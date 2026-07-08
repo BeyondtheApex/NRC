@@ -24,6 +24,18 @@
 #define NRC_KHR_SUBGROUP_SIZE 32
 #endif
 
+#ifndef NRC_KHR_COOPMAT_M
+#define NRC_KHR_COOPMAT_M 16
+#endif
+
+#ifndef NRC_KHR_COOPMAT_N
+#define NRC_KHR_COOPMAT_N 16
+#endif
+
+#ifndef NRC_KHR_COOPMAT_K
+#define NRC_KHR_COOPMAT_K 16
+#endif
+
 #if NRC_KHR_WORKGROUP_SIZE != 128
 #error NRC KHR backend currently requires workgroup size 128.
 #endif
@@ -32,11 +44,17 @@
 #error NRC KHR backend currently supports subgroup size 16 or 32.
 #endif
 
+#if NRC_KHR_COOPMAT_M != 8 && NRC_KHR_COOPMAT_M != 16
+#error NRC KHR backend currently supports cooperative matrix M size 8 or 16.
+#endif
+
+#if NRC_KHR_COOPMAT_N != 16 || NRC_KHR_COOPMAT_K != 16
+#error NRC KHR backend currently requires cooperative matrix N=16 and K=16.
+#endif
+
 #define NRC_KHR_SUBGROUP_COUNT (NRC_KHR_WORKGROUP_SIZE / NRC_KHR_SUBGROUP_SIZE)
-#define NRC_KHR_COOPMAT_M 16
-#define NRC_KHR_COOPMAT_N 16
-#define NRC_KHR_COOPMAT_K 16
-#define NRC_KHR_COOPMAT_X (NRC_NN_HIDDEN_WIDTH / NRC_KHR_COOPMAT_K)
+#define NRC_KHR_COOPMAT_K_BLOCKS (NRC_NN_HIDDEN_WIDTH / NRC_KHR_COOPMAT_K)
+#define NRC_KHR_COOPMAT_M_BLOCKS (NRC_NN_HIDDEN_WIDTH / NRC_KHR_COOPMAT_M)
 #define NRC_KHR_ACT_Y NRC_KHR_WORKGROUP_SIZE
 #define NRC_KHR_ACT_UVEC4_COUNT ((NRC_NN_HIDDEN_WIDTH * NRC_KHR_ACT_Y) / NRC_FP16_PER_UVEC4)
 #define NRC_KHR_ACT_COOPMAT_Y (NRC_KHR_ACT_Y / NRC_KHR_COOPMAT_N)
@@ -45,8 +63,16 @@
 #define NRC_KHR_OUTPUT_WEIGHT_UVEC4_COUNT ((NRC_NN_HIDDEN_WIDTH * NRC_NN_OUTPUT_WIDTH) / NRC_FP16_PER_UVEC4)
 #define NRC_KHR_THREAD_WEIGHT_64_UVEC4_COUNT (NRC_KHR_WEIGHT_64_UVEC4_COUNT / NRC_KHR_WORKGROUP_SIZE)
 #define NRC_KHR_MAT64_COOPMAT_STRIDE (NRC_NN_HIDDEN_WIDTH / NRC_FP16_PER_UVEC4)
-#define NRC_KHR_MAT64_COOPMAT_ELEMENT(X, Y) \
-    ((X) * (NRC_KHR_COOPMAT_K / NRC_FP16_PER_UVEC4) + (Y) * NRC_KHR_COOPMAT_N * NRC_KHR_MAT64_COOPMAT_STRIDE)
+#define NRC_KHR_ACC_COMPONENT_COUNT ((NRC_KHR_COOPMAT_M * NRC_KHR_COOPMAT_N) / NRC_KHR_SUBGROUP_SIZE)
+#define NRC_KHR_WEIGHT_COOPMAT_ELEMENT(COL_BLOCK, ROW_BLOCK) \
+    ((COL_BLOCK) * (NRC_KHR_COOPMAT_K / NRC_FP16_PER_UVEC4) + \
+     (ROW_BLOCK) * NRC_KHR_COOPMAT_M * NRC_KHR_MAT64_COOPMAT_STRIDE)
+#define NRC_KHR_ACT_COOPMAT_ELEMENT(ROW_BLOCK, COL_BLOCK) \
+    ((ROW_BLOCK) * (NRC_KHR_COOPMAT_K / NRC_FP16_PER_UVEC4) + \
+     (COL_BLOCK) * NRC_KHR_COOPMAT_N * NRC_KHR_MAT64_COOPMAT_STRIDE)
+#define NRC_KHR_ACC_COOPMAT_ELEMENT(ROW_BLOCK, COL_BLOCK) \
+    ((ROW_BLOCK) * (NRC_KHR_COOPMAT_M / NRC_FP16_PER_UVEC4) + \
+     (COL_BLOCK) * NRC_KHR_COOPMAT_N * NRC_KHR_MAT64_COOPMAT_STRIDE)
 #define NRC_KHR_WEIGHT_COOPMAT_MAJOR gl_CooperativeMatrixLayoutRowMajor
 #define NRC_KHR_ACT_COOPMAT_MAJOR gl_CooperativeMatrixLayoutColumnMajor
 
@@ -55,11 +81,25 @@ layout(std430, set = NRC_NN_SET, binding = NRC_NN_WEIGHTS_BINDING) readonly buff
 };
 
 shared uvec4 nrcKhrSharedBuffer[NRC_KHR_ACT_UVEC4_COUNT];
-coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB>
-    nrcKhrActCoopmats[NRC_KHR_SUBGROUP_ACT_COOPMAT_Y][NRC_KHR_COOPMAT_X];
+coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_K, NRC_KHR_COOPMAT_N, gl_MatrixUseB>
+    nrcKhrActCoopmats[NRC_KHR_SUBGROUP_ACT_COOPMAT_Y][NRC_KHR_COOPMAT_K_BLOCKS];
 
 uint NrcKhrLayerWeightUvec4Offset(uint layer) {
     return layer * NRC_KHR_WEIGHT_64_UVEC4_COUNT;
+}
+
+void NrcKhrLoadActivationsFromShared() {
+    for (uint y = 0u; y < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++y) {
+        uint workgroupY = gl_SubgroupID * NRC_KHR_SUBGROUP_ACT_COOPMAT_Y + y;
+        for (uint kBlock = 0u; kBlock < NRC_KHR_COOPMAT_K_BLOCKS; ++kBlock) {
+            coopMatLoad(nrcKhrActCoopmats[y][kBlock],
+                        nrcKhrSharedBuffer,
+                        NRC_KHR_ACT_COOPMAT_ELEMENT(kBlock, workgroupY),
+                        NRC_KHR_MAT64_COOPMAT_STRIDE,
+                        NRC_KHR_ACT_COOPMAT_MAJOR);
+        }
+    }
+    barrier();
 }
 
 void NrcKhrLoadInput(uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT]) {
@@ -68,18 +108,7 @@ void NrcKhrLoadInput(uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT]) {
         nrcKhrSharedBuffer[localBase + x] = encoded[x];
     }
     barrier();
-
-    for (uint y = 0u; y < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++y) {
-        uint workgroupY = gl_SubgroupID * NRC_KHR_SUBGROUP_ACT_COOPMAT_Y + y;
-        for (uint x = 0u; x < NRC_KHR_COOPMAT_X; ++x) {
-            coopMatLoad(nrcKhrActCoopmats[y][x],
-                        nrcKhrSharedBuffer,
-                        NRC_KHR_MAT64_COOPMAT_ELEMENT(x, workgroupY),
-                        NRC_KHR_MAT64_COOPMAT_STRIDE,
-                        NRC_KHR_ACT_COOPMAT_MAJOR);
-        }
-    }
-    barrier();
+    NrcKhrLoadActivationsFromShared();
 }
 
 void NrcKhrLoadHiddenWeights(uint layer) {
@@ -101,61 +130,71 @@ void NrcKhrLoadOutputWeights(uint layer) {
 }
 
 void NrcKhrForwardHiddenRelu() {
-    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>
-        dst[NRC_KHR_SUBGROUP_ACT_COOPMAT_Y][NRC_KHR_COOPMAT_X];
+    coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_N, gl_MatrixUseAccumulator>
+        dst[NRC_KHR_SUBGROUP_ACT_COOPMAT_Y][NRC_KHR_COOPMAT_M_BLOCKS];
 
     for (uint y = 0u; y < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++y) {
-        for (uint x = 0u; x < NRC_KHR_COOPMAT_X; ++x) {
-            dst[y][x] = coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0);
+        for (uint rowBlock = 0u; rowBlock < NRC_KHR_COOPMAT_M_BLOCKS; ++rowBlock) {
+            dst[y][rowBlock] =
+                coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_N, gl_MatrixUseAccumulator>(0);
         }
     }
 
-    for (uint weightY = 0u; weightY < NRC_KHR_COOPMAT_X; ++weightY) {
-        for (uint x = 0u; x < NRC_KHR_COOPMAT_X; ++x) {
-            coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> weightCoopmat;
+    for (uint rowBlock = 0u; rowBlock < NRC_KHR_COOPMAT_M_BLOCKS; ++rowBlock) {
+        for (uint kBlock = 0u; kBlock < NRC_KHR_COOPMAT_K_BLOCKS; ++kBlock) {
+            coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_K, gl_MatrixUseA> weightCoopmat;
             coopMatLoad(weightCoopmat,
                         nrcKhrSharedBuffer,
-                        NRC_KHR_MAT64_COOPMAT_ELEMENT(x, weightY),
+                        NRC_KHR_WEIGHT_COOPMAT_ELEMENT(kBlock, rowBlock),
                         NRC_KHR_MAT64_COOPMAT_STRIDE,
                         NRC_KHR_WEIGHT_COOPMAT_MAJOR);
 
             for (uint activationY = 0u; activationY < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++activationY) {
-                dst[activationY][weightY] =
+                dst[activationY][rowBlock] =
                     coopMatMulAdd(weightCoopmat,
-                                  nrcKhrActCoopmats[activationY][x],
-                                  dst[activationY][weightY]);
+                                  nrcKhrActCoopmats[activationY][kBlock],
+                                  dst[activationY][rowBlock]);
             }
         }
     }
     barrier();
 
     for (uint y = 0u; y < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++y) {
-        for (uint x = 0u; x < NRC_KHR_COOPMAT_X; ++x) {
-            for (uint k = 0u; k < (256u / NRC_KHR_SUBGROUP_SIZE); ++k) {
-                nrcKhrActCoopmats[y][x][k] = max(dst[y][x][k], float16_t(0));
+        uint workgroupY = gl_SubgroupID * NRC_KHR_SUBGROUP_ACT_COOPMAT_Y + y;
+        for (uint rowBlock = 0u; rowBlock < NRC_KHR_COOPMAT_M_BLOCKS; ++rowBlock) {
+            for (uint element = 0u; element < NRC_KHR_ACC_COMPONENT_COUNT; ++element) {
+                dst[y][rowBlock][element] = max(dst[y][rowBlock][element], float16_t(0));
             }
+            coopMatStore(dst[y][rowBlock],
+                         nrcKhrSharedBuffer,
+                         NRC_KHR_ACC_COOPMAT_ELEMENT(rowBlock, workgroupY),
+                         NRC_KHR_MAT64_COOPMAT_STRIDE,
+                         NRC_KHR_ACT_COOPMAT_MAJOR);
         }
     }
+    barrier();
+    NrcKhrLoadActivationsFromShared();
 }
 
 void NrcKhrForwardOutputStore() {
-    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>
+    coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_N, gl_MatrixUseAccumulator>
         dst[NRC_KHR_SUBGROUP_ACT_COOPMAT_Y];
 
     for (uint y = 0u; y < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++y) {
-        dst[y] = coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0);
+        dst[y] =
+            coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_N, gl_MatrixUseAccumulator>(0);
     }
 
-    for (uint x = 0u; x < NRC_KHR_COOPMAT_X; ++x) {
-        coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> weightCoopmat;
+    for (uint kBlock = 0u; kBlock < NRC_KHR_COOPMAT_K_BLOCKS; ++kBlock) {
+        coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_K, gl_MatrixUseA> weightCoopmat;
         coopMatLoad(weightCoopmat,
                     nrcKhrSharedBuffer,
-                    NRC_KHR_MAT64_COOPMAT_ELEMENT(x, 0u),
+                    NRC_KHR_WEIGHT_COOPMAT_ELEMENT(kBlock, 0u),
                     NRC_KHR_MAT64_COOPMAT_STRIDE,
                     NRC_KHR_WEIGHT_COOPMAT_MAJOR);
 
         for (uint y = 0u; y < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++y) {
-            dst[y] = coopMatMulAdd(weightCoopmat, nrcKhrActCoopmats[y][x], dst[y]);
+            dst[y] = coopMatMulAdd(weightCoopmat, nrcKhrActCoopmats[y][kBlock], dst[y]);
         }
     }
     barrier();
@@ -164,7 +203,7 @@ void NrcKhrForwardOutputStore() {
         uint workgroupY = gl_SubgroupID * NRC_KHR_SUBGROUP_ACT_COOPMAT_Y + y;
         coopMatStore(dst[y],
                      nrcKhrSharedBuffer,
-                     NRC_KHR_MAT64_COOPMAT_ELEMENT(0u, workgroupY),
+                     NRC_KHR_ACC_COOPMAT_ELEMENT(0u, workgroupY),
                      NRC_KHR_MAT64_COOPMAT_STRIDE,
                      NRC_KHR_ACT_COOPMAT_MAJOR);
     }

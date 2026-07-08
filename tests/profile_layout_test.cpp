@@ -126,8 +126,9 @@ int main() {
         sg32,
         mat8,
     };
-    ok &= require(nrc::choose_profile(capsM8Only) == nrc::ProfileId::None,
-                  "unimplemented M8 profile is not selected yet");
+    ok &= require(nrc::choose_profile(capsM8Only) ==
+                      nrc::ProfileId::KhrFp16M8N16K16Sg32Wg128,
+                  "choose implemented M8 profile when M16 is unavailable");
 
     const nrc::DeviceCapabilitiesView emptyCaps{};
     ok &= require(nrc::choose_profile(emptyCaps) == nrc::ProfileId::None,

@@ -181,13 +181,13 @@ std::vector<std::uint32_t> read_spirv(const char *path) {
 
 class VulkanKhrRunner {
 public:
-    VulkanKhrRunner(const char *sg32SpirvPath, const char *sg16SpirvPath) {
+    VulkanKhrRunner(const char *sg32SpirvPath, const char *sg16SpirvPath, const char *m8Sg32SpirvPath) {
         create_instance();
         pick_physical_device();
         create_device();
         create_descriptor_set_layout();
         create_pipeline_layout();
-        create_pipeline(selected_spirv_path(sg32SpirvPath, sg16SpirvPath));
+        create_pipeline(selected_spirv_path(sg32SpirvPath, sg16SpirvPath, m8Sg32SpirvPath));
         create_command_pool();
     }
 
@@ -500,12 +500,17 @@ private:
                  "vkCreatePipelineLayout");
     }
 
-    const char *selected_spirv_path(const char *sg32SpirvPath, const char *sg16SpirvPath) const {
+    const char *selected_spirv_path(const char *sg32SpirvPath,
+                                    const char *sg16SpirvPath,
+                                    const char *m8Sg32SpirvPath) const {
         if (selectedProfile_->id == nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128) {
             return sg32SpirvPath;
         }
         if (selectedProfile_->id == nrc::ProfileId::KhrFp16M16N16K16Sg16Wg128) {
             return sg16SpirvPath;
+        }
+        if (selectedProfile_->id == nrc::ProfileId::KhrFp16M8N16K16Sg32Wg128) {
+            return m8Sg32SpirvPath;
         }
         throw std::runtime_error("selected KHR profile has no dispatch SPIR-V");
     }
@@ -755,8 +760,8 @@ bool close_enough(float lhs, float rhs) {
 } // namespace
 
 int main(int argc, char **argv) {
-    if (argc != 3) {
-        std::cerr << "usage: nrc_vulkan_khr_dispatch_test <sg32.spv> <sg16.spv>\n";
+    if (argc != 4) {
+        std::cerr << "usage: nrc_vulkan_khr_dispatch_test <sg32.spv> <sg16.spv> <m8_sg32.spv>\n";
         return EXIT_FAILURE;
     }
 
@@ -770,7 +775,7 @@ int main(int argc, char **argv) {
         std::vector<nrc::PackedFp16x8> packedInputs;
         make_test_inputs(cpuInputs, packedInputs);
 
-        VulkanKhrRunner runner(argv[1], argv[2]);
+        VulkanKhrRunner runner(argv[1], argv[2], argv[3]);
         const std::vector<Vec4> gpuOutputs = runner.run(packedWeights, packedInputs, kSampleCount);
 
         bool ok = true;

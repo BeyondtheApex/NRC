@@ -11,13 +11,13 @@ Implemented:
 - 5 hidden ReLU layers of width 64.
 - 3 output values.
 - FP16 cooperative matrices.
-- 16x16x16 subgroup matrices.
+- `M16N16K16` and `M8N16K16` subgroup matrices.
 - Workgroup size 128.
 - Subgroup size 16 or 32, selected by `NRC_KHR_SUBGROUP_SIZE`.
+- Matrix M size selected by `NRC_KHR_COOPMAT_M`.
 
 Not implemented yet:
 
-- 8x16x16 profile.
 - Backpropagation.
 - Gradient accumulation.
 - Optimizer.
@@ -27,17 +27,18 @@ Not implemented yet:
 
 The backend consumes the same packed fp16 `uvec4` layout documented in `weight_layout.md`.
 
-Hidden layers are loaded as full 64x64 matrices.
+Hidden layers are loaded as full 64x64 matrices. The backend no longer assumes `M == K`: hidden-layer outputs are stored back into the shared activation tile and reloaded through the K dimension before the next layer. This keeps the layout stable for both `M16N16K16` and `M8N16K16`.
 
-The output layer uses a 16x64 cooperative matrix tile. Only the first 3 rows are populated from the packed 3x64 output weights; remaining rows are zero-filled.
+The output layer uses the first M-row cooperative matrix tile. Only the first 3 rows are populated from the packed 3x64 output weights; remaining rows are zero-filled.
 
 ## Compile Tests
 
-CTest currently compiles the backend twice:
+CTest currently compiles the backend variants:
 
 ```text
 NRC_KHR_SUBGROUP_SIZE=32
 NRC_KHR_SUBGROUP_SIZE=16
+NRC_KHR_SUBGROUP_SIZE=32, NRC_KHR_COOPMAT_M=8
 ```
 
 These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support or numerical correctness.
@@ -48,7 +49,7 @@ Milestone 8 adds `tests/vulkan_khr_dispatch_test.cpp` and `tests/shader_compile/
 
 The test:
 
-- Builds SG32 and SG16 SPIR-V variants.
+- Builds SG32, SG16, and M8/SG32 SPIR-V variants.
 - Queries real Vulkan device capabilities through `nrc::vulkan::query_device_capabilities`.
 - Selects an implemented KHR inference profile with `requireTraining = false`.
 - Creates the device with KHR cooperative matrix, shader float16, storage buffer 16-bit access, subgroup size control, and full compute subgroup features.
@@ -67,4 +68,10 @@ This means capability/profile selection is necessary but not sufficient for prod
 
 ## Profile Selection
 
-Profiles now carry an `implemented` flag. The 16x16x16 KHR SG16/SG32 profiles are implemented. The M8 profile remains in the profile list as a planned target but is not selected by `choose_profile` yet.
+Profiles carry an `implemented` flag. The implemented KHR inference profiles are:
+
+- `KHR_FP16_M16N16K16_SG32_WG128`
+- `KHR_FP16_M16N16K16_SG16_WG128`
+- `KHR_FP16_M8N16K16_SG32_WG128`
+
+`choose_profile` still prefers the M16 profiles when the device reports both M16 and M8 support. M8 is selected when it is the first implemented matching profile for the reported matrix properties and subgroup size.

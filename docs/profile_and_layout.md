@@ -10,7 +10,7 @@ Initial profiles:
 
 - `KHR_FP16_M16N16K16_SG32_WG128`
 - `KHR_FP16_M16N16K16_SG16_WG128`
-- `KHR_FP16_M8N16K16_SG32_WG128` (planned, not selected until the backend is implemented)
+- `KHR_FP16_M8N16K16_SG32_WG128`
 - `SCALAR_REFERENCE_WG64`
 
 The scalar profile is for correctness and CI. It is never selected unless explicitly allowed by the caller.

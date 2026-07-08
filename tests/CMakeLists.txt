@@ -127,6 +127,15 @@ if(NRC_GLSLC)
             "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_khr_smoke.comp"
             "-o"
             "${CMAKE_CURRENT_BINARY_DIR}/nrc_khr_sg16_smoke.spv")
+    add_test(NAME nrc_shader_khr_m8_sg32_compile
+        COMMAND "${NRC_GLSLC}"
+            "--target-env=vulkan1.3"
+            "-DNRC_KHR_SUBGROUP_SIZE=32"
+            "-DNRC_KHR_COOPMAT_M=8"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_khr_smoke.comp"
+            "-o"
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_khr_m8_sg32_smoke.spv")
 
     if(TARGET nrc_vulkan)
         set(NRC_SCALAR_DISPATCH_SPV "${CMAKE_CURRENT_BINARY_DIR}/nrc_scalar_dispatch.spv")
@@ -321,10 +330,30 @@ if(NRC_GLSLC)
                 "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcConstants.glsl"
             VERBATIM)
 
+        set(NRC_KHR_DISPATCH_M8_SG32_SPV "${CMAKE_CURRENT_BINARY_DIR}/nrc_khr_dispatch_m8_sg32.spv")
+        add_custom_command(
+            OUTPUT "${NRC_KHR_DISPATCH_M8_SG32_SPV}"
+            COMMAND "${NRC_GLSLC}"
+                "--target-env=vulkan1.3"
+                "-DNRC_KHR_SUBGROUP_SIZE=32"
+                "-DNRC_KHR_COOPMAT_M=8"
+                "-I${PROJECT_SOURCE_DIR}/shaders"
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_khr_dispatch.comp"
+                "-o"
+                "${NRC_KHR_DISPATCH_M8_SG32_SPV}"
+            DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_khr_dispatch.comp"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcEncoding.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcTypes.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcConstants.glsl"
+            VERBATIM)
+
         add_custom_target(nrc_khr_dispatch_shaders
             DEPENDS
                 "${NRC_KHR_DISPATCH_SG32_SPV}"
-                "${NRC_KHR_DISPATCH_SG16_SPV}")
+                "${NRC_KHR_DISPATCH_SG16_SPV}"
+                "${NRC_KHR_DISPATCH_M8_SG32_SPV}")
 
         add_executable(nrc_vulkan_khr_dispatch_test
             vulkan_khr_dispatch_test.cpp)
@@ -333,7 +362,8 @@ if(NRC_GLSLC)
         add_test(NAME nrc_vulkan_khr_dispatch_test
             COMMAND nrc_vulkan_khr_dispatch_test
                 "${NRC_KHR_DISPATCH_SG32_SPV}"
-                "${NRC_KHR_DISPATCH_SG16_SPV}")
+                "${NRC_KHR_DISPATCH_SG16_SPV}"
+                "${NRC_KHR_DISPATCH_M8_SG32_SPV}")
     endif()
 else()
     message(WARNING "glslc was not found; shader compile smoke test will not be registered")

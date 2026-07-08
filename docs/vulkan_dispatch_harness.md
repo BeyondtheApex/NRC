@@ -55,7 +55,7 @@ KHR-specific behavior:
 
 - The KHR dispatch shader uses `local_size_x = NRC_KHR_WORKGROUP_SIZE`, currently 128.
 - The test dispatches 149 samples to verify padded final workgroups.
-- The test selects SG32 or SG16 SPIR-V based on the implemented profile chosen from queried capabilities.
+- The test selects SG32, SG16, or M8/SG32 SPIR-V based on the implemented profile chosen from queried capabilities.
 - The pipeline requires the selected subgroup size and full compute subgroups.
 - On MSVC/Windows, the test catches structured exceptions from `vkCreateComputePipelines` and reports a controlled `SKIP:`. This is needed because the current local AMD driver advertises the profile but raises an exception while compiling the VkNRC-style KHR cooperative matrix shader.
 

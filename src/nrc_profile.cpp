@@ -41,7 +41,7 @@ constexpr std::array<Profile, 4> kProfiles = {{
         32,
         128,
         true,
-        false,
+        true,
     },
     {
         ProfileId::ScalarReferenceWg64,

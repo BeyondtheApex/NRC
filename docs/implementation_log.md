@@ -1805,3 +1805,83 @@ The PPM payload is generated from the scalar-inference-resolved screen image aft
 ### Next Step
 
 Grow the sample from a single-frame smoke artifact into a small iterative reference run with a larger output image. The next useful sample milestone should either repeat train/infer/update over several frame-like iterations or replace the local triangle loop with a more realistic ray-query/path-tracing stage.
+
+## 2026-07-09 - Milestone 24 KHR M8 Cooperative Matrix Inference Profile
+
+### Implemented
+
+- Generalized the KHR cooperative matrix inference backend:
+  - `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl`
+- Marked the M8 KHR inference profile implemented:
+  - `KHR_FP16_M8N16K16_SG32_WG128`
+- Updated profile selection test:
+  - M8-only device capabilities now select `KhrFp16M8N16K16Sg32Wg128`.
+- Added shader compile coverage:
+  - `nrc_shader_khr_m8_sg32_compile`
+- Added M8 dispatch SPIR-V build path:
+  - `nrc_khr_dispatch_m8_sg32.spv`
+- Updated Vulkan KHR dispatch test:
+  - accepts SG32, SG16, and M8/SG32 SPIR-V variants;
+  - chooses the dispatch shader matching the selected implemented profile.
+- Updated documentation:
+  - `docs/khr_coopmat_backend.md`
+  - `docs/profile_and_layout.md`
+  - `docs/vulkan_dispatch_harness.md`
+
+### Backend Behavior
+
+The previous KHR backend implicitly relied on `M == K == 16`: the hidden-layer accumulator could be assigned directly back to the activation cooperative matrix because both matrices had the same shape.
+
+The backend now treats matrix M and K separately:
+
+- activation tiles remain `K x N`;
+- hidden/output weight tiles are `M x K`;
+- accumulators are `M x N`;
+- hidden-layer outputs are ReLU-applied, stored back into the shared activation buffer, and reloaded as K-row activation tiles for the next layer.
+
+This supports:
+
+```text
+M16N16K16
+M8N16K16
+```
+
+The workgroup policy remains deliberately constrained:
+
+```text
+workgroup size: 128
+subgroup size: 16 or 32
+N: 16
+K: 16
+M: 8 or 16
+```
+
+### Validation
+
+- Manual shader compile checks succeeded:
+  - `NRC_KHR_SUBGROUP_SIZE=32`
+  - `NRC_KHR_SUBGROUP_SIZE=16`
+  - `NRC_KHR_SUBGROUP_SIZE=32 NRC_KHR_COOPMAT_M=8`
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_profile_layout_test nrc_vulkan_khr_dispatch_test`
+- Targeted KHR/profile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_profile_layout_test|nrc_shader_khr|nrc_vulkan_khr_dispatch_test" --output-on-failure`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- KHR runtime numerical validation still depends on a driver that can create and run the cooperative matrix pipeline. The current local AMD driver path remains protected by the existing structured-exception skip.
+- The new M8 profile is forward inference only.
+- KHR cooperative-matrix gradient/backpropagation remains missing.
+- The sample path tracer still uses scalar inference/training instead of KHR inference.
+
+### Next Step
+
+Start the KHR training backend design, or add a profile-specific validation layer that records pipeline creation success and numerical validation status separately from capability selection. The latter is useful before allowing downstream integrations to enable a KHR profile automatically.
