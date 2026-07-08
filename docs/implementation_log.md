@@ -2794,3 +2794,56 @@ The sample still owns descriptor pools and descriptor sets. The NRC helper layer
 ### Next Step
 
 Migrate the sample path tracer memory/image barrier recording onto `cmd_memory_barrier`, `color_image_barrier`, and `cmd_pipeline_barrier`.
+
+## 2026-07-09 - Milestone 41 Sample Barrier Helper Adoption
+
+### Implemented
+
+- Refactored `sample/path_tracer/sample.cpp` command recording so sample memory-only barriers use `nrc::vulkan::cmd_memory_barrier`.
+- Refactored sample image layout transitions to use:
+  - `nrc::vulkan::color_image_barrier`
+  - `nrc::vulkan::cmd_pipeline_barrier`
+- Kept memory+image synchronization points combined in one helper call through sample-local `record_memory_image_barriers`.
+- Removed sample-local `VkImageMemoryBarrier` construction and direct `vkCmdPipelineBarrier` calls.
+- Updated `docs/sample_path_tracer.md` to reflect current barrier helper usage.
+
+### Behavior
+
+This milestone preserves the sample synchronization plan:
+
+- host writes become visible to transfer reads;
+- screen images transition from `UNDEFINED` to `TRANSFER_DST_OPTIMAL`;
+- uploaded images transition to `GENERAL` before producer/inference/training dispatches;
+- compute pass writes become visible between reset, producer, inference, prepare, gradient, and optimize;
+- the prepare-to-gradient barrier preserves indirect-dispatch visibility;
+- the resolved bias image transitions to `TRANSFER_SRC_OPTIMAL` for readback;
+- transfer writes become visible to host reads.
+
+The number and placement of synchronization points remain aligned with the previous sample code. The change only routes barrier construction and recording through the reusable helper layer.
+
+### Validation
+
+- Targeted sample build succeeded:
+  - `cmake --build build --config Debug --target nrc_reference_path_tracer`
+- Targeted verbose sample smoke test succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_sample_reference_path_tracer_smoke" --output-on-failure -V`
+- Sample smoke output included:
+  - `NRC reference path tracer minimal integration passed: 17 eval records, scalar inference resolve, and one scalar training update.`
+  - `Wrote sample image: G:/cpp/radiance/NRC/build/sample/path_tracer/nrc_reference_path_tracer.ppm`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- Buffer/image copy helpers are still local to scalar inference and the sample.
+- Resource allocation remains host-owned, by design.
+- The sample is still a primary-ray triangle-loop integration skeleton, not a full path tracer.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Decide whether to add small buffer/image copy helper wrappers, or shift from helper extraction back to missing NRC coverage: KHR cooperative-matrix training and richer iterative sample/path tracing behavior.

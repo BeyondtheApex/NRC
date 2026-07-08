@@ -107,12 +107,14 @@ The host sample creates shader modules through `nrc::vulkan::create_shader_modul
 
 It also creates descriptor set layouts through `nrc::vulkan::create_descriptor_set_layout` and writes storage-buffer/storage-image descriptors through `nrc::vulkan::update_storage_buffer_descriptors` and `nrc::vulkan::update_storage_image_descriptors`.
 
+Memory and image barriers are recorded through `nrc::vulkan::cmd_memory_barrier`, `nrc::vulkan::color_image_barrier`, and `nrc::vulkan::cmd_pipeline_barrier`.
+
 ## Current Limitations
 
 - This is a primary-ray triangle-loop integration skeleton, not a full path tracer.
 - No acceleration structure, Vulkan ray query, material system, BRDF sampling, secondary rays, or scene loading exists yet.
 - Training records use deterministic direct lighting, not real multi-bounce path-traced samples.
-- Image barrier recording still contains sample-local Vulkan boilerplate.
+- Buffer/image copy helpers and resource allocation remain sample-local.
 - KHR cooperative matrix inference is not used because KHR pipeline creation is driver-gated on the current AMD machine.
 - Training uses the scalar correctness path, not a production-performance KHR cooperative-matrix backend.
 
@@ -121,7 +123,6 @@ It also creates descriptor set layouts through `nrc::vulkan::create_descriptor_s
 The next sample milestones should add:
 
 - replacing the sample-local triangle loop with Vulkan ray query or a fuller path tracing stage;
-- migrating image barrier boilerplate onto the reusable Vulkan helper layer;
 - train-record production from multi-bounce sampled paths;
 - iterative per-frame training instead of a single validated update;
 - a larger inspection output once the sample moves beyond the `4x4` smoke image.
