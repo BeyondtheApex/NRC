@@ -3005,3 +3005,67 @@ Out-of-range invocations cannot return early because KHR cooperative-matrix oper
 ### Next Step
 
 Add a KHR runtime gradient test that creates the KHR gradient pipeline when the driver allows it and compares output-layer gradients against the CPU/scalar reference, then continue with cooperative-matrix dA/dW propagation through hidden layers.
+
+## 2026-07-09 - Milestone 45 KHR Gradient Runtime Harness
+
+### Implemented
+
+- Added `tests/vulkan_gradient_khr_test.cpp`.
+- Added CMake SPIR-V generation for KHR gradient runtime variants:
+  - `nrc_gradient_khr_dispatch_sg32.spv`
+  - `nrc_gradient_khr_dispatch_sg16.spv`
+  - `nrc_gradient_khr_dispatch_m8_sg32.spv`
+  - `nrc_gradient_khr_dispatch_shaders`
+- Added `nrc_vulkan_gradient_khr_test` and CTest registration.
+- The runtime test combines the existing KHR inference and scalar gradient harness patterns:
+  - selects a KHR profile with `ProfileRequirements::requireTraining = true`;
+  - requires KHR cooperative matrix support and fp32 storage-buffer atomic add;
+  - enables cooperative matrix, shader float16, storage buffer 16-bit access, subgroup size control, full compute subgroups, and shader atomic float features;
+  - selects SG32, SG16, or M8/SG32 SPIR-V from `find_profile_shader_config`;
+  - creates the shader module through `nrc::vulkan::create_shader_module`;
+  - creates the pipeline through `nrc::vulkan::create_profile_compute_pipeline`;
+  - records host/compute memory barriers through `nrc::vulkan::cmd_memory_barrier`;
+  - uses the reusable storage-buffer descriptor layout/update helpers.
+- If pipeline creation and dispatch succeed, the test compares:
+  - output-layer gradients against an fp16-rounded CPU oracle that mirrors the current KHR forward/backprop groundwork;
+  - hidden-layer gradient regions against zero, because hidden-layer dA/dW is not implemented yet.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/vulkan_dispatch_harness.md`
+
+### Behavior
+
+This milestone adds runtime validation scaffolding for the KHR gradient pass without claiming full KHR training correctness. The test proves that capability selection, descriptor ABI, profile-specific pipeline creation, dispatch recording, and output-layer gradient comparison are wired together whenever the driver can create the selected pipeline.
+
+On the current local AMD driver, the KHR gradient pipeline follows the same protected path as KHR inference: `vkCreateComputePipelines` raises a structured exception and the test reports a controlled `SKIP:`.
+
+### Validation
+
+- Reconfigured CMake after adding CTest entries:
+  - `cmake -S . -B build`
+- Targeted KHR gradient test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime test succeeded with controlled skip:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr_test" --output-on-failure -V`
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+- Targeted KHR compile/runtime set succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr|nrc_vulkan_gradient_khr_test|nrc_vulkan_khr_dispatch_test" --output-on-failure -V`
+  - KHR gradient and KHR inference runtime tests both reported controlled structured-exception skips.
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `32/32 tests passed`
+
+### Current Limitations
+
+- The KHR gradient runtime numerical comparison has not executed on this machine because KHR pipeline creation is still driver-gated.
+- The KHR gradient pass still accumulates only output-layer `dW`.
+- Output-layer accumulation is still scalar per sample invocation, not a cooperative-matrix reduction.
+- Hidden-layer dA/dW propagation is still missing.
+
+### Next Step
+
+Implement KHR hidden-layer backpropagation helpers, starting with output derivative propagation to the final hidden layer (`dA5`) and a compile-checked hidden-layer `dW` layout path before replacing scalar accumulation with cooperative-matrix reductions.

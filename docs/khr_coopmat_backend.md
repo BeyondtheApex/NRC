@@ -29,9 +29,8 @@ Not implemented yet:
 - Cooperative-matrix output-layer `dW` reduction.
 - Cooperative-matrix backpropagation through hidden layers.
 - Cooperative-matrix gradient accumulation/reduction.
-- A KHR training pass wired to train records.
-- KHR training runtime numerical validation.
-- Runtime numerical validation on a driver that can create the KHR cooperative matrix pipeline successfully.
+- Full KHR training pass coverage through all layers.
+- Runtime numerical validation on a driver that can create the KHR cooperative matrix pipelines successfully.
 
 ## Weight Layout
 
@@ -82,6 +81,25 @@ Current local result:
 - `vkCreateComputePipelines` raises a structured exception for the VkNRC-style KHR cooperative matrix shader. The test catches this on MSVC/Windows, prints `SKIP:`, and returns success so the rest of the suite remains usable.
 
 This means capability/profile selection is necessary but not sufficient for production enablement. A downstream integration should compile or otherwise validate the selected KHR pipeline before enabling it for rendering.
+
+## Runtime Gradient Test
+
+`tests/vulkan_gradient_khr_test.cpp` builds SG32, SG16, and M8/SG32 SPIR-V variants for `tests/shader_compile/nrc_gradient_khr_dispatch.comp`.
+
+The test:
+
+- queries real Vulkan device capabilities;
+- selects an implemented KHR training profile with `requireTraining = true`;
+- creates a device with KHR cooperative matrix, fp32 storage-buffer atomic add, shader float16, storage buffer 16-bit access, subgroup size control, and full compute subgroup features;
+- creates the KHR gradient pipeline through `nrc::vulkan::create_profile_compute_pipeline`;
+- dispatches a small train-record batch through `NrcGradientKhr.glsl`;
+- compares output-layer gradients against an fp16-rounded CPU oracle if pipeline creation and dispatch succeed;
+- verifies hidden-layer gradient regions remain zero because hidden-layer dA/dW is not implemented yet.
+
+Current local result:
+
+- `vkCreateComputePipelines` raises a structured exception for the KHR gradient shader.
+- The test catches this on MSVC/Windows, prints `SKIP:`, and returns success so the rest of the suite remains usable.
 
 ## Profile Selection
 

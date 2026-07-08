@@ -42,6 +42,8 @@ The luminance denominator is treated as the current prediction scale, matching V
 
 `tests/vulkan_gradient_scalar_test.cpp` dispatches the scalar gradient pass on Vulkan when `VK_EXT_shader_atomic_float` and `shaderBufferFloat32AtomicAdd` are available. The test uploads packed fp16 weights, train records, and queue state, then compares the full fp32 gradient buffer against `nrc::reference_backward`.
 
+`tests/vulkan_gradient_khr_test.cpp` selects a KHR cooperative-matrix training profile when both cooperative matrices and fp32 storage-buffer atomic add are available. If pipeline creation succeeds, it dispatches `NrcGradientKhr.glsl` and compares the output-layer gradient region against an fp16-rounded CPU oracle while requiring hidden-layer gradient regions to remain zero. On the current local AMD driver, KHR gradient pipeline creation raises the same structured exception as KHR inference and the test reports a controlled `SKIP:`.
+
 `tests/vulkan_training_step_test.cpp` runs the gradient pass between `NrcTrainPrepare` and `NrcOptimize`, using prepare's indirect dispatch command and comparing the final optimizer state and packed weights against the CPU reference path.
 
 `sample/path_tracer` dispatches the same scalar gradient pass with sample scene unpacking after scalar inference has resolved train-record targets.
@@ -81,4 +83,4 @@ Current limitations:
 - only output-layer `dW` is accumulated;
 - the output `dW` helper is scalar per sample invocation and is not the final cooperative-matrix reduction path;
 - hidden-layer dA/dW propagation is not implemented;
-- there is no KHR runtime gradient comparison yet because the local KHR pipeline creation path remains driver-gated.
+- KHR runtime gradient comparison is present but remains driver-gated on the current local AMD pipeline creation path.
