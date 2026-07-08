@@ -74,6 +74,8 @@ The optional output-coopmat helper restores the fp32 shared output derivative ca
 
 Training profile selection now requires device `maxComputeSharedMemorySize` to meet that 98304-byte allocation. Inference-only selection can still be requested without the training shared-memory requirement.
 
+The same layout model now records a hidden-layer cooperative-matrix `dW` tile-streaming plan. It avoids the SG16 full-layer partial overwrite hazard by using only the active tile for row-block dPre staging and one tile of partials per subgroup.
+
 These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support, gradient correctness, or training performance.
 
 ## Runtime Dispatch Test

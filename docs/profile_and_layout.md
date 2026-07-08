@@ -62,6 +62,8 @@ This keeps profile selection and shader compilation synchronized as more matrix 
 
 `nrc::compute_khr_shader_shared_memory_layout(config)` mirrors the KHR shader's shared-memory constants for a selected `ProfileShaderConfig`. It reports the current 98304-byte KHR backprop shared allocation, saved activation snapshot offsets, dPre/output scratch regions, and hidden dW partial-storage constraints. See `docs/khr_shared_memory_layout.md`.
 
+The layout model also records a hidden-layer cooperative-matrix `dW` tile-streaming plan. The plan keeps one row block of fp16 `dPre` and one MxN partial tile per subgroup inside the active tile, preserving all saved activation snapshots for SG32, SG16, and M8/SG32 profiles.
+
 ## Capability Input
 
 `nrc::DeviceCapabilitiesView` is renderer-neutral. Vulkan-specific code should query device features and cooperative matrix properties, then translate them into this view.

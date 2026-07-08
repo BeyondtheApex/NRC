@@ -27,7 +27,9 @@ bool is_valid_khr_config(const ProfileShaderConfig &config) {
         return false;
     }
     if ((kNnHiddenWidth % config.cooperativeMatrixM) != 0 ||
+        (kNnHiddenWidth % config.cooperativeMatrixN) != 0 ||
         (kNnHiddenWidth % config.cooperativeMatrixK) != 0 ||
+        (config.workgroupSize % config.cooperativeMatrixN) != 0 ||
         (config.cooperativeMatrixM % kFp16PerUvec4) != 0 ||
         (config.cooperativeMatrixN % kFp16PerUvec4) != 0) {
         return false;
@@ -85,6 +87,29 @@ KhrShaderSharedMemoryLayout compute_khr_shader_shared_memory_layout(
 
     layout.hiddenDWeightPartialScratch = {0, layout.reductionSharedUvec4Count};
 
+    KhrHiddenDWeightTileStreamingLayout &tileStreaming =
+        layout.hiddenDWeightTileStreaming;
+    tileStreaming.valid = true;
+    tileStreaming.rowBlockCount = kNnHiddenWidth / config.cooperativeMatrixM;
+    tileStreaming.columnBlockCount = kNnHiddenWidth / config.cooperativeMatrixN;
+    tileStreaming.tileCount =
+        tileStreaming.rowBlockCount * tileStreaming.columnBlockCount;
+    tileStreaming.dPreRowScratchUvec4Count =
+        (config.cooperativeMatrixM * config.workgroupSize) / kFp16PerUvec4;
+    tileStreaming.partialTileUvec4Count =
+        (config.cooperativeMatrixM * config.cooperativeMatrixN) / kFp16PerUvec4;
+    tileStreaming.partialScratchUvec4Count =
+        tileStreaming.partialTileUvec4Count * layout.subgroupCount;
+    tileStreaming.totalScratchUvec4Count =
+        tileStreaming.dPreRowScratchUvec4Count +
+        tileStreaming.partialScratchUvec4Count;
+    tileStreaming.dPreRowScratch = {0, tileStreaming.dPreRowScratchUvec4Count};
+    tileStreaming.partialScratch = {
+        tileStreaming.dPreRowScratch.end_uvec4(),
+        tileStreaming.partialScratchUvec4Count,
+    };
+    tileStreaming.combinedScratch = {0, tileStreaming.totalScratchUvec4Count};
+
     const KhrSharedMemoryRegion activePlusFinalHidden{
         layout.activeTile.baseUvec4,
         layout.activeTileUvec4Count * 2u,
@@ -104,6 +129,11 @@ KhrShaderSharedMemoryLayout compute_khr_shader_shared_memory_layout(
         wholeShared.contains(layout.hiddenDWeightPartialScratch);
     layout.hiddenDWeightPartialPreservesSharedHiddenActivationSnapshots =
         layout.hiddenDWeightPartialScratch.end_uvec4() <= layout.outputSourceSnapshot.baseUvec4;
+    tileStreaming.fitsActiveTile =
+        layout.activeTile.contains(tileStreaming.combinedScratch);
+    tileStreaming.preservesSharedActivationSnapshots =
+        tileStreaming.combinedScratch.end_uvec4() <=
+        layout.finalHiddenSnapshot.baseUvec4;
 
     return layout;
 }

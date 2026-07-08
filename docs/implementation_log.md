@@ -4340,3 +4340,76 @@ The check runs after required feature, training atomic, subgroup arithmetic, sub
 ### Next Step
 
 Use the shared-memory layout model to design the hidden-layer cooperative-matrix dW memory plan. The design should choose a stable lifetime/order strategy for SG32, SG16, and M8/SG32 before adding shader code, because the naive offset-zero hidden partial storage would overwrite activation snapshots for SG16.
+
+## 2026-07-09 - Milestone 66 Hidden dW Tile-Streaming Layout Plan
+
+### Implemented
+
+- Added `KhrHiddenDWeightTileStreamingLayout` to `include/nrc/nrc_khr_shader_layout.hpp`.
+- Extended `KhrShaderSharedMemoryLayout` with `hiddenDWeightTileStreaming`.
+- Updated `compute_khr_shader_shared_memory_layout` to model a hidden-layer cooperative-matrix `dW` tile-streaming plan.
+- Tightened KHR layout validity checks so the layout model requires:
+  - hidden width divisible by cooperative matrix `N`;
+  - workgroup size divisible by cooperative matrix `N`.
+- Extended `tests/profile_layout_test.cpp` to validate, for every implemented KHR profile:
+  - hidden row-block count;
+  - hidden column-block count;
+  - tile count;
+  - row-block `dPre` scratch offset and size;
+  - per-tile partial size;
+  - per-subgroup partial scratch size;
+  - combined scratch size;
+  - active-tile fit;
+  - activation snapshot preservation.
+- Added a scalar-profile negative test so non-KHR shader configs do not expose a hidden `dW` tile-streaming plan.
+- Updated:
+  - `docs/khr_shared_memory_layout.md`
+  - `docs/profile_and_layout.md`
+  - `docs/khr_coopmat_backend.md`
+
+### Behavior
+
+The plan avoids full-layer hidden `dW` partial storage. Full-layer partial storage would require:
+
+```text
+SG32:    2048 uvec4
+SG16:    4096 uvec4
+M8/SG32: 2048 uvec4
+```
+
+That is especially problematic for SG16 if placed at offset zero because it would overwrite saved activation snapshots still needed by dA propagation.
+
+The new plan streams one hidden `dW` tile at a time. It stages one row block of fp16 `dPre` and one MxN partial tile per subgroup inside the active tile:
+
+```text
+M16/SG32: dPre row 256 uvec4 + partials 128 uvec4 = 384 uvec4
+M16/SG16: dPre row 256 uvec4 + partials 256 uvec4 = 512 uvec4
+M8/SG32:  dPre row 128 uvec4 + partials  64 uvec4 = 192 uvec4
+```
+
+All current profiles fit this combined scratch region inside the 1024-uvec4 active tile, ending before the first saved activation snapshot at offset 1024. This gives the shader implementation a stable cross-profile memory plan that does not require reordering all dA propagation or adding a larger shared-memory profile.
+
+### Validation
+
+- Targeted profile/layout build succeeded:
+  - `cmake --build build --config Debug --target nrc_profile_layout_test`
+- Targeted profile/layout test succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_profile_layout_test" --output-on-failure -V`
+- Targeted test result:
+  - `1/1 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `37/37 tests passed`
+
+### Current Limitations
+
+- This milestone is a host-side layout and lifetime model. It does not yet add the GLSL hidden-layer cooperative-matrix `dW` helper.
+- The planned helper will likely stage fp16 `dPre` row blocks, so it needs a dedicated oracle or tolerance path similar to the optional output-coopmat `dW` route.
+- Runtime numerical validation for KHR cooperative-matrix pipelines is still driver-gated on the current local AMD path.
+
+### Next Step
+
+Implement an optional compile-validated hidden-layer cooperative-matrix `dW` helper using the tile-streaming plan. Start with one hidden-layer helper entry point and shader compile tests for SG32, SG16, and M8/SG32, then decide how to hook it into the full gradient pass without changing the default path before numerical validation exists.

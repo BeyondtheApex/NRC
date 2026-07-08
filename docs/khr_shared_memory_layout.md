@@ -106,3 +106,26 @@ Hidden-layer cooperative-matrix dW therefore needs a deliberate memory-lifetime 
 - reduce one tile at a time with less partial storage;
 - use a different cross-subgroup reduction strategy;
 - add a profile-gated larger shared-memory layout.
+
+## Hidden dW Tile-Streaming Plan
+
+`KhrShaderSharedMemoryLayout::hiddenDWeightTileStreaming` records the conservative plan for a future hidden-layer cooperative-matrix `dW` helper.
+
+Instead of staging a full 64x64 hidden-layer partial per subgroup, the plan stages one row block of fp16 `dPre` plus one MxN `dW` tile partial per subgroup inside the active tile:
+
+```text
+dPre row-block scratch: M * 128 fp16 values
+partial tile scratch:   M * N fp16 values * subgroupCount
+```
+
+For the current profiles:
+
+```text
+M16/SG32: dPre row 256 uvec4 + partials 128 uvec4 = 384 uvec4
+M16/SG16: dPre row 256 uvec4 + partials 256 uvec4 = 512 uvec4
+M8/SG32:  dPre row 128 uvec4 + partials  64 uvec4 = 192 uvec4
+```
+
+All of these fit within the 1024-uvec4 active tile and end before the first activation snapshot at offset 1024. That makes the plan stable across SG32, SG16, and M8/SG32 without overwriting the saved hidden activations needed by later dA propagation.
+
+The tradeoff is that the shader will need to stream/reduce tiles rather than keep full-layer partials resident in shared memory. This is the intended next implementation shape unless runtime profiling proves a larger profile-gated shared-memory layout is worthwhile.

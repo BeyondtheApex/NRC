@@ -391,6 +391,51 @@ int main() {
                               (expectedHiddenPartialUvec4 <=
                                sharedLayout.outputSourceSnapshot.baseUvec4),
                           "KHR shader shared layout hidden dW snapshot preservation");
+            const nrc::KhrHiddenDWeightTileStreamingLayout &tileStreaming =
+                sharedLayout.hiddenDWeightTileStreaming;
+            const std::uint32_t expectedHiddenRowBlocks =
+                nrc::kNnHiddenWidth / config->cooperativeMatrixM;
+            const std::uint32_t expectedHiddenColumnBlocks =
+                nrc::kNnHiddenWidth / config->cooperativeMatrixN;
+            const std::uint32_t expectedDPreRowScratch =
+                (config->cooperativeMatrixM * config->workgroupSize) /
+                nrc::kFp16PerUvec4;
+            const std::uint32_t expectedTilePartial =
+                (config->cooperativeMatrixM * config->cooperativeMatrixN) /
+                nrc::kFp16PerUvec4;
+            ok &= require(tileStreaming.valid,
+                          "KHR hidden dW tile-streaming plan is valid");
+            ok &= require(tileStreaming.rowBlockCount == expectedHiddenRowBlocks,
+                          "KHR hidden dW tile-streaming row block count");
+            ok &= require(tileStreaming.columnBlockCount == expectedHiddenColumnBlocks,
+                          "KHR hidden dW tile-streaming column block count");
+            ok &= require(tileStreaming.tileCount ==
+                              expectedHiddenRowBlocks * expectedHiddenColumnBlocks,
+                          "KHR hidden dW tile-streaming tile count");
+            ok &= require(tileStreaming.dPreRowScratch.baseUvec4 == 0u,
+                          "KHR hidden dW tile-streaming dPre base");
+            ok &= require(tileStreaming.dPreRowScratch.countUvec4 ==
+                              expectedDPreRowScratch,
+                          "KHR hidden dW tile-streaming dPre row scratch size");
+            ok &= require(tileStreaming.partialTileUvec4Count == expectedTilePartial,
+                          "KHR hidden dW tile-streaming partial tile size");
+            ok &= require(tileStreaming.partialScratch.baseUvec4 ==
+                              tileStreaming.dPreRowScratch.end_uvec4(),
+                          "KHR hidden dW tile-streaming partial base");
+            ok &= require(tileStreaming.partialScratch.countUvec4 ==
+                              expectedTilePartial * sharedLayout.subgroupCount,
+                          "KHR hidden dW tile-streaming partial scratch size");
+            ok &= require(tileStreaming.totalScratchUvec4Count ==
+                              tileStreaming.dPreRowScratch.countUvec4 +
+                                  tileStreaming.partialScratch.countUvec4,
+                          "KHR hidden dW tile-streaming total scratch size");
+            ok &= require(tileStreaming.combinedScratch.end_uvec4() <=
+                              sharedLayout.activeTile.end_uvec4(),
+                          "KHR hidden dW tile-streaming stays inside active tile");
+            ok &= require(tileStreaming.fitsActiveTile,
+                          "KHR hidden dW tile-streaming fits active tile");
+            ok &= require(tileStreaming.preservesSharedActivationSnapshots,
+                          "KHR hidden dW tile-streaming preserves snapshots");
             ok &= require(std::strcmp(config->shaderHeader,
                                       "nrc/backend/khr_coopmat/NrcNNKhr.glsl") == 0,
                           "KHR shader config header path");
@@ -406,8 +451,12 @@ int main() {
                           "scalar shader config does not require subgroup size control");
             ok &= require(!config->requireSubgroupArithmeticForTraining,
                           "scalar shader config does not require subgroup arithmetic");
-            ok &= require(!nrc::compute_khr_shader_shared_memory_layout(*config).valid,
+            const nrc::KhrShaderSharedMemoryLayout scalarSharedLayout =
+                nrc::compute_khr_shader_shared_memory_layout(*config);
+            ok &= require(!scalarSharedLayout.valid,
                           "scalar shader config has no KHR shared layout");
+            ok &= require(!scalarSharedLayout.hiddenDWeightTileStreaming.valid,
+                          "scalar shader config has no hidden dW tile-streaming plan");
         }
     }
 

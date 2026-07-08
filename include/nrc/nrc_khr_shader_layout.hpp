@@ -23,6 +23,24 @@ struct KhrSharedMemoryRegion {
     }
 };
 
+struct KhrHiddenDWeightTileStreamingLayout {
+    bool valid = false;
+    std::uint32_t rowBlockCount = 0;
+    std::uint32_t columnBlockCount = 0;
+    std::uint32_t tileCount = 0;
+    std::uint32_t dPreRowScratchUvec4Count = 0;
+    std::uint32_t partialTileUvec4Count = 0;
+    std::uint32_t partialScratchUvec4Count = 0;
+    std::uint32_t totalScratchUvec4Count = 0;
+
+    KhrSharedMemoryRegion dPreRowScratch;
+    KhrSharedMemoryRegion partialScratch;
+    KhrSharedMemoryRegion combinedScratch;
+
+    bool fitsActiveTile = false;
+    bool preservesSharedActivationSnapshots = false;
+};
+
 struct KhrShaderSharedMemoryLayout {
     bool valid = false;
     std::uint32_t subgroupCount = 0;
@@ -44,6 +62,7 @@ struct KhrShaderSharedMemoryLayout {
     KhrSharedMemoryRegion outputDerivativeFp16Scratch;
     KhrSharedMemoryRegion outputDWeightPartialScratch;
     KhrSharedMemoryRegion hiddenDWeightPartialScratch;
+    KhrHiddenDWeightTileStreamingLayout hiddenDWeightTileStreaming;
 
     bool dPreScratchFitsActivePlusFinalSnapshot = false;
     bool outputDerivativeFp16FitsActiveTile = false;
