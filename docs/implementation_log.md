@@ -105,3 +105,64 @@ Initial candidate profiles:
 ### Next Step
 
 Create and commit the bootstrap repository state, then start Milestone 1 by defining `NrcProfile`, `NrcCapabilities`, and resource layout contracts.
+
+## 2026-07-08 - Milestone 1 Profile and Layout Contract
+
+### Implemented
+
+- Added `nrc_core` as a real static library target instead of a pure interface target.
+- Added public constants in `include/nrc/nrc_constants.hpp`.
+- Added public profile/capability selection ABI in `include/nrc/nrc_profile.hpp`.
+- Added resource layout ABI in `include/nrc/nrc_resource_layout.hpp`.
+- Implemented profile selection in `src/nrc_profile.cpp`.
+- Implemented resource-size calculation in `src/nrc_resource_layout.cpp`.
+- Added `tests/profile_layout_test.cpp` and registered it with CTest.
+
+### VkNRC Compatibility Decisions
+
+- Network structure follows VkNRC's first target:
+  - Encoded input width: 64 fp16 values.
+  - Hidden layer count: 5.
+  - Hidden layer width: 64.
+  - Output width: 3.
+  - Train batch size: 16384.
+  - Train batch count: 4.
+  - Weight count: 20672.
+- Record/resource sizes follow VkNRC's C++ and shader layout assumptions:
+  - `PackedNRCInput`: 16 bytes.
+  - `NRCEvalRecord`: 20 bytes.
+  - `NRCTrainRecord`: 40 bytes.
+  - `OptimizerState`: 20 bytes.
+  - `OptimizerEntry`: 16 bytes.
+- Eval record capacity follows VkNRC:
+  - `width * height + trainBatchSize * trainBatchCount`.
+
+### Profile Selection Policy
+
+- Production profiles currently require KHR cooperative matrix support, float16 shader support, 16-bit storage buffer access, subgroup size control, full compute subgroups, a matching cooperative matrix property, and the required subgroup size.
+- Full training profiles also require shader buffer float32 atomic add.
+- Inference-only selection can skip the atomic-add requirement by setting `ProfileRequirements::requireTraining = false`.
+- Scalar reference fallback is not selected unless `ProfileRequirements::allowReferenceBackend = true`.
+
+### Validation
+
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON`
+- Build command succeeded:
+  - `cmake --build build --config Debug --target nrc_profile_layout_test`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `1/1 Test #1: nrc_profile_layout_test Passed`.
+
+### Current Limitations
+
+- Capability data is not queried from Vulkan yet. Milestone 1 only defines the renderer-independent capability view and selection policy.
+- KHR cooperative matrix property mapping from Vulkan enums to `nrc::CooperativeMatrixCapability` is still missing.
+- No shader ABI files have been ported yet.
+- No reference renderer logic exists yet beyond the placeholder executable.
+- Profile whitelist is preliminary and will need verification against actual device-reported matrix properties and shader compile/run behavior.
+
+### Next Step
+
+Start Milestone 2 by adding Vulkan capability query helpers or, if keeping Vulkan out of the core first, by adding shader-side NRC record/encoding headers and ABI tests that mirror the C++ layout constants.

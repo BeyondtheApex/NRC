@@ -10,4 +10,8 @@ This repository is intended to provide three layers:
 
 The first implementation will follow the existing VkNRC implementation and the NRC paper closely, while restructuring the code so projects such as MCVR-custom can integrate it cleanly.
 
-Current status: repository bootstrap and implementation log only.
+Current status:
+
+- Repository bootstrap is complete.
+- Public constants, profile/capability selection, and VkNRC-compatible resource layout calculations are implemented.
+- A first profile/layout test is available through CTest.

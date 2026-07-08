@@ -9,8 +9,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_library(nrc_core INTERFACE)
-target_include_directories(nrc_core INTERFACE
+add_library(nrc_core STATIC)
+target_sources(nrc_core PRIVATE
+    src/nrc_profile.cpp
+    src/nrc_resource_layout.cpp)
+target_include_directories(nrc_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
 
@@ -28,4 +31,5 @@ endif()
 
 if(NRC_BUILD_TESTS)
     enable_testing()
+    add_subdirectory(tests)
 endif()
