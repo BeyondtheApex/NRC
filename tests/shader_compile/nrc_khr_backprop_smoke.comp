@@ -76,6 +76,11 @@ void main() {
                                      dHidden3);
     NrcKhrAccumulateSharedHiddenDWeightsSubgroup(NRC_NN_HIDDEN_LAYER_COUNT - 2u,
                                                  NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE);
+    NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming(
+        NRC_NN_HIDDEN_LAYER_COUNT - 2u,
+        NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE,
+        NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE,
+        dHidden3);
 
     float dHidden2[NRC_NN_HIDDEN_WIDTH];
     NrcKhrPropagateHiddenDActivation(NRC_NN_HIDDEN_LAYER_COUNT - 2u,

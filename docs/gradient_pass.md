@@ -46,7 +46,7 @@ The luminance denominator is treated as the current prediction scale, matching V
 
 `tests/vulkan_gradient_khr_test.cpp` selects a KHR cooperative-matrix training profile when cooperative matrices, fp32 storage-buffer atomic add, subgroup arithmetic, and the KHR training shared-memory requirement are available. If pipeline creation succeeds, it dispatches `NrcGradientKhr.glsl` over a 67-record one-workgroup batch and compares all hidden-layer and output-layer gradient regions against the matching CPU oracle. On the current local AMD driver, KHR training profile selection reports a controlled `SKIP:` because no implemented training profile satisfies the current 98304-byte shared-memory requirement.
 
-KHR shader compile tests also cover experimental cooperative-matrix `dW` variants for the output layer and final hidden layer across SG32, SG16, and M8/SG32 profiles.
+KHR shader compile tests also cover experimental cooperative-matrix `dW` variants for the output layer, final hidden layer, and hidden layer 3 across SG32, SG16, and M8/SG32 profiles.
 
 `tests/vulkan_training_step_test.cpp` runs the gradient pass between `NrcTrainPrepare` and `NrcOptimize`, using prepare's indirect dispatch command and comparing the final optimizer state and packed weights against the CPU reference path.
 
@@ -60,7 +60,7 @@ KHR shader compile tests also cover experimental cooperative-matrix `dW` variant
 - It uses fp32 storage-buffer atomic add and therefore requires `VK_EXT_shader_atomic_float` / `shaderBufferFloat32AtomicAdd`.
 - The Vulkan gradient test is feature-gated and reports a controlled skip on devices without fp32 storage-buffer atomic add support.
 - The sample path tracer currently runs one validated scalar training update, not an iterative training loop.
-- The KHR cooperative-matrix pass now has full hidden/output `dW` training groundwork and subgroup reduction for every hidden/output `dW` region. Experimental cooperative-matrix `dW` helpers exist for the output layer and final hidden layer, but the default path still waits on runtime numerical validation on a successful KHR pipeline creation path.
+- The KHR cooperative-matrix pass now has full hidden/output `dW` training groundwork and subgroup reduction for every hidden/output `dW` region. Experimental cooperative-matrix `dW` helpers exist for the output layer, final hidden layer, and hidden layer 3, but the default path still waits on runtime numerical validation on a successful KHR pipeline creation path.
 
 ## KHR Gradient Pass
 
@@ -110,12 +110,19 @@ Experimental KHR final-hidden cooperative-matrix reduction:
 - The 67-record test batch spans multiple subgroup sample ranges for both SG16 and SG32, so the coopmat oracles now model the shader's cross-subgroup partial reduction instead of only subgroup 0.
 - The local test currently reaches a controlled profile-selection skip before dispatch because the available device does not satisfy the 98304-byte KHR training shared-memory requirement.
 
+Experimental KHR hidden-layer-3 cooperative-matrix reduction:
+
+- `NRC_KHR_USE_COOPMAT_HIDDEN3_DW=1` switches only hidden layer 3 `dW` to `NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming`.
+- The pass still propagates `dHidden3` to hidden layer 2 through the local derivative array, so the helper does not need to preserve the active-tile fp32 `dPre` scratch after hidden layer 3 `dW`.
+- `nrc_vulkan_gradient_khr_coopmat_hidden3_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors hidden layer 4 backpropagation, fp16 hidden-layer-3 `dPre` staging, and per-subgroup fp16 partial storage.
+- The default KHR gradient pass still uses the subgroup hidden-layer-3 helper until runtime numerical validation succeeds on a driver that can create the KHR gradient pipeline.
+
 Current limitations:
 
 - the default hidden/output `dW` regions use subgroup arithmetic and one fp32 atomic add per covered weight per workgroup;
-- the optional output-layer and final-hidden cooperative-matrix helpers are not the default path;
-- the optional output-layer and final-hidden cooperative-matrix runtime tests are present but currently report the same controlled KHR training profile-selection skip as the default KHR gradient test on the local AMD driver;
-- only the final hidden layer has an experimental cooperative-matrix `dW` helper; earlier hidden layers still need equivalent coverage;
+- the optional output-layer, final-hidden, and hidden-layer-3 cooperative-matrix helpers are not the default path;
+- the optional output-layer, final-hidden, and hidden-layer-3 cooperative-matrix runtime tests are present but currently report the same controlled KHR training profile-selection skip as the default KHR gradient test on the local AMD driver;
+- hidden layers 2, 1, and 0 still need equivalent cooperative-matrix `dW` coverage;
 - KHR backpropagation of `dA` still uses scalar arrays rather than VkNRC-style cooperative matrices;
 - hidden-layer cooperative-matrix dW beyond the final hidden layer still needs staged integration and numerical validation;
 - KHR runtime gradient comparison is present but remains driver-gated on the current local AMD pipeline creation path.
