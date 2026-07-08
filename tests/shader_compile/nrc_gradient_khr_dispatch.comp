@@ -1,0 +1,27 @@
+#version 460
+
+#define NRC_GRADIENT_SET 0
+
+#include "nrc/common/NrcEncoding.glsl"
+
+NrcUnpackedInput NrcUnpackPackedInput(PackedNrcInput packedInput) {
+    vec2 barycentric = unpackUnorm2x16(packedInput.barycentric2x16U);
+    vec2 scatteredDir = unpackUnorm2x16(packedInput.scatteredDir2x16U);
+
+    NrcUnpackedInput unpackedInput;
+    unpackedInput.position = vec3(barycentric, 0.25);
+    unpackedInput.scatteredDir = scatteredDir;
+    unpackedInput.normal = vec2(0.5, 0.5);
+    unpackedInput.roughness = 0.35;
+    unpackedInput.diffuse = vec3(0.7, 0.6, 0.5);
+    unpackedInput.specular = vec3(0.1, 0.2, 0.3);
+    return unpackedInput;
+}
+
+#include "nrc/passes/NrcGradientKhr.glsl"
+
+layout(local_size_x = NRC_GRADIENT_WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    NrcGradientKhrMain();
+}

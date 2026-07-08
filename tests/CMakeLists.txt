@@ -111,6 +111,31 @@ if(NRC_GLSLC)
             "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_scalar_dispatch.comp"
             "-o"
             "${CMAKE_CURRENT_BINARY_DIR}/nrc_gradient_scalar_smoke.spv")
+    add_test(NAME nrc_shader_gradient_khr_sg32_compile
+        COMMAND "${NRC_GLSLC}"
+            "--target-env=vulkan1.3"
+            "-DNRC_KHR_SUBGROUP_SIZE=32"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_khr_dispatch.comp"
+            "-o"
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_gradient_khr_sg32_smoke.spv")
+    add_test(NAME nrc_shader_gradient_khr_sg16_compile
+        COMMAND "${NRC_GLSLC}"
+            "--target-env=vulkan1.3"
+            "-DNRC_KHR_SUBGROUP_SIZE=16"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_khr_dispatch.comp"
+            "-o"
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_gradient_khr_sg16_smoke.spv")
+    add_test(NAME nrc_shader_gradient_khr_m8_sg32_compile
+        COMMAND "${NRC_GLSLC}"
+            "--target-env=vulkan1.3"
+            "-DNRC_KHR_SUBGROUP_SIZE=32"
+            "-DNRC_KHR_COOPMAT_M=8"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_khr_dispatch.comp"
+            "-o"
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_gradient_khr_m8_sg32_smoke.spv")
     add_test(NAME nrc_shader_khr_sg32_compile
         COMMAND "${NRC_GLSLC}"
             "--target-env=vulkan1.3"

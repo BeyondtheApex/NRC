@@ -2945,3 +2945,63 @@ This keeps the first KHR training surface aligned with `NrcGradientScalar.glsl`,
 ### Next Step
 
 Add a KHR train-record gradient pass skeleton that can dispatch the output-layer `dW` helper, then validate output-layer gradients against the scalar/CPU reference on devices that can create the selected KHR pipeline.
+
+## 2026-07-09 - Milestone 44 KHR Gradient Pass Skeleton
+
+### Implemented
+
+- Added `shaders/nrc/passes/NrcGradientKhr.glsl`.
+- Matched the scalar gradient pass ABI:
+  - train records at binding 0;
+  - queue state/train counts at binding 1;
+  - packed fp16 weights at binding 2;
+  - fp32 gradients at binding 3;
+  - push constant `batch`;
+  - integration-provided `NrcUnpackPackedInput`.
+- The KHR pass now:
+  1. clamps the requested batch and train count;
+  2. encodes valid train records or zero-fills out-of-range workgroup lanes;
+  3. runs KHR cooperative-matrix hidden forward;
+  4. stores final hidden activations for output backpropagation;
+  5. runs the output layer;
+  6. computes the VkNRC-style relative-L2 luminance output derivative for valid records;
+  7. accumulates output-layer `dW` into fp32 gradient storage.
+- Added `tests/shader_compile/nrc_gradient_khr_dispatch.comp` with the same fake unpack hook shape as the scalar gradient compile test.
+- Added CTest compile coverage for the KHR gradient pass profile variants:
+  - `nrc_shader_gradient_khr_sg32_compile`
+  - `nrc_shader_gradient_khr_sg16_compile`
+  - `nrc_shader_gradient_khr_m8_sg32_compile`
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+The new pass is a real train-record shader-header entry point, but it intentionally covers only the first KHR training surface: output-layer `dW`. It preserves the scalar gradient pass resource layout so an integration can switch the gradient shader variant without changing descriptor binding order.
+
+Out-of-range invocations cannot return early because KHR cooperative-matrix operations require workgroup/subgroup participation. They instead contribute zero input and zero gradients.
+
+### Validation
+
+- Reconfigured CMake after adding CTest entries:
+  - `cmake -S . -B build`
+- Targeted KHR gradient/profile shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr|nrc_shader_khr" --output-on-failure -V`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `31/31 tests passed`
+
+### Current Limitations
+
+- The KHR gradient pass accumulates only output-layer `dW`.
+- Output-layer accumulation is still scalar per sample invocation, not a cooperative-matrix reduction.
+- Hidden-layer dA/dW propagation is still missing.
+- Runtime KHR gradient validation is not added yet because the current local KHR pipeline creation path remains driver-gated.
+
+### Next Step
+
+Add a KHR runtime gradient test that creates the KHR gradient pipeline when the driver allows it and compares output-layer gradients against the CPU/scalar reference, then continue with cooperative-matrix dA/dW propagation through hidden layers.

@@ -1,4 +1,4 @@
-# Scalar Gradient Pass
+# Gradient Passes
 
 `shaders/nrc/passes/NrcGradientScalar.glsl` is the first reusable gradient shader-header pass.
 
@@ -54,4 +54,31 @@ The luminance denominator is treated as the current prediction scale, matching V
 - It uses fp32 storage-buffer atomic add and therefore requires `VK_EXT_shader_atomic_float` / `shaderBufferFloat32AtomicAdd`.
 - The Vulkan gradient test is feature-gated and reports a controlled skip on devices without fp32 storage-buffer atomic add support.
 - The sample path tracer currently runs one validated scalar training update, not an iterative training loop.
-- KHR cooperative-matrix gradient/backpropagation is not implemented yet.
+- The KHR cooperative-matrix pass exists as output-layer training groundwork only; hidden-layer dA/dW and runtime numerical validation are still missing.
+
+## KHR Output-Gradient Pass
+
+`shaders/nrc/passes/NrcGradientKhr.glsl` is the first KHR cooperative-matrix train-record gradient pass.
+
+It uses the same external ABI as the scalar gradient pass:
+
+- flat `NrcTrainRecord` storage;
+- `NrcQueueState` train batch counts;
+- packed fp16 weights;
+- fp32 gradient storage;
+- push-constant train batch selection;
+- integration-provided `NrcUnpackPackedInput`.
+
+Current behavior:
+
+- all invocations in a workgroup participate in KHR cooperative-matrix forward work;
+- train indices outside the selected batch count use zero input and zero output derivative;
+- final hidden activations are saved before output forward overwrites the shared activation tile;
+- output-layer `dW` is accumulated into the same fp32 row-major gradient layout as the scalar pass.
+
+Current limitations:
+
+- only output-layer `dW` is accumulated;
+- the output `dW` helper is scalar per sample invocation and is not the final cooperative-matrix reduction path;
+- hidden-layer dA/dW propagation is not implemented;
+- there is no KHR runtime gradient comparison yet because the local KHR pipeline creation path remains driver-gated.

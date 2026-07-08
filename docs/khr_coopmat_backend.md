@@ -22,6 +22,7 @@ Implemented:
   - final hidden-activation copy storage for output-layer backpropagation;
   - scalar output-layer `dW` accumulation in the shared row-major weight layout;
   - enlarged shared-buffer allocation for future per-subgroup gradient reductions.
+- `shaders/nrc/passes/NrcGradientKhr.glsl`, a train-record pass skeleton that dispatches KHR forward and accumulates output-layer `dW`.
 
 Not implemented yet:
 
@@ -51,6 +52,8 @@ NRC_KHR_SUBGROUP_SIZE=32, NRC_KHR_COOPMAT_M=8
 ```
 
 CTest also compiles the same three variants with `NRC_NN_BACKPROPAGATION` enabled through `tests/shader_compile/nrc_khr_backprop_smoke.comp`. The backprop smoke test exercises the gradient buffer declaration, output derivative, atomic add helper, and forward path in one translation unit.
+
+`tests/shader_compile/nrc_gradient_khr_dispatch.comp` compile-validates the KHR train-record pass for the same three profile shader shapes. It proves the pass-level binding ABI, push constants, train-count handling, integration-provided unpack hook, and output-layer `dW` helper compile together.
 
 These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support, gradient correctness, or training performance.
 
