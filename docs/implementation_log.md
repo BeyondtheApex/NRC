@@ -3280,3 +3280,77 @@ The CPU oracle now mirrors this as a layer-indexed hidden activation table, whic
 ### Next Step
 
 Continue the same shader/oracle expansion through hidden layers 1 and 0. Once all hidden layers are covered, compare the full KHR gradient layout against the scalar reference shape and then start replacing scalar per-sample accumulation with cooperative-matrix/subgroup reduction.
+
+## 2026-07-09 - Milestone 49 KHR Hidden Layer 1 Gradient Groundwork
+
+### Implemented
+
+- Extended `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl` backpropagation storage from four saved activation snapshots to five saved snapshots:
+  - activations feeding hidden layer 1;
+  - activations feeding hidden layer 2;
+  - activations feeding hidden layer 3;
+  - activations feeding hidden layer 4;
+  - activations feeding the output layer.
+- Added the hidden-layer 1 source activation snapshot base and store/read helpers.
+- Updated `shaders/nrc/passes/NrcGradientKhr.glsl` so the current KHR gradient path:
+  1. runs hidden layer 0;
+  2. stores the activations feeding hidden layer 1;
+  3. runs hidden layer 1;
+  4. stores the activations feeding hidden layer 2;
+  5. runs hidden layer 2;
+  6. stores the activations feeding hidden layer 3;
+  7. runs hidden layer 3;
+  8. stores the activations feeding hidden layer 4;
+  9. runs hidden layer 4;
+  10. stores the activations feeding the output layer;
+  11. accumulates output-layer and hidden-layer 4/3/2/1 `dW`.
+- Updated `tests/shader_compile/nrc_khr_backprop_smoke.comp` to exercise the same layer-1 coverage path.
+- Extended `tests/vulkan_gradient_khr_test.cpp` by moving the covered suffix start from hidden layer 2 to hidden layer 1. The comparison currently covers:
+  - output-layer `dW`;
+  - hidden-layer 4 `dW`;
+  - hidden-layer 3 `dW`;
+  - hidden-layer 2 `dW`;
+  - hidden-layer 1 `dW`;
+  - zero gradients for hidden layer 0.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+This milestone extends the correctness-first KHR gradient suffix from layers 4/3/2 to layers 4/3/2/1. The shader pass now computes:
+
+```text
+dA1 = transpose(W2) * dZ2
+dW1 = dZ1 * transpose(A0)
+```
+
+while preserving the existing output-layer and hidden-layer 4/3/2 gradient behavior.
+
+### Validation
+
+- Targeted KHR shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr|nrc_shader_khr_backprop" --output-on-failure -V`
+- Targeted KHR gradient test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `32/32 tests passed`
+- Targeted KHR gradient runtime test succeeded with controlled skip:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr_test" --output-on-failure -V`
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+
+### Current Limitations
+
+- Backpropagation through hidden layer 0 is still missing.
+- The KHR `dW` helpers are still scalar per sample invocation, not cooperative-matrix reductions.
+- Saved activation snapshots now cover five 128-sample activation tiles in shared memory. This remains a correctness-groundwork choice, not the final production-memory plan.
+- Runtime numerical comparison has not executed on this machine because the current local AMD KHR pipeline creation path still reports a controlled structured-exception skip.
+
+### Next Step
+
+Add hidden-layer 0 coverage by saving the encoded input activation tile before the first hidden layer, then compare the full hidden/output KHR gradient layout against the scalar reference shape before moving to cooperative-matrix/subgroup reduction work.

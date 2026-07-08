@@ -90,7 +90,8 @@
 #define NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE (NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE + NRC_KHR_ACT_UVEC4_COUNT)
 #define NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE (NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE + NRC_KHR_ACT_UVEC4_COUNT)
 #define NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE (NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE + NRC_KHR_ACT_UVEC4_COUNT)
-#define NRC_KHR_BACKPROP_ACT_COPY_SHARED_UVEC4_COUNT (NRC_KHR_ACT_UVEC4_COUNT * 5)
+#define NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE (NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE + NRC_KHR_ACT_UVEC4_COUNT)
+#define NRC_KHR_BACKPROP_ACT_COPY_SHARED_UVEC4_COUNT (NRC_KHR_ACT_UVEC4_COUNT * 6)
 #define NRC_KHR_BACKPROP_REDUCTION_SHARED_UVEC4_COUNT (NRC_KHR_WEIGHT_64_UVEC4_COUNT * NRC_KHR_SUBGROUP_COUNT)
 #if NRC_KHR_BACKPROP_REDUCTION_SHARED_UVEC4_COUNT > NRC_KHR_BACKPROP_ACT_COPY_SHARED_UVEC4_COUNT
 #define NRC_KHR_BACKPROP_SHARED_UVEC4_COUNT NRC_KHR_BACKPROP_REDUCTION_SHARED_UVEC4_COUNT
@@ -297,6 +298,10 @@ void NrcKhrStoreBackpropEarlierSourceActivations() {
     NrcKhrStoreBackpropActivationsAt(NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE);
 }
 
+void NrcKhrStoreBackpropOldestSourceActivations() {
+    NrcKhrStoreBackpropActivationsAt(NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE);
+}
+
 float NrcKhrReadBackpropActivationFrom(uint baseOffset, uint sampleIndex, uint feature) {
     uint base = baseOffset +
                 sampleIndex * NRC_ENCODED_INPUT_UVEC4_COUNT;
@@ -324,6 +329,12 @@ float NrcKhrReadBackpropPreviousSourceActivation(uint sampleIndex, uint feature)
 
 float NrcKhrReadBackpropEarlierSourceActivation(uint sampleIndex, uint feature) {
     return NrcKhrReadBackpropActivationFrom(NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE,
+                                            sampleIndex,
+                                            feature);
+}
+
+float NrcKhrReadBackpropOldestSourceActivation(uint sampleIndex, uint feature) {
+    return NrcKhrReadBackpropActivationFrom(NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE,
                                             sampleIndex,
                                             feature);
 }

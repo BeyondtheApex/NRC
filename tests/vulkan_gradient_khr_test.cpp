@@ -173,7 +173,7 @@ HiddenLayers reference_forward_hidden_layers_fp16(std::span<const float> weights
 std::vector<float> make_expected_khr_groundwork_gradients(std::span<const float> gpuVisibleWeights,
                                                           const std::vector<nrc::NrcTrainRecord> &trainRecords) {
     std::vector<float> gradients(nrc::weight_count(), 0.0f);
-    constexpr std::uint32_t firstCoveredHiddenLayer = nrc::kNnHiddenLayerCount - 3u;
+    constexpr std::uint32_t firstCoveredHiddenLayer = nrc::kNnHiddenLayerCount - 4u;
     const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
 
     for (std::uint32_t i = 0; i < kTrainCount; ++i) {
@@ -852,7 +852,7 @@ int main(int argc, char **argv) {
         bool ok = true;
         std::uint32_t mismatchCount = 0;
         const std::size_t firstCoveredHiddenOffset =
-            nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 3u);
+            nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 4u);
         const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
         for (std::uint32_t i = 0; i < nrc::weight_count(); ++i) {
             const bool coveredHiddenWeight = i >= firstCoveredHiddenOffset && i < outputOffset;
