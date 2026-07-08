@@ -5448,3 +5448,82 @@ The new hidden2 `dA` mode remains separate from the other `dA` modes. That keeps
 ### Next Step
 
 Finish the individual KHR cooperative-matrix `dA` pass with hidden1-to-hidden0. Then add a cumulative full-chain `dA` mode and compare its oracle against the expected chained fp16 staging before combining it with all-`dW`.
+
+## 2026-07-09 - Milestone 80 KHR Hidden1 Coopmat dA Mode
+
+### Implemented
+
+- Added the fourth optional KHR cooperative-matrix `dA` propagation path: hidden layer 1 into hidden layer 0.
+- Added `NRC_KHR_USE_COOPMAT_HIDDEN1_DA`, defaulting to disabled, so the baseline KHR gradient path remains unchanged unless a test/profile explicitly enables this mode.
+- Reused `NrcKhrPropagateHiddenDActivationCoopmat` again. The same helper now covers every individual hidden-to-hidden derivative propagation step:
+  - final-hidden to hidden3;
+  - hidden3 to hidden2;
+  - hidden2 to hidden1;
+  - hidden1 to hidden0.
+- Wired the hidden1 `dA` switch after hidden-layer-1 `dW` accumulation. At that point the hidden-layer-1 activation snapshot has already been consumed for the ReLU mask, so the helper can safely store fp16 `dHidden0` into `NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE`.
+- Added a hidden1 `dA` test oracle wrapper that models fp16 hidden-layer-1 `dPre` staging and fp16 `dHidden0` storage before recomputing hidden-layer 0 gradients.
+- Added the `--coopmat-hidden1-da` runtime test mode.
+- Added compile coverage for the hidden1 `dA` mode across the current KHR shader profiles:
+  - subgroup 32;
+  - subgroup 16;
+  - `m8` subgroup 32.
+- Updated current documentation:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/khr_shared_memory_layout.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+This milestone completes the set of independent single-step KHR cooperative-matrix `dA` options while keeping the existing `dW` modes intact:
+
+```text
+default:                       KHR groundwork oracle
+--coopmat-output:              output-layer fp16 coopmat dW oracle
+--coopmat-final-hidden:        hidden layer 4 fp16 coopmat dW oracle
+--coopmat-final-hidden-da:     final-hidden -> hidden3 fp16 coopmat dA oracle
+--coopmat-hidden3-da:          hidden3 -> hidden2 fp16 coopmat dA oracle
+--coopmat-hidden2-da:          hidden2 -> hidden1 fp16 coopmat dA oracle
+--coopmat-hidden1-da:          hidden1 -> hidden0 fp16 coopmat dA oracle
+--coopmat-hidden3:             hidden layer 3 fp16 coopmat dW oracle
+--coopmat-hidden2:             hidden layer 2 fp16 coopmat dW oracle
+--coopmat-hidden1:             hidden layer 1 fp16 coopmat dW oracle
+--coopmat-hidden0:             hidden layer 0 fp16 coopmat dW oracle
+--coopmat-all-dw:              output and all hidden dW regions use fp16 coopmat oracles
+```
+
+The new hidden1 `dA` mode remains separate from the other `dA` modes. The next behavior change should be cumulative: enabling the whole hidden-to-hidden `dA` chain together and using an oracle that models chained fp16 derivative staging.
+
+### Validation
+
+- Diff whitespace check succeeded:
+  - `git diff --check`
+- Targeted KHR gradient runtime test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr" --output-on-failure -V`
+- Targeted KHR gradient runtime result:
+  - `12/12 tests passed`
+- Current local KHR training skip result for all twelve runtime modes remains:
+  - `SKIP: no Vulkan device supports an implemented NRC KHR cooperative matrix training profile`
+- Targeted hidden1 `dA` compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr_coopmat_hidden1_da" --output-on-failure -V`
+- Targeted hidden1 `dA` compile result:
+  - `3/3 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `77/77 tests passed`
+
+### Current Limitations
+
+- Every individual hidden-to-hidden `dA` propagation step now has an optional cooperative-matrix implementation, but the default KHR gradient path still uses scalar `dA` propagation.
+- The current `dA` modes are independent. There is not yet a cumulative full-chain `dA` mode that enables final-hidden-to-hidden3, hidden3-to-hidden2, hidden2-to-hidden1, and hidden1-to-hidden0 together.
+- The local device still does not satisfy the 98304-byte KHR training shared-memory profile gate, so the hidden1 `dA` mode has compile coverage and a wired runtime comparison but no local GPU numerical comparison yet.
+- The cumulative mode must validate chained fp16 `dA` staging semantics carefully before any all-`dA` or all-coopmat training variant is considered correct.
+
+### Next Step
+
+Add a cumulative full-chain KHR cooperative-matrix `dA` mode that enables all four hidden-to-hidden derivative propagation steps together. Its CPU oracle should use the existing `CoopmatDActivationLayers` mask with all valid hidden derivative layers enabled, then the runtime mode can become the foundation for combining all `dW` and all `dA` cooperative-matrix paths.

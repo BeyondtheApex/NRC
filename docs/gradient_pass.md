@@ -94,6 +94,7 @@ Current behavior:
 - optional `NRC_KHR_USE_COOPMAT_HIDDEN2_DA=1` replaces the hidden-layer 2 to hidden-layer 1 derivative propagation with the same fp16 cooperative-matrix path;
 - hidden-layer 1 `dW` is reduced across each subgroup through shared fp32 `dZ` scratch and accumulated into the same fp32 row-major gradient layout as the scalar pass;
 - hidden-layer 1 derivative is propagated to hidden-layer 0 activations;
+- optional `NRC_KHR_USE_COOPMAT_HIDDEN1_DA=1` replaces the hidden-layer 1 to hidden-layer 0 derivative propagation with the same fp16 cooperative-matrix path;
 - hidden-layer 0 `dW` stages encoded input into a retired shared snapshot region, then reduces across each subgroup into the same fp32 row-major gradient layout as the scalar pass.
 
 Experimental KHR output-layer cooperative-matrix reduction:
@@ -122,7 +123,9 @@ Experimental KHR cooperative-matrix `dA` propagation:
 - `nrc_vulkan_gradient_khr_coopmat_hidden3_da_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors fp16 hidden-layer-3 `dPre` staging and fp16 `dHidden2` storage before recomputing hidden-layer 2/1/0 gradients.
 - `NRC_KHR_USE_COOPMAT_HIDDEN2_DA=1` switches only the hidden-layer 2 to hidden-layer 1 derivative propagation to this helper. It stages hidden-layer 2 `dPre`, stores fp16 `dHidden1` into the retired hidden-layer-2 activation snapshot, and reads it back into the local derivative array.
 - `nrc_vulkan_gradient_khr_coopmat_hidden2_da_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors fp16 hidden-layer-2 `dPre` staging and fp16 `dHidden1` storage before recomputing hidden-layer 1/0 gradients.
-- These are independent optional `dA` switches. The default KHR gradient path still uses scalar-array `dA` propagation, and hidden-layer 1 to hidden-layer 0 `dA` propagation still uses scalar arrays.
+- `NRC_KHR_USE_COOPMAT_HIDDEN1_DA=1` switches only the hidden-layer 1 to hidden-layer 0 derivative propagation to this helper. It stages hidden-layer 1 `dPre`, stores fp16 `dHidden0` into the retired hidden-layer-1 activation snapshot, and reads it back into the local derivative array.
+- `nrc_vulkan_gradient_khr_coopmat_hidden1_da_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors fp16 hidden-layer-1 `dPre` staging and fp16 `dHidden0` storage before recomputing hidden-layer 0 gradients.
+- These are independent optional `dA` switches. The default KHR gradient path still uses scalar-array `dA` propagation, and a cumulative full-chain coopmat `dA` mode is still pending.
 
 Experimental KHR hidden-layer-3 cooperative-matrix reduction:
 
