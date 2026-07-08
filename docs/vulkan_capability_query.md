@@ -92,9 +92,11 @@ Header:
 
 The helper does not read files or own the returned shader module. Callers keep control of their asset system and must destroy the result with `vkDestroyShaderModule`.
 
-## Storage Buffer Descriptor Helper
+## Descriptor Helpers
 
-`nrc::vulkan::create_storage_buffer_descriptor_set_layout` creates a descriptor set layout from explicit storage-buffer bindings. `nrc::vulkan::update_storage_buffer_descriptors` writes storage-buffer descriptors into a caller-allocated descriptor set.
+`nrc::vulkan::create_descriptor_set_layout` creates a descriptor set layout from explicit descriptor bindings. `nrc::vulkan::create_storage_buffer_descriptor_set_layout` remains as a narrow storage-buffer convenience wrapper.
+
+`nrc::vulkan::update_storage_buffer_descriptors` writes storage-buffer descriptors into a caller-allocated descriptor set. `nrc::vulkan::update_storage_image_descriptors` does the same for storage images.
 
 Header:
 
@@ -102,14 +104,30 @@ Header:
 #include "nrc/vulkan/nrc_vulkan_descriptors.hpp"
 ```
 
-The helper is intentionally narrow:
+The helpers are intentionally renderer-neutral:
 
-- storage buffers only;
-- one descriptor per binding;
 - caller-owned descriptor pools and descriptor sets;
-- caller-owned layout destruction through `vkDestroyDescriptorSetLayout`.
+- caller-owned layout destruction through `vkDestroyDescriptorSetLayout`;
+- one descriptor per storage-buffer or storage-image update write;
+- generic layout creation for mixed descriptor sets;
+- storage-buffer and storage-image update helpers for the current NRC validation paths.
 
-This covers the scalar and KHR forward dispatch validation path while leaving image descriptors, samplers, bindless arrays, and engine-specific descriptor allocation policies to the host renderer.
+They do not allocate descriptor pools/sets, bind descriptor sets, or impose a descriptor indexing/bindless policy.
+
+Current descriptor update coverage:
+
+- storage buffers;
+- storage images.
+
+Current descriptor update exclusions:
+
+- sampled images;
+- samplers;
+- acceleration structures;
+- descriptor arrays;
+- bindless descriptors.
+
+This covers the scalar/KHR forward dispatch validation path and the scalar inference storage-image path while leaving engine-specific descriptor allocation policies to the host renderer.
 
 ## Memory Barrier Helper
 
@@ -157,4 +175,4 @@ The helpers do not own returned pipelines. Callers must destroy them with `vkDes
 
 ## Current Limit
 
-This module reports capabilities, aggregates profile validation state, creates shader modules from already-loaded SPIR-V words, writes simple storage-buffer descriptors, records simple memory barriers, and provides small compute pipeline creation helpers. It does not create devices, enable features, compile shaders, read shader files, create pipeline layouts, allocate descriptor pools/sets, create resources, perform image layout transitions, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own renderer code, then feed shader/pipeline/numerical outcomes back into `VulkanProfileValidationRequirements`.
+This module reports capabilities, aggregates profile validation state, creates shader modules from already-loaded SPIR-V words, creates descriptor set layouts, writes simple storage-buffer/storage-image descriptors, records simple memory barriers, and provides small compute pipeline creation helpers. It does not create devices, enable features, compile shaders, read shader files, create pipeline layouts, allocate descriptor pools/sets, create resources, perform image layout transitions, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own renderer code, then feed shader/pipeline/numerical outcomes back into `VulkanProfileValidationRequirements`.

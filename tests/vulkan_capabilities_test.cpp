@@ -98,6 +98,16 @@ int main() {
     ok &= require(invalidDescriptorLayout.validation.vkResult == VK_ERROR_INITIALIZATION_FAILED,
                   "invalid descriptor layout request records initialization failure");
 
+    const nrc::vulkan::VulkanDescriptorSetLayoutCreateResult invalidGenericDescriptorLayout =
+        nrc::vulkan::create_descriptor_set_layout({});
+    ok &= require(invalidGenericDescriptorLayout.layout == VK_NULL_HANDLE,
+                  "invalid generic descriptor layout request returns null layout");
+    ok &= require(invalidGenericDescriptorLayout.validation.status ==
+                      nrc::vulkan::VulkanValidationStepStatus::Failed,
+                  "invalid generic descriptor layout request fails safely");
+    ok &= require(invalidGenericDescriptorLayout.validation.vkResult == VK_ERROR_INITIALIZATION_FAILED,
+                  "invalid generic descriptor layout request records initialization failure");
+
     const std::array<nrc::vulkan::VulkanStorageBufferBinding, 2> duplicateBindings = {{
         {0, VK_SHADER_STAGE_COMPUTE_BIT},
         {0, VK_SHADER_STAGE_COMPUTE_BIT},
@@ -110,12 +120,31 @@ int main() {
                       nrc::vulkan::VulkanValidationStepStatus::Failed,
                   "duplicate descriptor layout bindings fail safely");
 
+    const std::array<nrc::vulkan::VulkanDescriptorBinding, 2> duplicateGenericBindings = {{
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT},
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT},
+    }};
+    nrc::vulkan::VulkanDescriptorSetLayoutCreateInfo duplicateGenericLayoutInfo{};
+    duplicateGenericLayoutInfo.bindings = duplicateGenericBindings;
+    const nrc::vulkan::VulkanDescriptorSetLayoutCreateResult duplicateGenericDescriptorLayout =
+        nrc::vulkan::create_descriptor_set_layout(duplicateGenericLayoutInfo);
+    ok &= require(duplicateGenericDescriptorLayout.validation.status ==
+                      nrc::vulkan::VulkanValidationStepStatus::Failed,
+                  "duplicate generic descriptor layout bindings fail safely");
+
     const nrc::vulkan::VulkanValidationStep invalidDescriptorUpdate =
         nrc::vulkan::update_storage_buffer_descriptors({});
     ok &= require(invalidDescriptorUpdate.status == nrc::vulkan::VulkanValidationStepStatus::Failed,
                   "invalid descriptor update fails safely");
     ok &= require(invalidDescriptorUpdate.vkResult == VK_ERROR_INITIALIZATION_FAILED,
                   "invalid descriptor update records initialization failure");
+
+    const nrc::vulkan::VulkanValidationStep invalidImageDescriptorUpdate =
+        nrc::vulkan::update_storage_image_descriptors({});
+    ok &= require(invalidImageDescriptorUpdate.status == nrc::vulkan::VulkanValidationStepStatus::Failed,
+                  "invalid image descriptor update fails safely");
+    ok &= require(invalidImageDescriptorUpdate.vkResult == VK_ERROR_INITIALIZATION_FAILED,
+                  "invalid image descriptor update records initialization failure");
 
     const nrc::vulkan::VulkanShaderModuleCreateResult invalidShaderModule =
         nrc::vulkan::create_shader_module({});

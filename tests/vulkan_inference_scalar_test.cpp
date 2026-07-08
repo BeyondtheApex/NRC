@@ -1,6 +1,7 @@
 #include "nrc/nrc_records.hpp"
 #include "nrc/nrc_reference_nn.hpp"
 #include "nrc/nrc_weights.hpp"
+#include "nrc/vulkan/nrc_vulkan_descriptors.hpp"
 #include "nrc/vulkan/nrc_vulkan_pipeline.hpp"
 #include "nrc/vulkan/nrc_vulkan_shader.hpp"
 
@@ -507,22 +508,21 @@ private:
     }
 
     void create_descriptor_set_layout() {
-        std::array<VkDescriptorSetLayoutBinding, 6> bindings{};
+        std::array<nrc::vulkan::VulkanDescriptorBinding, 6> bindings{};
         for (std::uint32_t i = 0; i < bindings.size(); ++i) {
             bindings[i].binding = i;
-            bindings[i].descriptorCount = 1;
             bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
             bindings[i].descriptorType =
                 (i == 3 || i == 4) ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         }
 
-        VkDescriptorSetLayoutCreateInfo createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        createInfo.bindingCount = static_cast<std::uint32_t>(bindings.size());
-        createInfo.pBindings = bindings.data();
-
-        check_vk(vkCreateDescriptorSetLayout(device_, &createInfo, nullptr, &descriptorSetLayout_),
-                 "vkCreateDescriptorSetLayout");
+        nrc::vulkan::VulkanDescriptorSetLayoutCreateInfo createInfo{};
+        createInfo.device = device_;
+        createInfo.bindings = bindings;
+        const nrc::vulkan::VulkanDescriptorSetLayoutCreateResult result =
+            nrc::vulkan::create_descriptor_set_layout(createInfo);
+        check_vk(result.validation.vkResult, "vkCreateDescriptorSetLayout");
+        descriptorSetLayout_ = result.layout;
     }
 
     void create_pipeline_layout() {
@@ -717,49 +717,31 @@ private:
                                const Image &biasImage,
                                const Image &factorImage,
                                const Buffer &trains) const {
-        std::array<VkDescriptorBufferInfo, 4> bufferInfos{};
-        bufferInfos[0].buffer = weights.buffer;
-        bufferInfos[0].range = weights.size;
-        bufferInfos[1].buffer = evals.buffer;
-        bufferInfos[1].range = evals.size;
-        bufferInfos[2].buffer = evalCount.buffer;
-        bufferInfos[2].range = evalCount.size;
-        bufferInfos[3].buffer = trains.buffer;
-        bufferInfos[3].range = trains.size;
+        const std::array<nrc::vulkan::VulkanStorageBufferDescriptorWrite, 4> bufferWrites = {{
+            {0, weights.buffer, 0, weights.size},
+            {1, evals.buffer, 0, evals.size},
+            {2, evalCount.buffer, 0, evalCount.size},
+            {5, trains.buffer, 0, trains.size},
+        }};
+        nrc::vulkan::VulkanStorageBufferDescriptorUpdate bufferUpdate{};
+        bufferUpdate.device = device_;
+        bufferUpdate.descriptorSet = descriptorSet;
+        bufferUpdate.buffers = bufferWrites;
+        const nrc::vulkan::VulkanValidationStep bufferValidation =
+            nrc::vulkan::update_storage_buffer_descriptors(bufferUpdate);
+        check_vk(bufferValidation.vkResult, "vkUpdateDescriptorSets(storage buffers)");
 
-        std::array<VkDescriptorImageInfo, 2> imageInfos{};
-        imageInfos[0].imageView = biasImage.view;
-        imageInfos[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        imageInfos[1].imageView = factorImage.view;
-        imageInfos[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-        std::array<VkWriteDescriptorSet, 6> writes{};
-        for (std::uint32_t i = 0; i < writes.size(); ++i) {
-            writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[i].dstSet = descriptorSet;
-            writes[i].descriptorCount = 1;
-        }
-
-        writes[0].dstBinding = 0;
-        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[0].pBufferInfo = &bufferInfos[0];
-        writes[1].dstBinding = 1;
-        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[1].pBufferInfo = &bufferInfos[1];
-        writes[2].dstBinding = 2;
-        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[2].pBufferInfo = &bufferInfos[2];
-        writes[3].dstBinding = 3;
-        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[3].pImageInfo = &imageInfos[0];
-        writes[4].dstBinding = 4;
-        writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[4].pImageInfo = &imageInfos[1];
-        writes[5].dstBinding = 5;
-        writes[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[5].pBufferInfo = &bufferInfos[3];
-
-        vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        const std::array<nrc::vulkan::VulkanStorageImageDescriptorWrite, 2> imageWrites = {{
+            {3, biasImage.view, VK_IMAGE_LAYOUT_GENERAL},
+            {4, factorImage.view, VK_IMAGE_LAYOUT_GENERAL},
+        }};
+        nrc::vulkan::VulkanStorageImageDescriptorUpdate imageUpdate{};
+        imageUpdate.device = device_;
+        imageUpdate.descriptorSet = descriptorSet;
+        imageUpdate.images = imageWrites;
+        const nrc::vulkan::VulkanValidationStep imageValidation =
+            nrc::vulkan::update_storage_image_descriptors(imageUpdate);
+        check_vk(imageValidation.vkResult, "vkUpdateDescriptorSets(storage images)");
     }
 
     VkCommandBuffer allocate_command_buffer() const {

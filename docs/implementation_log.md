@@ -2590,3 +2590,53 @@ The scalar inference test still validates the same screen-output image, training
 ### Next Step
 
 Add reusable storage-image descriptor helpers and image layout transition helpers, then adopt them in scalar inference before moving the same pattern into the sample path tracer.
+
+## 2026-07-09 - Milestone 37 Storage Image Descriptor Helper Adoption
+
+### Implemented
+
+- Extended the Vulkan descriptor helper API with generic descriptor set layout creation:
+  - `nrc::vulkan::VulkanDescriptorBinding`
+  - `nrc::vulkan::VulkanDescriptorSetLayoutCreateInfo`
+  - `nrc::vulkan::create_descriptor_set_layout`
+- Kept `nrc::vulkan::create_storage_buffer_descriptor_set_layout` as a compatibility wrapper over the generic layout helper.
+- Added storage-image descriptor update helpers:
+  - `nrc::vulkan::VulkanStorageImageDescriptorWrite`
+  - `nrc::vulkan::VulkanStorageImageDescriptorUpdate`
+  - `nrc::vulkan::update_storage_image_descriptors`
+- Extended `nrc_vulkan_capabilities_test` with invalid generic descriptor layout and invalid image descriptor update checks.
+- Refactored `nrc_vulkan_inference_scalar_test` so its mixed buffer/image descriptor set layout uses `create_descriptor_set_layout`.
+- Refactored scalar inference descriptor updates to use:
+  - `nrc::vulkan::update_storage_buffer_descriptors`
+  - `nrc::vulkan::update_storage_image_descriptors`
+- Updated `README.md`, `docs/vulkan_capability_query.md`, and `docs/vulkan_dispatch_harness.md`.
+
+### Behavior
+
+This milestone does not change descriptor binding numbers, descriptor pool ownership, descriptor set allocation, image formats, image layouts, or shader ABI. Scalar inference still uses bindings 0/1/2/5 for storage buffers and bindings 3/4 for storage images; the difference is that layout/write boilerplate now goes through the reusable Vulkan descriptor layer.
+
+The generic layout helper accepts explicit Vulkan descriptor types but still leaves descriptor pool allocation, descriptor set allocation, descriptor indexing policy, and descriptor binding to the host renderer. The update helpers intentionally cover only the storage-buffer and storage-image write patterns currently exercised by NRC tests.
+
+### Validation
+
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_capabilities_test nrc_vulkan_inference_scalar_test`
+- Targeted verbose tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_capabilities_test|nrc_vulkan_inference_scalar_test" --output-on-failure -V`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- Image layout transitions in scalar inference and the sample remain local boilerplate.
+- The sample path tracer still owns local descriptor layout/update boilerplate for its storage-image passes.
+- Descriptor update helpers do not cover sampled images, samplers, acceleration structures, descriptor arrays, or bindless descriptors.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Add reusable image layout transition helpers, adopt them in scalar inference, then migrate the sample path tracer descriptor and image-transition boilerplate onto the same helper layer.

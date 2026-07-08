@@ -64,11 +64,12 @@ KHR-specific behavior:
 - The KHR shader module is created through `nrc::vulkan::create_shader_module` and fed into `nrc::vulkan::evaluate_vulkan_profile_validation`.
 - The KHR pipeline is created through `nrc::vulkan::create_profile_compute_pipeline`, which applies the selected subgroup size and full compute subgroup requirements from `ProfileShaderConfig`.
 - On MSVC/Windows, the test catches structured exceptions from `vkCreateComputePipelines` and reports a controlled `SKIP:`. This is needed because the current local AMD driver advertises the profile but raises an exception while compiling the VkNRC-style KHR cooperative matrix shader.
-- Reusable runtime diagnostics now live in `nrc::vulkan::evaluate_vulkan_profile_validation`, shader module creation lives in `nrc::vulkan::create_shader_module`, storage-buffer descriptor helpers live in `nrc::vulkan::create_storage_buffer_descriptor_set_layout` / `update_storage_buffer_descriptors`, memory barriers live in `nrc::vulkan::cmd_memory_barrier`, plain compute pipeline creation lives in `nrc::vulkan::create_compute_pipeline`, and profile-aware compute pipeline creation lives in `nrc::vulkan::create_profile_compute_pipeline`. The dispatch harness still owns shader file loading, descriptor pools/sets, dispatch, and numerical comparison.
+- Reusable runtime diagnostics now live in `nrc::vulkan::evaluate_vulkan_profile_validation`, shader module creation lives in `nrc::vulkan::create_shader_module`, descriptor helpers live in `nrc::vulkan::create_descriptor_set_layout`, `create_storage_buffer_descriptor_set_layout`, `update_storage_buffer_descriptors`, and `update_storage_image_descriptors`, memory barriers live in `nrc::vulkan::cmd_memory_barrier`, plain compute pipeline creation lives in `nrc::vulkan::create_compute_pipeline`, and profile-aware compute pipeline creation lives in `nrc::vulkan::create_profile_compute_pipeline`. The dispatch harness still owns shader file loading, descriptor pools/sets, dispatch, and numerical comparison.
 
 Inference-specific behavior:
 
 - The scalar inference shader module and non-profile compute pipeline use `nrc::vulkan::create_shader_module` plus plain `nrc::vulkan::create_compute_pipeline`.
+- The scalar inference descriptor set layout/update path uses `nrc::vulkan::create_descriptor_set_layout`, `nrc::vulkan::update_storage_buffer_descriptors`, and `nrc::vulkan::update_storage_image_descriptors`.
 - The scalar inference test creates optimal-tiled `rgba32f` and `rg32f` storage images.
 - It uploads images through staging buffers, dispatches compute in `VK_IMAGE_LAYOUT_GENERAL`, then copies the screen output image back for verification.
 - It also verifies shader writes to the host-visible train-record buffer.
@@ -88,4 +89,4 @@ The same pattern should be reused for:
 - Reference path tracer integration using the validated scalar inference pass.
 - Regression tests for future backend layout changes.
 
-The final runtime helper should not copy this test harness wholesale. It should continue promoting only reusable pieces: image descriptor helpers, image layout transitions, and dispatch/numerical validation scaffolding.
+The final runtime helper should not copy this test harness wholesale. It should continue promoting only reusable pieces: sample descriptor migration, image layout transitions, and dispatch/numerical validation scaffolding.

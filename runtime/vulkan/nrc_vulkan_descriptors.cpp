@@ -14,7 +14,7 @@ VulkanValidationStep failed_step() {
     return validation;
 }
 
-bool has_duplicate_binding(std::span<const VulkanStorageBufferBinding> bindings) {
+bool has_duplicate_binding(std::span<const VulkanDescriptorBinding> bindings) {
     for (std::size_t lhs = 0; lhs < bindings.size(); ++lhs) {
         for (std::size_t rhs = lhs + 1; rhs < bindings.size(); ++rhs) {
             if (bindings[lhs].binding == bindings[rhs].binding) {
@@ -25,12 +25,12 @@ bool has_duplicate_binding(std::span<const VulkanStorageBufferBinding> bindings)
     return false;
 }
 
-bool valid_bindings(std::span<const VulkanStorageBufferBinding> bindings) {
+bool valid_bindings(std::span<const VulkanDescriptorBinding> bindings) {
     if (bindings.empty() || has_duplicate_binding(bindings)) {
         return false;
     }
-    for (const VulkanStorageBufferBinding &binding : bindings) {
-        if (binding.stageFlags == 0) {
+    for (const VulkanDescriptorBinding &binding : bindings) {
+        if (binding.stageFlags == 0 || binding.descriptorCount == 0) {
             return false;
         }
     }
@@ -49,10 +49,23 @@ bool valid_descriptor_writes(std::span<const VulkanStorageBufferDescriptorWrite>
     return true;
 }
 
+bool valid_image_descriptor_writes(std::span<const VulkanStorageImageDescriptorWrite> writes) {
+    if (writes.empty()) {
+        return false;
+    }
+    for (const VulkanStorageImageDescriptorWrite &write : writes) {
+        if (write.imageView == VK_NULL_HANDLE ||
+            write.imageLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
-VulkanDescriptorSetLayoutCreateResult create_storage_buffer_descriptor_set_layout(
-    const VulkanStorageBufferDescriptorSetLayoutCreateInfo &createInfo) {
+VulkanDescriptorSetLayoutCreateResult create_descriptor_set_layout(
+    const VulkanDescriptorSetLayoutCreateInfo &createInfo) {
     VulkanDescriptorSetLayoutCreateResult result{};
     if (createInfo.device == VK_NULL_HANDLE || !valid_bindings(createInfo.bindings)) {
         result.validation = failed_step();
@@ -62,9 +75,10 @@ VulkanDescriptorSetLayoutCreateResult create_storage_buffer_descriptor_set_layou
     std::vector<VkDescriptorSetLayoutBinding> bindings(createInfo.bindings.size());
     for (std::size_t index = 0; index < createInfo.bindings.size(); ++index) {
         bindings[index].binding = createInfo.bindings[index].binding;
-        bindings[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        bindings[index].descriptorCount = 1;
+        bindings[index].descriptorType = createInfo.bindings[index].descriptorType;
+        bindings[index].descriptorCount = createInfo.bindings[index].descriptorCount;
         bindings[index].stageFlags = createInfo.bindings[index].stageFlags;
+        bindings[index].pImmutableSamplers = createInfo.bindings[index].immutableSamplers;
     }
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -94,6 +108,24 @@ VulkanDescriptorSetLayoutCreateResult create_storage_buffer_descriptor_set_layou
     return result;
 }
 
+VulkanDescriptorSetLayoutCreateResult create_storage_buffer_descriptor_set_layout(
+    const VulkanStorageBufferDescriptorSetLayoutCreateInfo &createInfo) {
+    std::vector<VulkanDescriptorBinding> bindings(createInfo.bindings.size());
+    for (std::size_t index = 0; index < createInfo.bindings.size(); ++index) {
+        bindings[index].binding = createInfo.bindings[index].binding;
+        bindings[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[index].descriptorCount = 1;
+        bindings[index].stageFlags = createInfo.bindings[index].stageFlags;
+    }
+
+    VulkanDescriptorSetLayoutCreateInfo genericCreateInfo{};
+    genericCreateInfo.device = createInfo.device;
+    genericCreateInfo.bindings = bindings;
+    genericCreateInfo.flags = createInfo.flags;
+    genericCreateInfo.allocator = createInfo.allocator;
+    return create_descriptor_set_layout(genericCreateInfo);
+}
+
 VulkanValidationStep update_storage_buffer_descriptors(
     const VulkanStorageBufferDescriptorUpdate &update) {
     if (update.device == VK_NULL_HANDLE ||
@@ -115,6 +147,40 @@ VulkanValidationStep update_storage_buffer_descriptors(
         writes[index].descriptorCount = 1;
         writes[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[index].pBufferInfo = &bufferInfos[index];
+    }
+
+    vkUpdateDescriptorSets(update.device,
+                           static_cast<std::uint32_t>(writes.size()),
+                           writes.data(),
+                           0,
+                           nullptr);
+
+    VulkanValidationStep validation{};
+    validation.status = VulkanValidationStepStatus::Passed;
+    validation.vkResult = VK_SUCCESS;
+    return validation;
+}
+
+VulkanValidationStep update_storage_image_descriptors(
+    const VulkanStorageImageDescriptorUpdate &update) {
+    if (update.device == VK_NULL_HANDLE ||
+        update.descriptorSet == VK_NULL_HANDLE ||
+        !valid_image_descriptor_writes(update.images)) {
+        return failed_step();
+    }
+
+    std::vector<VkDescriptorImageInfo> imageInfos(update.images.size());
+    std::vector<VkWriteDescriptorSet> writes(update.images.size());
+    for (std::size_t index = 0; index < update.images.size(); ++index) {
+        imageInfos[index].imageView = update.images[index].imageView;
+        imageInfos[index].imageLayout = update.images[index].imageLayout;
+
+        writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[index].dstSet = update.descriptorSet;
+        writes[index].dstBinding = update.images[index].binding;
+        writes[index].descriptorCount = 1;
+        writes[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[index].pImageInfo = &imageInfos[index];
     }
 
     vkUpdateDescriptorSets(update.device,
