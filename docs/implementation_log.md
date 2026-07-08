@@ -2418,3 +2418,48 @@ VK_ACCESS_SHADER_WRITE_BIT
 ### Next Step
 
 Either adopt storage-buffer descriptor helpers in queue/gradient/training tests, or add image layout transition helpers for scalar inference and the sample path tracer.
+
+## 2026-07-09 - Milestone 33 Training Descriptor Helper Adoption
+
+### Implemented
+
+- Refactored additional Vulkan validation tests onto the reusable storage-buffer descriptor helpers:
+  - `nrc_vulkan_queue_ops_test`
+  - `nrc_vulkan_gradient_scalar_test`
+  - `nrc_vulkan_training_step_test`
+- Queue ops now uses:
+  - `nrc::vulkan::create_storage_buffer_descriptor_set_layout`
+  - `nrc::vulkan::update_storage_buffer_descriptors`
+- Scalar gradient now uses the same descriptor helper pair for its 4-binding train/queue/weight/gradient layout.
+- Full scalar training step now uses the same descriptor helper pair for its 6-binding prepare/gradient/optimize descriptor layout.
+- Updated `docs/vulkan_dispatch_harness.md` to record descriptor helper coverage for queue, gradient, and full-training-step tests.
+
+### Behavior
+
+This milestone does not change descriptor binding numbers or resource ownership. Descriptor pools and descriptor sets are still allocated by the tests. The reusable helper only creates storage-buffer set layouts and writes storage-buffer descriptors.
+
+The full scalar training step keeps the same binding order across prepare, gradient, and optimize passes. It now builds descriptor writes from the existing `std::array<const Buffer *, kDescriptorBindingCount>` input and delegates the Vulkan write boilerplate to `update_storage_buffer_descriptors`.
+
+### Validation
+
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_queue_ops_test nrc_vulkan_gradient_scalar_test nrc_vulkan_training_step_test`
+- Targeted verbose tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_queue_ops_test|nrc_vulkan_gradient_scalar_test|nrc_vulkan_training_step_test" --output-on-failure -V`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- The descriptor helper still covers storage buffers only.
+- Image descriptors in scalar inference and the sample remain local boilerplate.
+- Shader module and compute pipeline helpers have not yet been adopted by queue/gradient/training tests.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Adopt shader module and compute pipeline helpers in queue/gradient/training tests, or add image descriptor/layout transition helpers for scalar inference and the sample path tracer.
