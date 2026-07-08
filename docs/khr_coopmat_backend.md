@@ -19,15 +19,17 @@ Implemented:
   - writable fp32 gradient buffer binding;
   - scalar relative-L2 luminance output derivative;
   - fp32 storage-buffer atomic add helper;
-  - final hidden-activation copy storage for output-layer backpropagation;
+  - final hidden source-activation and final hidden-activation copy storage for backpropagation;
   - scalar output-layer `dW` accumulation in the shared row-major weight layout;
+  - scalar output-derivative propagation to final hidden activations;
+  - scalar final hidden-layer `dW` accumulation in the shared row-major weight layout;
   - enlarged shared-buffer allocation for future per-subgroup gradient reductions.
-- `shaders/nrc/passes/NrcGradientKhr.glsl`, a train-record pass skeleton that dispatches KHR forward and accumulates output-layer `dW`.
+- `shaders/nrc/passes/NrcGradientKhr.glsl`, a train-record pass skeleton that dispatches KHR forward and accumulates output-layer plus final hidden-layer `dW`.
 
 Not implemented yet:
 
-- Cooperative-matrix output-layer `dW` reduction.
-- Cooperative-matrix backpropagation through hidden layers.
+- Cooperative-matrix output-layer and hidden-layer `dW` reduction.
+- Cooperative-matrix backpropagation through hidden layers 0-3.
 - Cooperative-matrix gradient accumulation/reduction.
 - Full KHR training pass coverage through all layers.
 - Runtime numerical validation on a driver that can create the KHR cooperative matrix pipelines successfully.
@@ -50,9 +52,9 @@ NRC_KHR_SUBGROUP_SIZE=16
 NRC_KHR_SUBGROUP_SIZE=32, NRC_KHR_COOPMAT_M=8
 ```
 
-CTest also compiles the same three variants with `NRC_NN_BACKPROPAGATION` enabled through `tests/shader_compile/nrc_khr_backprop_smoke.comp`. The backprop smoke test exercises the gradient buffer declaration, output derivative, atomic add helper, and forward path in one translation unit.
+CTest also compiles the same three variants with `NRC_NN_BACKPROPAGATION` enabled through `tests/shader_compile/nrc_khr_backprop_smoke.comp`. The backprop smoke test exercises the gradient buffer declaration, output derivative, output-to-final-hidden derivative propagation, final hidden-layer `dW`, atomic add helper, and forward path in one translation unit.
 
-`tests/shader_compile/nrc_gradient_khr_dispatch.comp` compile-validates the KHR train-record pass for the same three profile shader shapes. It proves the pass-level binding ABI, push constants, train-count handling, integration-provided unpack hook, and output-layer `dW` helper compile together.
+`tests/shader_compile/nrc_gradient_khr_dispatch.comp` compile-validates the KHR train-record pass for the same three profile shader shapes. It proves the pass-level binding ABI, push constants, train-count handling, integration-provided unpack hook, and current output/final-hidden `dW` helpers compile together.
 
 These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support, gradient correctness, or training performance.
 
@@ -93,8 +95,8 @@ The test:
 - creates a device with KHR cooperative matrix, fp32 storage-buffer atomic add, shader float16, storage buffer 16-bit access, subgroup size control, and full compute subgroup features;
 - creates the KHR gradient pipeline through `nrc::vulkan::create_profile_compute_pipeline`;
 - dispatches a small train-record batch through `NrcGradientKhr.glsl`;
-- compares output-layer gradients against an fp16-rounded CPU oracle if pipeline creation and dispatch succeed;
-- verifies hidden-layer gradient regions remain zero because hidden-layer dA/dW is not implemented yet.
+- compares output-layer and final hidden-layer gradients against an fp16-rounded CPU oracle if pipeline creation and dispatch succeed;
+- verifies earlier hidden-layer gradient regions remain zero because backpropagation through hidden layers 0-3 is not implemented yet.
 
 Current local result:
 

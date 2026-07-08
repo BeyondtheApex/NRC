@@ -83,10 +83,14 @@ void NrcGradientKhrMain() {
     }
 
     NrcKhrLoadInput(encoded);
-    for (uint layer = 0u; layer < NRC_NN_HIDDEN_LAYER_COUNT; ++layer) {
+    for (uint layer = 0u; layer < NRC_NN_HIDDEN_LAYER_COUNT - 1u; ++layer) {
         NrcKhrLoadHiddenWeights(layer);
         NrcKhrForwardHiddenRelu();
     }
+    NrcKhrStoreBackpropSourceActivations();
+
+    NrcKhrLoadHiddenWeights(NRC_NN_HIDDEN_LAYER_COUNT - 1u);
+    NrcKhrForwardHiddenRelu();
     NrcKhrStoreBackpropActivations();
 
     NrcKhrLoadOutputWeights(NRC_NN_HIDDEN_LAYER_COUNT);
@@ -101,6 +105,9 @@ void NrcGradientKhrMain() {
         NrcKhrOutputDerivative(prediction, target, dOutput);
     }
     NrcKhrAccumulateOutputDWeights(dOutput);
+    float dActivation[NRC_NN_HIDDEN_WIDTH];
+    NrcKhrPropagateOutputDActivation(dOutput, dActivation);
+    NrcKhrAccumulateFinalHiddenDWeights(dActivation);
 }
 
 #endif

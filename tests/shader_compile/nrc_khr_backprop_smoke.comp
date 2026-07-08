@@ -25,10 +25,14 @@ void main() {
     NrcEncodeInput(sampleInput, encoded);
 
     NrcKhrLoadInput(encoded);
-    for (uint layer = 0u; layer < NRC_NN_HIDDEN_LAYER_COUNT; ++layer) {
+    for (uint layer = 0u; layer < NRC_NN_HIDDEN_LAYER_COUNT - 1u; ++layer) {
         NrcKhrLoadHiddenWeights(layer);
         NrcKhrForwardHiddenRelu();
     }
+    NrcKhrStoreBackpropSourceActivations();
+
+    NrcKhrLoadHiddenWeights(NRC_NN_HIDDEN_LAYER_COUNT - 1u);
+    NrcKhrForwardHiddenRelu();
     NrcKhrStoreBackpropActivations();
 
     NrcKhrLoadOutputWeights(NRC_NN_HIDDEN_LAYER_COUNT);
@@ -38,6 +42,9 @@ void main() {
     float dOutput[NRC_NN_OUTPUT_WIDTH];
     NrcKhrOutputDerivative(prediction, vec3(0.2, 0.3, 0.4), dOutput);
     NrcKhrAccumulateOutputDWeights(dOutput);
+    float dActivation[NRC_NN_HIDDEN_WIDTH];
+    NrcKhrPropagateOutputDActivation(dOutput, dActivation);
+    NrcKhrAccumulateFinalHiddenDWeights(dActivation);
 
     nrcKhrBackpropSmokeOutput.value[gl_LocalInvocationID.x] = vec4(prediction, dOutput[0]);
 }
