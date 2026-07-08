@@ -284,3 +284,56 @@ Reason: extension commands are not guaranteed to be exported through `vulkan-1.l
 ### Next Step
 
 Start Milestone 4 with a scalar/reference NN backend and CPU tests, or begin KHR inference shader scaffolding once the reference path is available for correctness comparison.
+
+## 2026-07-08 - Milestone 4 Reference NN and Scalar Shader Backend
+
+### Implemented
+
+- Added CPU reference NN API:
+  - `include/nrc/nrc_reference_nn.hpp`
+  - `src/nrc_reference_nn.cpp`
+- Added GLSL scalar NN backend:
+  - `shaders/nrc/backend/scalar/NrcNNScalar.glsl`
+- Added CPU reference NN unit test:
+  - `tests/reference_nn_test.cpp`
+- Added scalar shader compile smoke test:
+  - `tests/shader_compile/nrc_scalar_smoke.comp`
+- Registered new CTest tests:
+  - `nrc_reference_nn_test`
+  - `nrc_shader_scalar_compile`
+
+### VkNRC Compatibility Decisions
+
+- The reference path uses the same topology as VkNRC:
+  - 64 encoded inputs.
+  - 5 hidden layers.
+  - 64 hidden neurons per hidden layer.
+  - ReLU after hidden layers.
+  - 3 raw output values.
+- Weight layout is row-major by layer:
+  - hidden layer offset: `layer * 64 * 64`.
+  - output layer offset: `5 * 64 * 64`.
+  - row-major index: `offset + row * 64 + column`.
+- CPU reference uses float weights for clarity and deterministic tests.
+- GLSL scalar backend reads packed fp16 weights from `uvec4` storage, matching the future GPU weight buffer format.
+
+### Validation
+
+- Full Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `5/5 tests passed`.
+
+### Current Limitations
+
+- CPU reference and GLSL scalar backend are not yet cross-validated numerically against each other at runtime. Current shader coverage is compile-only.
+- No fp32-to-fp16 weight packing utility exists yet.
+- No KHR cooperative matrix backend exists yet.
+- No inference pass consumes `NrcEvalRecord` queues yet.
+- No gradient/backpropagation path has been implemented yet.
+
+### Next Step
+
+Start Milestone 5 by adding weight initialization/packing utilities and a deterministic packed-weight fixture, then use that fixture for scalar GPU and future KHR backend validation.
