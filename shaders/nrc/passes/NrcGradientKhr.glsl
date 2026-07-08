@@ -159,7 +159,12 @@ void NrcGradientKhrMain() {
                                      NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE,
                                      dHidden1,
                                      dHidden0);
-    NrcKhrAccumulateInputHiddenDWeights(dHidden0, encoded);
+    NrcKhrStoreSharedDPreActivations(NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE,
+                                     dHidden0);
+    NrcKhrStoreSharedEncodedInput(NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE,
+                                  encoded);
+    NrcKhrAccumulateSharedHiddenDWeightsWorkgroup(0u,
+                                                  NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE);
 }
 
 #endif

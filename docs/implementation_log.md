@@ -3704,3 +3704,58 @@ The scratch continues to reuse only the first 2048 `uvec4` entries of `nrcKhrSha
 ### Next Step
 
 Add a workgroup-reduced hidden-layer 0 path by staging the encoded input source features, or design a source reader abstraction that lets the shared-`dZ` helper reduce against either saved shared activations or invocation-local encoded activations without duplicating the entire loop.
+
+## 2026-07-09 - Milestone 56 KHR Hidden Layer 0 Workgroup Gradient Reduction
+
+### Implemented
+
+- Added `NrcKhrStoreSharedEncodedInput` to `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl`.
+- Changed `shaders/nrc/passes/NrcGradientKhr.glsl` so hidden-layer 0 now:
+  1. stores ReLU-gated `dZ0` into shared fp32 scratch;
+  2. stages the invocation-local encoded input into the retired A0 snapshot region;
+  3. reuses `NrcKhrAccumulateSharedHiddenDWeightsWorkgroup` to reduce `dW0` with one fp32 atomic add per weight per workgroup.
+- Updated `tests/shader_compile/nrc_khr_backprop_smoke.comp` so the compile smoke test exercises the hidden-layer 0 encoded-source staging path.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+Hidden-layer 0 is now reduced across the workgroup like the other hidden layers. The pass computes:
+
+```text
+dZ0[row] = A0[row] > 0 ? dA0[row] : 0
+dW0[row, col] = sum_samples(dZ0[row] * encodedInput[col])
+```
+
+The source activation is different from the other hidden layers because it is the per-invocation encoded input rather than a saved hidden activation snapshot. The pass therefore stages `encoded` into `NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE` after `NrcKhrStoreSharedDPreActivations` has already consumed the A0 snapshot for the ReLU gate. At that point A0 is no longer needed, so the staged encoded input does not destroy any later backpropagation dependency.
+
+With this milestone, every hidden/output `dW` region in the KHR gradient groundwork path uses scalar workgroup reduction. The gradient layout remains unchanged and still matches `nrc::reference_backward_khr_fp16`.
+
+### Validation
+
+- Targeted KHR shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr|nrc_shader_khr_backprop" --output-on-failure -V`
+- Targeted KHR gradient test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime test succeeded with controlled skip:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr_test" --output-on-failure -V`
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `33/33 tests passed`
+
+### Current Limitations
+
+- All hidden/output `dW` regions now use scalar workgroup reductions, but they are still not cooperative-matrix or subgroup reductions.
+- The current correctness path still depends on fp32 storage-buffer atomic add.
+- Runtime numerical comparison for the KHR shader still did not execute on this machine because the local AMD KHR pipeline creation path reports a controlled structured-exception skip.
+- Shared scratch reuse is tied to the current fixed 64-wide/128-sample shape and fixed 5-hidden-layer backprop ordering. It is guarded for this shape, but final production reduction should revisit memory lifetime and profile-specific pressure.
+
+### Next Step
+
+Start replacing scalar workgroup loops with subgroup or cooperative-matrix reduction while keeping the same full hidden/output coverage and `nrc::reference_backward_khr_fp16` as the invariant oracle. A practical next step is an output-layer subgroup reduction path because it has only three output rows and already has the smallest source-activation footprint.

@@ -556,6 +556,16 @@ void NrcKhrAccumulateSharedHiddenDWeightsWorkgroup(uint layer,
     barrier();
 }
 
+void NrcKhrStoreSharedEncodedInput(uint baseOffset,
+                                   uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT]) {
+    uint sampleBase = baseOffset +
+                      gl_LocalInvocationID.x * NRC_ENCODED_INPUT_UVEC4_COUNT;
+    for (uint i = 0u; i < NRC_ENCODED_INPUT_UVEC4_COUNT; ++i) {
+        nrcKhrSharedBuffer[sampleBase + i] = encoded[i];
+    }
+    barrier();
+}
+
 void NrcKhrAccumulateInputHiddenDWeights(float dActivation[NRC_NN_HIDDEN_WIDTH],
                                          uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT]) {
     uint sampleIndex = gl_LocalInvocationID.x;
