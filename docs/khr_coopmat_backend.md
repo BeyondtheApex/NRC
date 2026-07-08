@@ -56,6 +56,7 @@ The test:
 - Creates and updates the storage-buffer descriptor set layout through the reusable Vulkan descriptor helpers.
 - Creates the shader module through `nrc::vulkan::create_shader_module` and records the result in `VulkanProfileValidationReport`.
 - Creates the compute pipeline through `nrc::vulkan::create_profile_compute_pipeline`, which applies `VkPipelineShaderStageRequiredSubgroupSizeCreateInfo` and `VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT` from the selected `ProfileShaderConfig`.
+- Records host-to-shader and shader-to-host memory barriers through `nrc::vulkan::cmd_memory_barrier`.
 - Dispatches 149 samples and compares against an fp16-rounded CPU reference if pipeline creation and dispatch succeed.
 
 Current local result:

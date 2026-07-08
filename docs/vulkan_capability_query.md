@@ -111,6 +111,24 @@ The helper is intentionally narrow:
 
 This covers the scalar and KHR forward dispatch validation path while leaving image descriptors, samplers, bindless arrays, and engine-specific descriptor allocation policies to the host renderer.
 
+## Memory Barrier Helper
+
+`nrc::vulkan::cmd_memory_barrier` records a single `VkMemoryBarrier` and returns a `VulkanValidationStep`.
+
+Header:
+
+```cpp
+#include "nrc/vulkan/nrc_vulkan_barriers.hpp"
+```
+
+Common presets are available for the dispatch validation path:
+
+- `host_write_to_compute_shader_barrier`
+- `compute_shader_write_to_host_read_barrier`
+- `compute_shader_write_to_compute_shader_barrier`
+
+The helper is deliberately limited to memory barriers. It does not perform image layout transitions or buffer/image memory barriers yet.
+
 ## Profile Compute Pipeline Helper
 
 `nrc::vulkan::create_profile_compute_pipeline` creates a compute pipeline from a caller-owned device, shader module, pipeline layout, and `ProfileShaderConfig`.
@@ -137,4 +155,4 @@ The helper does not own the returned pipeline. Callers must destroy it with `vkD
 
 ## Current Limit
 
-This module reports capabilities, aggregates profile validation state, creates shader modules from already-loaded SPIR-V words, writes simple storage-buffer descriptors, and provides a small profile-aware compute pipeline creation helper. It does not create devices, enable features, compile shaders, read shader files, create pipeline layouts, allocate descriptor pools/sets, create resources, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own renderer code, then feed shader/pipeline/numerical outcomes back into `VulkanProfileValidationRequirements`.
+This module reports capabilities, aggregates profile validation state, creates shader modules from already-loaded SPIR-V words, writes simple storage-buffer descriptors, records simple memory barriers, and provides a small profile-aware compute pipeline creation helper. It does not create devices, enable features, compile shaders, read shader files, create pipeline layouts, allocate descriptor pools/sets, create resources, perform image layout transitions, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own renderer code, then feed shader/pipeline/numerical outcomes back into `VulkanProfileValidationRequirements`.

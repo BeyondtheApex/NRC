@@ -14,5 +14,5 @@ Current status:
 
 - Repository bootstrap is complete.
 - Public constants, profile/capability selection, support diagnostics, shader config mapping, and VkNRC-compatible resource layout calculations are implemented.
-- Optional Vulkan capability query, profile validation report, shader module creation, storage-buffer descriptor, and profile-aware compute pipeline creation helpers are implemented.
+- Optional Vulkan capability query, profile validation report, shader module creation, storage-buffer descriptor, memory barrier, and profile-aware compute pipeline creation helpers are implemented.
 - CPU reference forward/backpropagation, scalar Vulkan inference/training passes, KHR cooperative-matrix inference profiles, CTest coverage, and a small reference path tracing sample are in progress.

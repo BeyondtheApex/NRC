@@ -1,5 +1,6 @@
 #include "nrc/nrc_reference_nn.hpp"
 #include "nrc/nrc_weights.hpp"
+#include "nrc/vulkan/nrc_vulkan_barriers.hpp"
 #include "nrc/vulkan/nrc_vulkan_descriptors.hpp"
 
 #include <vulkan/vulkan.h>
@@ -534,20 +535,11 @@ private:
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         check_vk(vkBeginCommandBuffer(commandBuffer, &beginInfo), "vkBeginCommandBuffer");
 
-        VkMemoryBarrier hostToShader{};
-        hostToShader.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        hostToShader.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-        hostToShader.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        vkCmdPipelineBarrier(commandBuffer,
-                             VK_PIPELINE_STAGE_HOST_BIT,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             0,
-                             1,
-                             &hostToShader,
-                             0,
-                             nullptr,
-                             0,
-                             nullptr);
+        nrc::vulkan::VulkanValidationStep barrierValidation =
+            nrc::vulkan::cmd_memory_barrier(
+                commandBuffer,
+                nrc::vulkan::host_write_to_compute_shader_barrier(VK_ACCESS_SHADER_READ_BIT));
+        check_vk(barrierValidation.vkResult, "host-to-shader barrier");
 
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
         vkCmdBindDescriptorSets(commandBuffer,
@@ -569,20 +561,11 @@ private:
             (sampleCount + kDispatchWorkgroupSize - 1u) / kDispatchWorkgroupSize;
         vkCmdDispatch(commandBuffer, groupCount, 1, 1);
 
-        VkMemoryBarrier shaderToHost{};
-        shaderToHost.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        shaderToHost.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        shaderToHost.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-        vkCmdPipelineBarrier(commandBuffer,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_HOST_BIT,
-                             0,
-                             1,
-                             &shaderToHost,
-                             0,
-                             nullptr,
-                             0,
-                             nullptr);
+        barrierValidation =
+            nrc::vulkan::cmd_memory_barrier(
+                commandBuffer,
+                nrc::vulkan::compute_shader_write_to_host_read_barrier());
+        check_vk(barrierValidation.vkResult, "shader-to-host barrier");
 
         check_vk(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer");
     }

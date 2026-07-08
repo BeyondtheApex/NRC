@@ -1,3 +1,4 @@
+#include "nrc/vulkan/nrc_vulkan_barriers.hpp"
 #include "nrc/vulkan/nrc_vulkan_capabilities.hpp"
 #include "nrc/vulkan/nrc_vulkan_descriptors.hpp"
 #include "nrc/vulkan/nrc_vulkan_pipeline.hpp"
@@ -61,6 +62,31 @@ int main() {
     property.scope = VK_SCOPE_WORKGROUP_KHR;
     auto noSubgroup = nrc::vulkan::translate_cooperative_matrix_property(property, VK_SHADER_STAGE_COMPUTE_BIT);
     ok &= require(!noSubgroup.has_value(), "reject non-subgroup cooperative matrix property");
+
+    const nrc::vulkan::VulkanMemoryBarrier hostToCompute =
+        nrc::vulkan::host_write_to_compute_shader_barrier(VK_ACCESS_SHADER_READ_BIT);
+    ok &= require(hostToCompute.srcStageMask == VK_PIPELINE_STAGE_HOST_BIT,
+                  "host to compute barrier source stage");
+    ok &= require(hostToCompute.dstStageMask == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                  "host to compute barrier destination stage");
+    ok &= require(hostToCompute.srcAccessMask == VK_ACCESS_HOST_WRITE_BIT,
+                  "host to compute barrier source access");
+    ok &= require(hostToCompute.dstAccessMask == VK_ACCESS_SHADER_READ_BIT,
+                  "host to compute barrier destination access");
+
+    const nrc::vulkan::VulkanMemoryBarrier shaderToHost =
+        nrc::vulkan::compute_shader_write_to_host_read_barrier();
+    ok &= require(shaderToHost.srcAccessMask == VK_ACCESS_SHADER_WRITE_BIT,
+                  "shader to host barrier source access");
+    ok &= require(shaderToHost.dstAccessMask == VK_ACCESS_HOST_READ_BIT,
+                  "shader to host barrier destination access");
+
+    const nrc::vulkan::VulkanValidationStep invalidBarrier =
+        nrc::vulkan::cmd_memory_barrier(VK_NULL_HANDLE, hostToCompute);
+    ok &= require(invalidBarrier.status == nrc::vulkan::VulkanValidationStepStatus::Failed,
+                  "invalid memory barrier request fails safely");
+    ok &= require(invalidBarrier.vkResult == VK_ERROR_INITIALIZATION_FAILED,
+                  "invalid memory barrier request records initialization failure");
 
     const nrc::vulkan::VulkanDescriptorSetLayoutCreateResult invalidDescriptorLayout =
         nrc::vulkan::create_storage_buffer_descriptor_set_layout({});

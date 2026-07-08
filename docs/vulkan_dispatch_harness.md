@@ -51,6 +51,7 @@ This keeps the test focused on shader/runtime correctness rather than expected f
 - The test uses host-visible coherent storage buffers to avoid adding staging/copy complexity at this stage.
 - If no Vulkan 1.1 compute device or compatible host-visible coherent memory type is available, the test prints `SKIP:` and returns success.
 - The scalar dispatch descriptor set layout/update path uses `nrc::vulkan::create_storage_buffer_descriptor_set_layout` and `nrc::vulkan::update_storage_buffer_descriptors`.
+- The scalar dispatch host-to-shader and shader-to-host memory barriers use `nrc::vulkan::cmd_memory_barrier`.
 
 KHR-specific behavior:
 
@@ -58,10 +59,11 @@ KHR-specific behavior:
 - The test dispatches 149 samples to verify padded final workgroups.
 - The test selects SG32, SG16, or M8/SG32 SPIR-V through `nrc::find_profile_shader_config` after choosing an implemented profile from queried capabilities.
 - The KHR dispatch descriptor set layout/update path uses the same reusable storage-buffer descriptor helpers as the scalar dispatch test.
+- The KHR dispatch host-to-shader and shader-to-host memory barriers use the same reusable memory barrier helper as the scalar dispatch test.
 - The KHR shader module is created through `nrc::vulkan::create_shader_module` and fed into `nrc::vulkan::evaluate_vulkan_profile_validation`.
 - The KHR pipeline is created through `nrc::vulkan::create_profile_compute_pipeline`, which applies the selected subgroup size and full compute subgroup requirements from `ProfileShaderConfig`.
 - On MSVC/Windows, the test catches structured exceptions from `vkCreateComputePipelines` and reports a controlled `SKIP:`. This is needed because the current local AMD driver advertises the profile but raises an exception while compiling the VkNRC-style KHR cooperative matrix shader.
-- Reusable runtime diagnostics now live in `nrc::vulkan::evaluate_vulkan_profile_validation`, shader module creation lives in `nrc::vulkan::create_shader_module`, and profile-aware compute pipeline creation lives in `nrc::vulkan::create_profile_compute_pipeline`. The dispatch harness still owns shader file loading, descriptor layout, dispatch, and numerical comparison.
+- Reusable runtime diagnostics now live in `nrc::vulkan::evaluate_vulkan_profile_validation`, shader module creation lives in `nrc::vulkan::create_shader_module`, storage-buffer descriptor helpers live in `nrc::vulkan::create_storage_buffer_descriptor_set_layout` / `update_storage_buffer_descriptors`, memory barriers live in `nrc::vulkan::cmd_memory_barrier`, and profile-aware compute pipeline creation lives in `nrc::vulkan::create_profile_compute_pipeline`. The dispatch harness still owns shader file loading, descriptor pools/sets, dispatch, and numerical comparison.
 
 Inference-specific behavior:
 
@@ -77,4 +79,4 @@ The same pattern should be reused for:
 - Reference path tracer integration using the validated scalar inference pass.
 - Regression tests for future backend layout changes.
 
-The final runtime helper should not copy this test harness wholesale. It should continue promoting only reusable pieces: image descriptor helpers, resource barriers, and dispatch/numerical validation scaffolding.
+The final runtime helper should not copy this test harness wholesale. It should continue promoting only reusable pieces: image descriptor helpers, image layout transitions, and dispatch/numerical validation scaffolding.

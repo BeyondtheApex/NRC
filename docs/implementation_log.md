@@ -2292,3 +2292,69 @@ This avoids imposing an allocator or descriptor pool policy on integrations such
 ### Next Step
 
 Promote resource barrier helpers shared by scalar/KHR/queue/training dispatch tests, or add image descriptor helpers for the scalar inference pass and reference path tracer sample.
+
+## 2026-07-09 - Milestone 31 Vulkan Memory Barrier Helpers
+
+### Implemented
+
+- Added reusable memory barrier helper API:
+  - `include/nrc/vulkan/nrc_vulkan_barriers.hpp`
+  - `runtime/vulkan/nrc_vulkan_barriers.cpp`
+  - `nrc::vulkan::VulkanMemoryBarrier`
+  - `nrc::vulkan::host_write_to_compute_shader_barrier`
+  - `nrc::vulkan::compute_shader_write_to_host_read_barrier`
+  - `nrc::vulkan::compute_shader_write_to_compute_shader_barrier`
+  - `nrc::vulkan::cmd_memory_barrier`
+- `cmd_memory_barrier` validates:
+  - non-null command buffer;
+  - non-zero source stage mask;
+  - non-zero destination stage mask.
+- Refactored:
+  - `nrc_vulkan_scalar_dispatch_test`
+  - `nrc_vulkan_khr_dispatch_test`
+- Extended `nrc_vulkan_capabilities_test` to cover:
+  - host-write to compute-shader barrier preset;
+  - compute-shader write to host-read barrier preset;
+  - invalid memory barrier request handling.
+- Updated documentation:
+  - `docs/vulkan_capability_query.md`
+  - `docs/vulkan_dispatch_harness.md`
+  - `docs/khr_coopmat_backend.md`
+  - `README.md`
+
+### Behavior
+
+The helper records one `VkMemoryBarrier` through `vkCmdPipelineBarrier` and returns a `VulkanValidationStep`. The scalar and KHR forward dispatch tests now use it for:
+
+- host writes becoming compute shader reads;
+- compute shader writes becoming host reads.
+
+The helper intentionally remains low-level. It does not allocate command buffers, begin/end command buffers, submit work, or infer resource ownership.
+
+### Validation
+
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_capabilities_test nrc_vulkan_scalar_dispatch_test nrc_vulkan_khr_dispatch_test`
+- Targeted verbose tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_capabilities_test|nrc_vulkan_scalar_dispatch_test|nrc_vulkan_khr_dispatch_test" --output-on-failure -V`
+- Verbose KHR dispatch test still reports a controlled local skip:
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR cooperative matrix shader`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- The helper only records `VkMemoryBarrier`.
+- It does not yet cover buffer memory barriers, image memory barriers, or image layout transitions.
+- The scalar inference test and sample still contain image transition boilerplate.
+- Queue/training/gradient dispatch tests still contain local memory barrier wrappers or inline barriers.
+- The local AMD KHR dispatch path still cannot numerically validate because pipeline creation raises a structured exception and is reported as a controlled skip.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Extend the barrier helpers to cover image layout transitions used by scalar inference and the sample, or continue refactoring queue/training/gradient tests onto `cmd_memory_barrier` for the common compute/host barrier cases.
