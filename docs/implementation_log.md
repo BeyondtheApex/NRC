@@ -4413,3 +4413,78 @@ All current profiles fit this combined scratch region inside the 1024-uvec4 acti
 ### Next Step
 
 Implement an optional compile-validated hidden-layer cooperative-matrix `dW` helper using the tile-streaming plan. Start with one hidden-layer helper entry point and shader compile tests for SG32, SG16, and M8/SG32, then decide how to hook it into the full gradient pass without changing the default path before numerical validation exists.
+
+## 2026-07-09 - Milestone 67 Experimental Final-Hidden Coopmat dW Helper
+
+### Implemented
+
+- Added KHR shader macros for the hidden-layer cooperative-matrix `dW` tile-streaming scratch layout:
+  - row-block fp16 `dPre` scratch;
+  - row-major source activation cooperative-matrix load offsets;
+  - per-subgroup MxN partial tile scratch;
+  - combined active-tile scratch size.
+- Added a compile-time shader guard requiring hidden `dW` tile-streaming scratch to fit inside the active tile.
+- Added `NrcKhrStageHiddenDPreRowFp16`.
+- Added `NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming`.
+- Updated `tests/shader_compile/nrc_khr_backprop_smoke.comp` to call the helper after the existing final-hidden subgroup helper has consumed the shared fp32 output-derivative cache.
+- Added `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW` to `NrcGradientKhr.glsl`.
+- When `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW=1`, the KHR gradient pass uses the new tile-streaming helper for hidden layer 4 `dW`; the default path remains the subgroup-arithmetic helper.
+- Added shader compile tests for the full KHR gradient pass with `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW=1`:
+  - SG32;
+  - SG16;
+  - M8/SG32.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/khr_shared_memory_layout.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+The new helper implements the tile-streaming plan from Milestone 66:
+
+```text
+for each hidden row block:
+  stage fp16 dPre for that row block in the active tile
+  for each source column block:
+    accumulate one MxN dW tile per subgroup with coopMatMulAdd
+    store one fp16 partial tile per subgroup
+    reduce subgroup partials into the fp32 row-major gradient buffer
+```
+
+The helper uses:
+
+```text
+A: dPre row block, MxK, column-major from compact active-tile staging
+B: source activations, KxN, row-major from saved activation snapshots
+C: dW tile, MxN, fp16 cooperative-matrix accumulator
+```
+
+This is the first hidden-layer cooperative-matrix `dW` implementation surface. It is deliberately limited to an experimental final-hidden switch in the full gradient pass. Earlier hidden layers still use the existing subgroup path.
+
+### Validation
+
+- Reconfigured CMake so the new shader compile tests are registered:
+  - `cmake -S . -B build`
+- Targeted shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr_coopmat_final_hidden|nrc_shader_khr_backprop" --output-on-failure -V`
+- Targeted test result:
+  - `6/6 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `40/40 tests passed`
+
+### Current Limitations
+
+- The helper is compile-validated only. It is not yet numerically validated on a driver that can create the KHR gradient pipeline.
+- No CPU oracle has been added yet for final-hidden coopmat `dW` fp16 staging and partial storage.
+- The default KHR gradient path still uses subgroup arithmetic for final-hidden `dW`.
+- Hidden layers 3, 2, 1, and 0 still use the subgroup `dW` path.
+- KHR `dA` propagation still uses scalar arrays rather than cooperative matrices.
+
+### Next Step
+
+Add a CPU oracle path for the final-hidden cooperative-matrix `dW` helper, then add a runtime validation mode similar to `--coopmat-output` once the oracle is available. After that, extend the same tile-streaming helper to earlier hidden layers one layer at a time while keeping the default path stable until numerical validation succeeds.

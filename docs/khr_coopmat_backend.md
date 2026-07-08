@@ -27,6 +27,7 @@ Implemented:
   - fp32 shared `dZ` scratch that reuses the active tile and retired final-hidden activation snapshot;
   - subgroup-arithmetic hidden-layer 3/2/1/0 `dW` accumulation in the shared row-major weight layout;
   - compile-validated experimental output-layer cooperative-matrix `dW` accumulation behind `NRC_KHR_USE_COOPMAT_OUTPUT_DW`;
+  - compile-validated experimental final-hidden cooperative-matrix `dW` tile-streaming helper behind `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW`;
   - generic scalar hidden-layer derivative propagation helper;
   - enlarged shared-buffer allocation for future cooperative-matrix reductions.
 - `shaders/nrc/passes/NrcGradientKhr.glsl`, a train-record pass skeleton that dispatches KHR forward and accumulates every hidden/output `dW` region.
@@ -35,9 +36,9 @@ Implemented:
 Not implemented yet:
 
 - Default-path cooperative-matrix `dW` reduction beyond the current subgroup reductions.
-- Cooperative-matrix gradient accumulation/reduction for hidden regions.
+- Cooperative-matrix gradient accumulation/reduction for hidden regions before the final hidden layer.
 - Cooperative-matrix `dA` propagation matching VkNRC's fully fused NV path.
-- Production KHR training pass memory/reduction plan.
+- Production-default KHR training cooperative-matrix reduction path.
 - Runtime numerical validation on a driver that can create the KHR cooperative matrix pipelines successfully.
 
 ## Weight Layout
@@ -64,6 +65,8 @@ CTest also compiles the same three variants with `NRC_NN_BACKPROPAGATION` enable
 
 The same dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the optional output-layer cooperative-matrix `dW` path type-checks for the currently implemented KHR profile shapes. They do not make it the default runtime path.
 
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the final-hidden cooperative-matrix tile-streaming helper type-checks in the full train-record pass. The default runtime path still uses the subgroup final-hidden helper.
+
 `tests/khr_gradient_reference_test.cpp` validates the reusable host-side KHR fp16 oracle. It proves the CPU oracle covers every hidden/output gradient region before that oracle is used by the Vulkan KHR runtime test.
 
 `tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-output` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_output_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1`. That mode compares output-layer gradients against a test-side oracle that mirrors fp16 output derivative staging and fp16 output partial storage, while hidden-layer gradients still use `nrc::reference_backward_khr_fp16`.
@@ -75,6 +78,8 @@ The optional output-coopmat helper restores the fp32 shared output derivative ca
 Training profile selection now requires device `maxComputeSharedMemorySize` to meet that 98304-byte allocation. Inference-only selection can still be requested without the training shared-memory requirement.
 
 The same layout model now records a hidden-layer cooperative-matrix `dW` tile-streaming plan. It avoids the SG16 full-layer partial overwrite hazard by using only the active tile for row-block dPre staging and one tile of partials per subgroup.
+
+`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` implements the first shader helper using that plan. It currently has compile validation for final-hidden `dW`; runtime numerical validation and earlier hidden-layer integration are still pending.
 
 These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support, gradient correctness, or training performance.
 

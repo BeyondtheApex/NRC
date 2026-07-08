@@ -129,3 +129,5 @@ M8/SG32:  dPre row 128 uvec4 + partials  64 uvec4 = 192 uvec4
 All of these fit within the 1024-uvec4 active tile and end before the first activation snapshot at offset 1024. That makes the plan stable across SG32, SG16, and M8/SG32 without overwriting the saved hidden activations needed by later dA propagation.
 
 The tradeoff is that the shader will need to stream/reduce tiles rather than keep full-layer partials resident in shared memory. This is the intended next implementation shape unless runtime profiling proves a larger profile-gated shared-memory layout is worthwhile.
+
+`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` is the first shader helper using this plan. It is currently compile-validated for final-hidden `dW` through `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW=1`; it is not yet the default gradient path.
