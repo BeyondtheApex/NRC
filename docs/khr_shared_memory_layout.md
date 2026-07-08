@@ -1,0 +1,108 @@
+# KHR Shared Memory Layout
+
+`nrc::compute_khr_shader_shared_memory_layout` mirrors the compile-time shared-memory constants used by `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl`.
+
+Header:
+
+```cpp
+#include "nrc/nrc_khr_shader_layout.hpp"
+```
+
+The helper consumes a `ProfileShaderConfig` and returns:
+
+- active activation tile size;
+- saved activation snapshot regions;
+- dPre scratch region;
+- output derivative and output dW partial regions;
+- hidden dW partial region size;
+- total shared-memory requirement in `uvec4` units and bytes;
+- boolean lifetime checks used by tests and future profile diagnostics.
+
+## Current Profile Shape
+
+All implemented KHR profiles use:
+
+```text
+workgroup size: 128
+hidden width:   64
+N:              16
+K:              16
+```
+
+The active activation tile is:
+
+```text
+64 values/sample * 128 samples / 8 fp16-per-uvec4 = 1024 uvec4
+1024 uvec4 * 16 bytes = 16384 bytes
+```
+
+Backpropagation keeps six activation-sized regions:
+
+```text
+active tile                              [0,    1024)
+final hidden snapshot                    [1024, 2048)
+output source snapshot                   [2048, 3072)
+previous source snapshot                 [3072, 4096)
+earlier source snapshot                  [4096, 5120)
+oldest source snapshot                   [5120, 6144)
+```
+
+The current KHR backprop shader therefore allocates:
+
+```text
+6144 uvec4 = 98304 bytes
+```
+
+This is only a shader layout fact. Vulkan integrations still need device-level validation because `maxComputeSharedMemorySize` is device-dependent.
+
+## Scratch Regions
+
+The fp32 dPre scratch is:
+
+```text
+128 samples * (64 fp32 / 4 fp32-per-uvec4) = 2048 uvec4
+```
+
+It intentionally occupies the active tile plus the retired final-hidden snapshot region.
+
+The optional output-layer cooperative-matrix dW path uses:
+
+```text
+fp16 dOutput staging:
+128 samples * (16 fp16 / 8 fp16-per-uvec4) = 256 uvec4
+
+output dW partials:
+SG32:  512 uvec4
+SG16: 1024 uvec4
+M8/SG32: 512 uvec4
+```
+
+These output regions fit inside the active tile. After reducing output partials, the helper restores the fp32 shared dOutput cache because final-hidden dW reads it.
+
+## Hidden dW Constraint
+
+Hidden dW cooperative-matrix partial storage would require:
+
+```text
+64 * 64 fp16 values / 8 fp16-per-uvec4 * subgroupCount
+```
+
+For current profiles:
+
+```text
+SG32:    subgroupCount 4 -> 2048 uvec4
+SG16:    subgroupCount 8 -> 4096 uvec4
+M8/SG32: subgroupCount 4 -> 2048 uvec4
+```
+
+All fit inside the current 6144-uvec4 allocation, but not all are safe to place at offset zero:
+
+- SG32 and M8/SG32 end at `2048`, preserving the first shared hidden activation snapshot at `2048`.
+- SG16 ends at `4096`, which would overwrite activation snapshots still needed by later dA propagation.
+
+Hidden-layer cooperative-matrix dW therefore needs a deliberate memory-lifetime strategy before implementation. Options include:
+
+- reorder dA propagation before hidden dW partial storage;
+- reduce one tile at a time with less partial storage;
+- use a different cross-subgroup reduction strategy;
+- add a profile-gated larger shared-memory layout.

@@ -4195,3 +4195,82 @@ This is required because `NrcKhrAccumulateFinalHiddenDWeightsSubgroup` reads out
 ### Next Step
 
 Return to the host-side KHR shared-memory layout model so shader shared-memory assumptions, derivative cache lifetime, and future hidden-dW partial storage constraints are visible from tests and profile diagnostics before more hidden cooperative-matrix code is added.
+
+## 2026-07-09 - Milestone 64 Host KHR Shared-Memory Layout Model
+
+### Implemented
+
+- Added `include/nrc/nrc_khr_shader_layout.hpp`.
+- Added `src/nrc_khr_shader_layout.cpp`.
+- Added `nrc::compute_khr_shader_shared_memory_layout`, which mirrors the KHR shader shared-memory constants from `NrcNNKhr.glsl` for a selected `ProfileShaderConfig`.
+- Added the new source file to `nrc_core`.
+- Extended `tests/profile_layout_test.cpp` to validate the shared-memory layout for all implemented KHR profiles.
+- Added `docs/khr_shared_memory_layout.md`.
+- Updated:
+  - `docs/profile_and_layout.md`
+  - `docs/khr_coopmat_backend.md`
+
+### Behavior
+
+The new host layout model reports:
+
+```text
+active tile
+final hidden snapshot
+output source snapshot
+previous source snapshot
+earlier source snapshot
+oldest source snapshot
+dPre scratch
+output derivative fp16 scratch
+output dW partial scratch
+hidden dW partial scratch
+total shared uvec4 count
+total shared bytes
+```
+
+For the currently implemented KHR profiles, the model records:
+
+```text
+active tile:        1024 uvec4
+activation regions: 6144 uvec4
+shared allocation:  6144 uvec4 = 98304 bytes
+dPre scratch:       2048 uvec4
+```
+
+The output coopmat dW scratch fits in the active tile for SG32, SG16, and M8/SG32.
+
+The hidden dW partial scratch result is profile-dependent:
+
+```text
+SG32:    2048 uvec4, preserves the first shared hidden activation snapshot if placed at offset 0
+SG16:    4096 uvec4, would overwrite shared hidden activation snapshots if placed at offset 0
+M8/SG32: 2048 uvec4, preserves the first shared hidden activation snapshot if placed at offset 0
+```
+
+This makes the hidden-layer cooperative-matrix dW lifetime issue test-visible instead of relying on hand inspection of shader constants.
+
+### Validation
+
+- Targeted profile/layout build succeeded:
+  - `cmake --build build --config Debug --target nrc_profile_layout_test`
+- Targeted profile/layout test succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_profile_layout_test" --output-on-failure -V`
+- Test result:
+  - `1/1 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `37/37 tests passed`
+
+### Current Limitations
+
+- The model mirrors the current fixed KHR shader shape. It is not yet used to reject devices whose `maxComputeSharedMemorySize` is below 98304 bytes.
+- Vulkan capability query still does not report `maxComputeSharedMemorySize`.
+- Hidden-layer cooperative-matrix dW is still not implemented; the model only exposes scratch sizes and the SG16 snapshot-overwrite hazard.
+
+### Next Step
+
+Promote shared-memory size into Vulkan capabilities/profile support so KHR training profiles can reject devices that cannot support the current 98304-byte backprop shader allocation. After that, use the layout model to design a hidden-layer cooperative-matrix dW path that is valid for SG32, SG16, and M8/SG32 rather than relying on a single offset-zero partial storage assumption.

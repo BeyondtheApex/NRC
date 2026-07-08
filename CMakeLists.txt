@@ -12,6 +12,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(nrc_core STATIC)
 target_sources(nrc_core PRIVATE
     src/nrc_encoding.cpp
+    src/nrc_khr_shader_layout.cpp
     src/nrc_khr_reference.cpp
     src/nrc_optimizer.cpp
     src/nrc_reference_nn.cpp

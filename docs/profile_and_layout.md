@@ -59,6 +59,8 @@ NRC_KHR_COOPMAT_K
 
 This keeps profile selection and shader compilation synchronized as more matrix sizes are added.
 
+`nrc::compute_khr_shader_shared_memory_layout(config)` mirrors the KHR shader's shared-memory constants for a selected `ProfileShaderConfig`. It reports the current 98304-byte KHR backprop shared allocation, saved activation snapshot offsets, dPre/output scratch regions, and hidden dW partial-storage constraints. See `docs/khr_shared_memory_layout.md`.
+
 ## Capability Input
 
 `nrc::DeviceCapabilitiesView` is renderer-neutral. Vulkan-specific code should query device features and cooperative matrix properties, then translate them into this view.

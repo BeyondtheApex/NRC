@@ -1,4 +1,5 @@
 #include "nrc/nrc_constants.hpp"
+#include "nrc/nrc_khr_shader_layout.hpp"
 #include "nrc/nrc_profile.hpp"
 #include "nrc/nrc_records.hpp"
 #include "nrc/nrc_resource_layout.hpp"
@@ -330,6 +331,45 @@ int main() {
                           "KHR shader config requires subgroup size control");
             ok &= require(config->requireSubgroupArithmeticForTraining,
                           "KHR shader config requires subgroup arithmetic for training");
+            const nrc::KhrShaderSharedMemoryLayout sharedLayout =
+                nrc::compute_khr_shader_shared_memory_layout(*config);
+            ok &= require(sharedLayout.valid, "KHR shader shared layout is valid");
+            ok &= require(sharedLayout.subgroupCount ==
+                              config->workgroupSize / config->subgroupSize,
+                          "KHR shader shared layout subgroup count");
+            ok &= require(sharedLayout.activeTileUvec4Count == 1024u,
+                          "KHR shader shared layout active tile size");
+            ok &= require(sharedLayout.finalHiddenSnapshot.baseUvec4 == 1024u,
+                          "KHR shader shared layout final hidden snapshot base");
+            ok &= require(sharedLayout.outputSourceSnapshot.baseUvec4 == 2048u,
+                          "KHR shader shared layout output source snapshot base");
+            ok &= require(sharedLayout.activationCopySharedUvec4Count == 6144u,
+                          "KHR shader shared layout activation copy size");
+            ok &= require(sharedLayout.sharedUvec4Count == 6144u,
+                          "KHR shader shared layout total uvec4 count");
+            ok &= require(sharedLayout.sharedBytes == 98304u,
+                          "KHR shader shared layout byte count");
+            ok &= require(sharedLayout.dPreScratch.countUvec4 == 2048u,
+                          "KHR shader shared layout dPre scratch size");
+            ok &= require(sharedLayout.dPreScratchFitsActivePlusFinalSnapshot,
+                          "KHR shader shared layout dPre lifetime fit");
+            ok &= require(sharedLayout.outputDerivativeFp16FitsActiveTile,
+                          "KHR shader shared layout output derivative fit");
+            ok &= require(sharedLayout.outputDWeightPartialFitsActiveTile,
+                          "KHR shader shared layout output dW partial fit");
+
+            const std::uint32_t expectedHiddenPartialUvec4 =
+                nrc::hidden_layer_weight_count() / nrc::kFp16PerUvec4 *
+                sharedLayout.subgroupCount;
+            ok &= require(sharedLayout.hiddenDWeightPartialScratch.countUvec4 ==
+                              expectedHiddenPartialUvec4,
+                          "KHR shader shared layout hidden dW partial size");
+            ok &= require(sharedLayout.hiddenDWeightPartialFitsSharedAllocation,
+                          "KHR shader shared layout hidden dW partial fits allocation");
+            ok &= require(sharedLayout.hiddenDWeightPartialPreservesSharedHiddenActivationSnapshots ==
+                              (expectedHiddenPartialUvec4 <=
+                               sharedLayout.outputSourceSnapshot.baseUvec4),
+                          "KHR shader shared layout hidden dW snapshot preservation");
             ok &= require(std::strcmp(config->shaderHeader,
                                       "nrc/backend/khr_coopmat/NrcNNKhr.glsl") == 0,
                           "KHR shader config header path");
@@ -345,6 +385,8 @@ int main() {
                           "scalar shader config does not require subgroup size control");
             ok &= require(!config->requireSubgroupArithmeticForTraining,
                           "scalar shader config does not require subgroup arithmetic");
+            ok &= require(!nrc::compute_khr_shader_shared_memory_layout(*config).valid,
+                          "scalar shader config has no KHR shared layout");
         }
     }
 
