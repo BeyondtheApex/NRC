@@ -2552,3 +2552,41 @@ This milestone does not change the scalar backend ABI, descriptor binding order,
 ### Next Step
 
 Adopt shader module/plain compute pipeline helpers in scalar inference, then add image descriptor and image layout transition helpers that can be shared by scalar inference and the sample path tracer.
+
+## 2026-07-09 - Milestone 36 Scalar Inference Pipeline Helper Adoption
+
+### Implemented
+
+- Refactored `nrc_vulkan_inference_scalar_test` to create its shader module through `nrc::vulkan::create_shader_module`.
+- Refactored the scalar inference compute pipeline creation path to use `nrc::vulkan::create_compute_pipeline`.
+- Preserved the existing storage image creation, descriptor set layout, descriptor updates, image upload/readback, dispatch, and CPU/GPU validation logic.
+- Added the same MSVC/Windows structured-exception guard used by the other plain compute pipeline tests.
+- Updated `docs/vulkan_dispatch_harness.md` to document scalar inference helper usage.
+
+### Behavior
+
+The scalar inference test still validates the same screen-output image, training-record writes, and fp16-rounded CPU reference comparison. This milestone only moves shader module and pipeline creation behind the reusable Vulkan helper layer, which keeps the testing path aligned with scalar dispatch, queue ops, gradient, and full training-step dispatches.
+
+### Validation
+
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_inference_scalar_test`
+- Targeted verbose test succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_inference_scalar_test" --output-on-failure -V`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- Test-side non-profile compute pipeline creation now uses helpers, but the sample path tracer still owns local shader module and compute pipeline creation.
+- Scalar inference and the sample still use local storage-image descriptor and image layout transition boilerplate.
+- Descriptor set layout helpers still cover storage buffers only.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Add reusable storage-image descriptor helpers and image layout transition helpers, then adopt them in scalar inference before moving the same pattern into the sample path tracer.

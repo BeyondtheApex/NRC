@@ -68,6 +68,7 @@ KHR-specific behavior:
 
 Inference-specific behavior:
 
+- The scalar inference shader module and non-profile compute pipeline use `nrc::vulkan::create_shader_module` plus plain `nrc::vulkan::create_compute_pipeline`.
 - The scalar inference test creates optimal-tiled `rgba32f` and `rg32f` storage images.
 - It uploads images through staging buffers, dispatches compute in `VK_IMAGE_LAYOUT_GENERAL`, then copies the screen output image back for verification.
 - It also verifies shader writes to the host-visible train-record buffer.
