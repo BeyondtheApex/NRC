@@ -71,7 +71,6 @@
 #define NRC_KHR_WEIGHT_64_UVEC4_COUNT ((NRC_NN_HIDDEN_WIDTH * NRC_NN_HIDDEN_WIDTH) / NRC_FP16_PER_UVEC4)
 #define NRC_KHR_OUTPUT_WEIGHT_UVEC4_COUNT ((NRC_NN_HIDDEN_WIDTH * NRC_NN_OUTPUT_WIDTH) / NRC_FP16_PER_UVEC4)
 #define NRC_KHR_THREAD_WEIGHT_64_UVEC4_COUNT (NRC_KHR_WEIGHT_64_UVEC4_COUNT / NRC_KHR_WORKGROUP_SIZE)
-#define NRC_KHR_BACKPROP_SHARED_UVEC4_COUNT (NRC_KHR_WEIGHT_64_UVEC4_COUNT * NRC_KHR_SUBGROUP_COUNT)
 #define NRC_KHR_MAT64_COOPMAT_STRIDE (NRC_NN_HIDDEN_WIDTH / NRC_FP16_PER_UVEC4)
 #define NRC_KHR_ACC_COMPONENT_COUNT ((NRC_KHR_COOPMAT_M * NRC_KHR_COOPMAT_N) / NRC_KHR_SUBGROUP_SIZE)
 #define NRC_KHR_WEIGHT_COOPMAT_ELEMENT(COL_BLOCK, ROW_BLOCK) \
@@ -87,6 +86,14 @@
 #define NRC_KHR_ACT_COOPMAT_MAJOR gl_CooperativeMatrixLayoutColumnMajor
 
 #ifdef NRC_NN_BACKPROPAGATION
+#define NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE NRC_KHR_ACT_UVEC4_COUNT
+#define NRC_KHR_BACKPROP_ACT_COPY_SHARED_UVEC4_COUNT (NRC_KHR_ACT_UVEC4_COUNT * 2)
+#define NRC_KHR_BACKPROP_REDUCTION_SHARED_UVEC4_COUNT (NRC_KHR_WEIGHT_64_UVEC4_COUNT * NRC_KHR_SUBGROUP_COUNT)
+#if NRC_KHR_BACKPROP_REDUCTION_SHARED_UVEC4_COUNT > NRC_KHR_BACKPROP_ACT_COPY_SHARED_UVEC4_COUNT
+#define NRC_KHR_BACKPROP_SHARED_UVEC4_COUNT NRC_KHR_BACKPROP_REDUCTION_SHARED_UVEC4_COUNT
+#else
+#define NRC_KHR_BACKPROP_SHARED_UVEC4_COUNT NRC_KHR_BACKPROP_ACT_COPY_SHARED_UVEC4_COUNT
+#endif
 #if NRC_KHR_BACKPROP_SHARED_UVEC4_COUNT > NRC_KHR_ACT_UVEC4_COUNT
 #define NRC_KHR_SHARED_BUFFER_UVEC4_COUNT NRC_KHR_BACKPROP_SHARED_UVEC4_COUNT
 #else
@@ -112,6 +119,10 @@ coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_K, NRC_KHR_COOPMAT_N, gl_Ma
 
 uint NrcKhrLayerWeightUvec4Offset(uint layer) {
     return layer * NRC_KHR_WEIGHT_64_UVEC4_COUNT;
+}
+
+uint NrcKhrLayerWeightFloatOffset(uint layer) {
+    return layer * NRC_NN_HIDDEN_WIDTH * NRC_NN_HIDDEN_WIDTH;
 }
 
 void NrcKhrLoadActivationsFromShared() {
@@ -246,6 +257,27 @@ void NrcKhrGradientAtomicAdd(uint index, float value) {
     atomicAdd(nrcKhrDWeights[index], value);
 }
 
+float NrcKhrUnpackFeature(uvec4 packed, uint lane) {
+    vec2 pairValue = unpackHalf2x16(packed[lane >> 1u]);
+    return (lane & 1u) == 0u ? pairValue.x : pairValue.y;
+}
+
+void NrcKhrStoreBackpropActivations() {
+    uint srcBase = gl_LocalInvocationID.x * NRC_ENCODED_INPUT_UVEC4_COUNT;
+    uint dstBase = NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE + srcBase;
+    for (uint i = 0u; i < NRC_ENCODED_INPUT_UVEC4_COUNT; ++i) {
+        nrcKhrSharedBuffer[dstBase + i] = nrcKhrSharedBuffer[srcBase + i];
+    }
+    barrier();
+}
+
+float NrcKhrReadBackpropActivation(uint sampleIndex, uint feature) {
+    uint base = NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE +
+                sampleIndex * NRC_ENCODED_INPUT_UVEC4_COUNT;
+    return NrcKhrUnpackFeature(nrcKhrSharedBuffer[base + feature / NRC_FP16_PER_UVEC4],
+                               feature & (NRC_FP16_PER_UVEC4 - 1u));
+}
+
 void NrcKhrOutputDerivative(vec3 prediction, vec3 target, out float dOutput[NRC_NN_OUTPUT_WIDTH]) {
     float luminance = dot(vec3(0.299, 0.587, 0.114), max(prediction, vec3(0.0)));
     float denominator = luminance * luminance + 0.01;
@@ -253,6 +285,18 @@ void NrcKhrOutputDerivative(vec3 prediction, vec3 target, out float dOutput[NRC_
     dOutput[0] = dLoss.x;
     dOutput[1] = dLoss.y;
     dOutput[2] = dLoss.z;
+}
+
+void NrcKhrAccumulateOutputDWeights(float dOutput[NRC_NN_OUTPUT_WIDTH]) {
+    uint sampleIndex = gl_LocalInvocationID.x;
+    uint outputOffset = NrcKhrLayerWeightFloatOffset(NRC_NN_HIDDEN_LAYER_COUNT);
+    for (uint col = 0u; col < NRC_NN_HIDDEN_WIDTH; ++col) {
+        float activation = NrcKhrReadBackpropActivation(sampleIndex, col);
+        for (uint row = 0u; row < NRC_NN_OUTPUT_WIDTH; ++row) {
+            NrcKhrGradientAtomicAdd(outputOffset + row * NRC_NN_HIDDEN_WIDTH + col,
+                                    dOutput[row] * activation);
+        }
+    }
 }
 #endif
 

@@ -24,15 +24,20 @@ void main() {
     uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT];
     NrcEncodeInput(sampleInput, encoded);
 
-    vec3 prediction;
-    NrcKhrForward(encoded, prediction);
+    NrcKhrLoadInput(encoded);
+    for (uint layer = 0u; layer < NRC_NN_HIDDEN_LAYER_COUNT; ++layer) {
+        NrcKhrLoadHiddenWeights(layer);
+        NrcKhrForwardHiddenRelu();
+    }
+    NrcKhrStoreBackpropActivations();
+
+    NrcKhrLoadOutputWeights(NRC_NN_HIDDEN_LAYER_COUNT);
+    NrcKhrForwardOutputStore();
+    vec3 prediction = NrcKhrReadInvocationOutput();
 
     float dOutput[NRC_NN_OUTPUT_WIDTH];
     NrcKhrOutputDerivative(prediction, vec3(0.2, 0.3, 0.4), dOutput);
-
-    if (gl_LocalInvocationID.x < NRC_NN_OUTPUT_WIDTH) {
-        NrcKhrGradientAtomicAdd(gl_LocalInvocationID.x, dOutput[gl_LocalInvocationID.x]);
-    }
+    NrcKhrAccumulateOutputDWeights(dOutput);
 
     nrcKhrBackpropSmokeOutput.value[gl_LocalInvocationID.x] = vec4(prediction, dOutput[0]);
 }

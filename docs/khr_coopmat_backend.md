@@ -19,11 +19,14 @@ Implemented:
   - writable fp32 gradient buffer binding;
   - scalar relative-L2 luminance output derivative;
   - fp32 storage-buffer atomic add helper;
+  - final hidden-activation copy storage for output-layer backpropagation;
+  - scalar output-layer `dW` accumulation in the shared row-major weight layout;
   - enlarged shared-buffer allocation for future per-subgroup gradient reductions.
 
 Not implemented yet:
 
-- Cooperative-matrix backpropagation through hidden and output layers.
+- Cooperative-matrix output-layer `dW` reduction.
+- Cooperative-matrix backpropagation through hidden layers.
 - Cooperative-matrix gradient accumulation/reduction.
 - A KHR training pass wired to train records.
 - KHR training runtime numerical validation.

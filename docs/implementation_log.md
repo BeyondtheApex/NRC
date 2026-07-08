@@ -2894,3 +2894,54 @@ The output derivative intentionally mirrors the scalar gradient pass and CPU ref
 ### Next Step
 
 Implement the output-layer dW path for the KHR backend first, validate its gradient layout against the scalar/CPU reference on a small batch, then extend backward propagation through hidden layers.
+
+## 2026-07-09 - Milestone 43 KHR Output Gradient Layout Groundwork
+
+### Implemented
+
+- Added KHR backprop shared-buffer regions for:
+  - final hidden-activation backup before output forward overwrites the shared activation tile;
+  - future per-subgroup dW reductions.
+- Added `NrcKhrLayerWeightFloatOffset` so KHR gradient writes use the same fp32 row-major weight index space as the scalar pass and CPU reference.
+- Added KHR output-layer gradient helpers:
+  - `NrcKhrStoreBackpropActivations`;
+  - `NrcKhrReadBackpropActivation`;
+  - `NrcKhrAccumulateOutputDWeights`.
+- Updated `tests/shader_compile/nrc_khr_backprop_smoke.comp` so the smoke shader now explicitly:
+  1. runs hidden-layer forward;
+  2. stores final hidden activations for backpropagation;
+  3. runs the output layer;
+  4. computes the relative-L2 luminance output derivative;
+  5. accumulates output-layer `dW` into the fp32 gradient buffer.
+- Updated `docs/khr_coopmat_backend.md` to record the new output-gradient groundwork and remaining KHR training gaps.
+
+### Behavior
+
+The new output-layer `dW` helper intentionally writes the same gradient indices as the scalar gradient path:
+
+```text
+outputOffset + row * 64 + column
+```
+
+This keeps the first KHR training surface aligned with `NrcGradientScalar.glsl`, `nrc::reference_backward`, and the documented weight layout before replacing the helper with a cooperative-matrix reduction.
+
+### Validation
+
+- Targeted KHR shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_khr" --output-on-failure -V`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `28/28 tests passed`
+
+### Current Limitations
+
+- Output-layer `dW` accumulation is scalar per sample invocation and loops over all 64 input columns; it is currently compile-checked only and is not the final cooperative-matrix reduction path.
+- Hidden-layer dA/dW propagation is still missing.
+- There is still no full KHR train-record gradient pass or KHR runtime numerical comparison against the CPU/scalar reference.
+
+### Next Step
+
+Add a KHR train-record gradient pass skeleton that can dispatch the output-layer `dW` helper, then validate output-layer gradients against the scalar/CPU reference on devices that can create the selected KHR pipeline.
