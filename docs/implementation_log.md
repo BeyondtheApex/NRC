@@ -4056,3 +4056,77 @@ This milestone deliberately keeps the default gradient pass on the previous subg
 ### Next Step
 
 Either add a runtime A/B validation mode for `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1` on a driver that can create the KHR pipeline, or continue porting the VkNRC fully fused shape by moving hidden-layer `dA` propagation and hidden-layer `dW` updates toward cooperative matrices under explicit compile-time/profile gates.
+
+## 2026-07-09 - Milestone 62 KHR Output Coopmat Runtime Validation Entry
+
+### Implemented
+
+- Extended `tests/vulkan_gradient_khr_test.cpp` with a `--coopmat-output` mode.
+- Added a test-side CPU oracle for the optional output-layer cooperative-matrix dW path:
+  - hidden layers still use the existing `nrc::reference_backward_khr_fp16` shape;
+  - output-layer dW is recomputed with fp16 output-derivative staging and fp16 output partial storage before fp32 comparison.
+- Added runtime SPIR-V generation for `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1`:
+  - SG32;
+  - SG16;
+  - M8/SG32.
+- Added `nrc_vulkan_gradient_khr_coopmat_output_test`, which runs the same Vulkan KHR gradient harness with the output-coopmat SPIR-V variants and the matching CPU oracle mode.
+- Documented a hidden-layer cooperative-matrix dW design hazard:
+  - the current shared dPre scratch lives in the active shared tile;
+  - activation snapshots needed by later dA propagation live in the subsequent shared regions;
+  - a naive hidden-dW partial-tile store would overwrite either dPre or snapshots before later propagation consumes them;
+  - hidden-layer coopmat dW therefore needs pass reordering, smaller per-tile reduction storage, a different partial-reduction strategy, or a larger/profile-gated shared-memory layout.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/vulkan_dispatch_harness.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+The default KHR gradient runtime test still receives the normal subgroup-output SPIR-V variants. The new output-coopmat test receives SPIR-V variants compiled with:
+
+```text
+NRC_KHR_USE_COOPMAT_OUTPUT_DW=1
+```
+
+When the test is run on a driver that can create the KHR gradient pipeline, it will compare:
+
+```text
+hidden-layer gradients: current KHR fp16 oracle
+output-layer gradients: fp16 staged output-coopmat oracle
+```
+
+This gives the output cooperative-matrix dW helper a separate validation route without changing the default production candidate path.
+
+### Validation
+
+- Targeted KHR gradient test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- The build generated the new output-coopmat runtime SPIR-V variants:
+  - `nrc_gradient_khr_coopmat_output_dispatch_sg32.spv`
+  - `nrc_gradient_khr_coopmat_output_dispatch_sg16.spv`
+  - `nrc_gradient_khr_coopmat_output_dispatch_m8_sg32.spv`
+- Targeted KHR runtime tests succeeded with controlled skips:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr" --output-on-failure -V`
+- Test result:
+  - `2/2 tests passed`
+- Local skip results:
+  - default KHR gradient: `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+  - output-coopmat KHR gradient: `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `37/37 tests passed`
+
+### Current Limitations
+
+- The local AMD driver still does not execute KHR numerical validation because pipeline creation raises a structured exception.
+- The output-coopmat oracle approximates the intended fp16 derivative/partial staging path for the current small test batch; it should be revisited if larger batches span multiple subgroup ranges in a runtime-success environment.
+- Hidden-layer cooperative-matrix dW is not implemented. The next version needs an explicit memory-lifetime/reordering plan rather than simply storing hidden partials over the existing shared snapshots.
+- KHR dA propagation remains scalar-array based.
+
+### Next Step
+
+Either validate the output-coopmat runtime path on a driver that successfully creates the KHR gradient pipeline, or design the hidden-layer cooperative-matrix dW memory plan before adding code. The hidden plan should decide whether to reorder dA propagation before dW partial storage, reduce one tile at a time, accept more atomics, or introduce a separate profile with larger shared-memory requirements.

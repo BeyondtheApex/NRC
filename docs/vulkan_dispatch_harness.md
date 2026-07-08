@@ -20,6 +20,9 @@ Milestone 7 adds the first GPU runtime validation path. The harness is intention
   - `tests/vulkan_gradient_khr_test.cpp`
 - KHR gradient shader:
   - `tests/shader_compile/nrc_gradient_khr_dispatch.comp`
+- Optional KHR output-coopmat gradient mode:
+  - `nrc_vulkan_gradient_khr_coopmat_output_test`
+  - SPIR-V variants compiled with `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1`
 - Scalar inference test file:
   - `tests/vulkan_inference_scalar_test.cpp`
 - Scalar inference shader wrapper:
@@ -70,7 +73,7 @@ KHR-specific behavior:
 - The KHR shader module is created through `nrc::vulkan::create_shader_module` and fed into `nrc::vulkan::evaluate_vulkan_profile_validation`.
 - The KHR pipeline is created through `nrc::vulkan::create_profile_compute_pipeline`, which applies the selected subgroup size and full compute subgroup requirements from `ProfileShaderConfig`.
 - On MSVC/Windows, the test catches structured exceptions from `vkCreateComputePipelines` and reports a controlled `SKIP:`. This is needed because the current local AMD driver advertises the profile but raises an exception while compiling the VkNRC-style KHR cooperative matrix shader.
-- The KHR gradient runtime test uses the same profile pipeline path with `ProfileRequirements::requireTraining = true`; on the current local AMD driver it reports the same controlled structured-exception `SKIP:` during pipeline creation.
+- The KHR gradient runtime tests use the same profile pipeline path with `ProfileRequirements::requireTraining = true`; on the current local AMD driver both the default gradient path and the optional output-coopmat path report the same controlled structured-exception `SKIP:` during pipeline creation.
 - Reusable runtime diagnostics now live in `nrc::vulkan::evaluate_vulkan_profile_validation`, shader module creation lives in `nrc::vulkan::create_shader_module`, descriptor helpers live in `nrc::vulkan::create_descriptor_set_layout`, `create_storage_buffer_descriptor_set_layout`, `update_storage_buffer_descriptors`, and `update_storage_image_descriptors`, memory barriers live in `nrc::vulkan::cmd_memory_barrier`, plain compute pipeline creation lives in `nrc::vulkan::create_compute_pipeline`, and profile-aware compute pipeline creation lives in `nrc::vulkan::create_profile_compute_pipeline`. The dispatch harness still owns shader file loading, descriptor pools/sets, dispatch, and numerical comparison.
 
 Inference-specific behavior:

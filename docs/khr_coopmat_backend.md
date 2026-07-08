@@ -66,6 +66,8 @@ The same dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_OU
 
 `tests/khr_gradient_reference_test.cpp` validates the reusable host-side KHR fp16 oracle. It proves the CPU oracle covers every hidden/output gradient region before that oracle is used by the Vulkan KHR runtime test.
 
+`tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-output` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_output_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1`. That mode compares output-layer gradients against a test-side oracle that mirrors fp16 output derivative staging and fp16 output partial storage, while hidden-layer gradients still use `nrc::reference_backward_khr_fp16`.
+
 These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support, gradient correctness, or training performance.
 
 ## Runtime Dispatch Test
@@ -110,7 +112,7 @@ The test:
 Current local result:
 
 - `vkCreateComputePipelines` raises a structured exception for the KHR gradient shader.
-- The test catches this on MSVC/Windows, prints `SKIP:`, and returns success so the rest of the suite remains usable.
+- The default KHR gradient test and the optional output-coopmat KHR gradient test catch this on MSVC/Windows, print `SKIP:`, and return success so the rest of the suite remains usable.
 
 ## Profile Selection
 

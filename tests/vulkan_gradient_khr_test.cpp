@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -164,6 +165,104 @@ std::vector<float> make_expected_khr_groundwork_gradients(std::span<const float>
                                          nullptr,
                                          nrc::kLossScale,
                                          true);
+    }
+    return gradients;
+}
+
+float fp16_round(float value) {
+    return nrc::half_bits_to_float(nrc::float_to_half_bits(value));
+}
+
+using HiddenVector = std::array<float, nrc::kNnHiddenWidth>;
+using HiddenLayers = std::array<HiddenVector, nrc::kNnHiddenLayerCount>;
+
+HiddenLayers forward_hidden_layers_fp16(std::span<const float> weights,
+                                        const nrc::ReferenceInput &input) {
+    HiddenLayers hiddenLayers{};
+    HiddenVector src{};
+    std::copy(input.begin(), input.end(), src.begin());
+
+    for (std::uint32_t layer = 0; layer < nrc::kNnHiddenLayerCount; ++layer) {
+        const std::size_t offset = nrc::layer_weight_offset(layer);
+        for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
+            float value = 0.0f;
+            for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
+                value += weights[offset + row * nrc::kNnHiddenWidth + col] * src[col];
+            }
+            hiddenLayers[layer][row] = fp16_round(std::max(value, 0.0f));
+        }
+        src = hiddenLayers[layer];
+    }
+    return hiddenLayers;
+}
+
+nrc::ReferenceOutput output_from_final_hidden_fp16(std::span<const float> weights,
+                                                   const HiddenVector &finalHidden) {
+    nrc::ReferenceOutput output{};
+    const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
+    for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
+        float value = 0.0f;
+        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
+            value += weights[outputOffset + row * nrc::kNnHiddenWidth + col] * finalHidden[col];
+        }
+        output[row] = fp16_round(value);
+    }
+    return output;
+}
+
+nrc::ReferenceOutput relative_luminance_output_derivative(const nrc::ReferenceOutput &prediction,
+                                                          const nrc::ReferenceOutput &target) {
+    const float luminance =
+        0.299f * std::max(prediction[0], 0.0f) +
+        0.587f * std::max(prediction[1], 0.0f) +
+        0.114f * std::max(prediction[2], 0.0f);
+    const float denominator = luminance * luminance + 0.01f;
+
+    nrc::ReferenceOutput dOutput{};
+    for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
+        dOutput[row] = 2.0f * nrc::kLossScale * (prediction[row] - target[row]) / denominator;
+    }
+    return dOutput;
+}
+
+std::vector<float> make_expected_khr_output_coopmat_gradients(
+    std::span<const float> gpuVisibleWeights,
+    const std::vector<nrc::NrcTrainRecord> &trainRecords) {
+    std::vector<float> gradients =
+        make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
+
+    const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
+    std::fill(gradients.begin() + static_cast<std::ptrdiff_t>(outputOffset),
+              gradients.begin() + static_cast<std::ptrdiff_t>(outputOffset + nrc::output_layer_weight_count()),
+              0.0f);
+
+    std::array<float, nrc::kNnOutputWidth * nrc::kNnHiddenWidth> outputPartials{};
+    for (std::uint32_t i = 0; i < kTrainCount; ++i) {
+        nrc::EncodedInput encoded{};
+        nrc::encode_input(unpack_test_input(trainRecords[i].packedInput), encoded);
+        const HiddenLayers hiddenLayers = forward_hidden_layers_fp16(gpuVisibleWeights, encoded);
+        const HiddenVector &finalHidden = hiddenLayers[nrc::kNnHiddenLayerCount - 1u];
+        const nrc::ReferenceOutput prediction =
+            output_from_final_hidden_fp16(gpuVisibleWeights, finalHidden);
+        const nrc::ReferenceOutput target{
+            trainRecords[i].biasR,
+            trainRecords[i].biasG,
+            trainRecords[i].biasB,
+        };
+        const nrc::ReferenceOutput dOutput =
+            relative_luminance_output_derivative(prediction, target);
+
+        for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
+            const float stagedDOutput = fp16_round(dOutput[row]);
+            for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
+                outputPartials[row * nrc::kNnHiddenWidth + col] +=
+                    finalHidden[col] * stagedDOutput;
+            }
+        }
+    }
+
+    for (std::uint32_t i = 0; i < nrc::output_layer_weight_count(); ++i) {
+        gradients[outputOffset + i] = fp16_round(outputPartials[i]);
     }
     return gradients;
 }
@@ -742,8 +841,9 @@ bool close_enough(float lhs, float rhs) {
 } // namespace
 
 int main(int argc, char **argv) {
-    if (argc != 4) {
-        std::cerr << "usage: nrc_vulkan_gradient_khr_test <sg32.spv> <sg16.spv> <m8_sg32.spv>\n";
+    const bool useCoopmatOutput = argc == 5 && std::strcmp(argv[4], "--coopmat-output") == 0;
+    if (argc != 4 && !useCoopmatOutput) {
+        std::cerr << "usage: nrc_vulkan_gradient_khr_test <sg32.spv> <sg16.spv> <m8_sg32.spv> [--coopmat-output]\n";
         return EXIT_FAILURE;
     }
 
@@ -754,7 +854,9 @@ int main(int argc, char **argv) {
             nrc::unpack_weights_fp16_uvec4(packedWeights, nrc::weight_count());
         const std::vector<nrc::NrcTrainRecord> trainRecords = make_train_records();
         const std::vector<float> expectedGradients =
-            make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
+            useCoopmatOutput
+                ? make_expected_khr_output_coopmat_gradients(gpuVisibleWeights, trainRecords)
+                : make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
 
         nrc::NrcQueueState queueState{};
         queueState.trainCounts[0] = kTrainCount;
