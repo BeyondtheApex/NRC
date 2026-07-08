@@ -88,6 +88,7 @@ Current behavior:
 - optional `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1` replaces the hidden-layer 4 to hidden-layer 3 derivative propagation with an fp16 cooperative-matrix path;
 - hidden-layer 3 `dW` is reduced across each subgroup through shared fp32 `dZ` scratch and accumulated into the same fp32 row-major gradient layout as the scalar pass;
 - hidden-layer 3 derivative is propagated to hidden-layer 2 activations;
+- optional `NRC_KHR_USE_COOPMAT_HIDDEN3_DA=1` replaces the hidden-layer 3 to hidden-layer 2 derivative propagation with the same fp16 cooperative-matrix path;
 - hidden-layer 2 `dW` is reduced across each subgroup through shared fp32 `dZ` scratch and accumulated into the same fp32 row-major gradient layout as the scalar pass;
 - hidden-layer 2 derivative is propagated to hidden-layer 1 activations;
 - hidden-layer 1 `dW` is reduced across each subgroup through shared fp32 `dZ` scratch and accumulated into the same fp32 row-major gradient layout as the scalar pass;
@@ -111,12 +112,14 @@ Experimental KHR final-hidden cooperative-matrix reduction:
 - The 197-record test batch spans multiple subgroup sample ranges for both SG16 and SG32 across a full workgroup and a partial final workgroup, so the coopmat oracles now model the shader's per-workgroup subgroup partial reduction before fp32 gradient accumulation.
 - The local test currently reaches a controlled profile-selection skip before dispatch because the available device does not satisfy the 98304-byte KHR training shared-memory requirement.
 
-Experimental KHR final-hidden cooperative-matrix `dA` propagation:
+Experimental KHR cooperative-matrix `dA` propagation:
 
 - `NrcKhrPropagateHiddenDActivationCoopmat` stages hidden-layer 4 `dPre` as fp16 into the active tile, loads transposed hidden-layer weights through KHR cooperative matrices, stores fp16 `dHidden3` into the retired final-hidden activation snapshot, and reads the per-invocation derivative back into the local derivative array.
 - `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1` switches only the hidden-layer 4 to hidden-layer 3 derivative propagation to this helper.
 - `nrc_vulkan_gradient_khr_coopmat_final_hidden_da_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors fp16 `dPre` staging and fp16 `dHidden3` storage before recomputing hidden-layer 3/2/1/0 gradients.
-- This is the first KHR cooperative-matrix `dA` propagation path. The remaining hidden-layer `dA` propagation steps still use scalar arrays.
+- `NRC_KHR_USE_COOPMAT_HIDDEN3_DA=1` switches only the hidden-layer 3 to hidden-layer 2 derivative propagation to this helper. It stages hidden-layer 3 `dPre`, stores fp16 `dHidden2` into the retired hidden-layer-3 activation snapshot, and reads it back into the local derivative array.
+- `nrc_vulkan_gradient_khr_coopmat_hidden3_da_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors fp16 hidden-layer-3 `dPre` staging and fp16 `dHidden2` storage before recomputing hidden-layer 2/1/0 gradients.
+- These are independent optional `dA` switches. The default KHR gradient path still uses scalar-array `dA` propagation, and hidden-layer 2 to hidden-layer 1 plus hidden-layer 1 to hidden-layer 0 `dA` propagation steps still use scalar arrays.
 
 Experimental KHR hidden-layer-3 cooperative-matrix reduction:
 

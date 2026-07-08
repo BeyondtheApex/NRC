@@ -57,6 +57,10 @@
 #define NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA 0
 #endif
 
+#ifndef NRC_KHR_USE_COOPMAT_HIDDEN3_DA
+#define NRC_KHR_USE_COOPMAT_HIDDEN3_DA 0
+#endif
+
 #ifndef NRC_NN_SET
 #define NRC_NN_SET NRC_GRADIENT_SET
 #endif
@@ -194,10 +198,17 @@ void NrcGradientKhrMain() {
 #endif
 
     float dHidden2[NRC_NN_HIDDEN_WIDTH];
+#if NRC_KHR_USE_COOPMAT_HIDDEN3_DA
+    NrcKhrPropagateHiddenDActivationCoopmat(NRC_NN_HIDDEN_LAYER_COUNT - 2u,
+                                            NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE,
+                                            dHidden3,
+                                            dHidden2);
+#else
     NrcKhrPropagateHiddenDActivation(NRC_NN_HIDDEN_LAYER_COUNT - 2u,
                                      NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE,
                                      dHidden3,
                                      dHidden2);
+#endif
 #if NRC_KHR_USE_COOPMAT_HIDDEN2_DW
     NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming(
         NRC_NN_HIDDEN_LAYER_COUNT - 3u,
