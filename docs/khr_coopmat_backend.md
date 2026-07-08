@@ -35,6 +35,7 @@ Implemented:
   - compile-validated experimental all-`dW` cooperative-matrix mode behind `NRC_KHR_USE_COOPMAT_ALL_DW`;
   - compile-validated experimental final-hidden cooperative-matrix `dA` propagation behind `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA`;
   - compile-validated experimental hidden-layer-3 cooperative-matrix `dA` propagation behind `NRC_KHR_USE_COOPMAT_HIDDEN3_DA`;
+  - compile-validated experimental hidden-layer-2 cooperative-matrix `dA` propagation behind `NRC_KHR_USE_COOPMAT_HIDDEN2_DA`;
   - generic scalar hidden-layer derivative propagation helper;
   - enlarged shared-buffer allocation for future cooperative-matrix reductions.
 - `shaders/nrc/passes/NrcGradientKhr.glsl`, a train-record pass skeleton that dispatches KHR forward and accumulates every hidden/output `dW` region.
@@ -77,6 +78,8 @@ The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_FINAL_H
 
 The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN3_DA=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-3 to hidden-layer-2 cooperative-matrix derivative propagation helper type-checks in the full train-record pass. The default runtime path still uses scalar-array `dA` propagation.
 
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN2_DA=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-2 to hidden-layer-1 cooperative-matrix derivative propagation helper type-checks in the full train-record pass. The default runtime path still uses scalar-array `dA` propagation.
+
 The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN3_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-3 cooperative-matrix tile-streaming helper type-checks in the full train-record pass. The default runtime path still uses the subgroup hidden-layer-3 helper.
 
 The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN2_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-2 cooperative-matrix tile-streaming helper type-checks in the full train-record pass. The default runtime path still uses the subgroup hidden-layer-2 helper.
@@ -96,6 +99,8 @@ The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_ALL_DW=
 `tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-final-hidden-da` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_final_hidden_da_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1`. That mode keeps output and final-hidden `dW` on the current groundwork oracle, then compares hidden layers 3, 2, 1, and 0 against a test-side oracle that mirrors fp16 final-hidden `dPre` staging and fp16 `dHidden3` storage.
 
 `tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-hidden3-da` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_hidden3_da_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_HIDDEN3_DA=1`. That mode keeps output, final-hidden, and hidden-layer-3 `dW` on the current groundwork oracle, then compares hidden layers 2, 1, and 0 against a test-side oracle that mirrors fp16 hidden-layer-3 `dPre` staging and fp16 `dHidden2` storage.
+
+`tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-hidden2-da` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_hidden2_da_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_HIDDEN2_DA=1`. That mode keeps output, final-hidden, hidden-layer-3, and hidden-layer-2 `dW` on the current groundwork oracle, then compares hidden layers 1 and 0 against a test-side oracle that mirrors fp16 hidden-layer-2 `dPre` staging and fp16 `dHidden1` storage.
 
 `tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-hidden3` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_hidden3_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_HIDDEN3_DW=1`. That mode compares hidden layer 3 gradients against a test-side oracle that mirrors hidden layer 4 backpropagation, fp16 hidden-layer-3 dPre row-block staging, and per-subgroup fp16 hidden-layer-3 partial storage, while the other hidden/output regions use the current KHR groundwork oracle.
 
@@ -121,7 +126,7 @@ The same layout model now records a hidden-layer cooperative-matrix `dW` tile-st
 
 `NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` implements the first shader helper using that plan. It currently has compile validation and runtime validation entries for final-hidden `dW`, hidden-layer-3 `dW`, hidden-layer-2 `dW`, hidden-layer-1 `dW`, hidden-layer-0 `dW`, and the all-`dW` combined mode; successful dispatch still depends on hardware/driver support for the selected training profile.
 
-`NrcKhrPropagateHiddenDActivationCoopmat` implements the experimental cooperative-matrix `dA` helper. It stages hidden-layer `dPre` values as fp16 in the active tile, loads hidden-layer weights through a transposed cooperative-matrix view, writes the fp16 source derivative to the retired activation snapshot whose ReLU mask has already been consumed, and reads the derivative back into the per-invocation local array. It is currently wired behind `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1` and `NRC_KHR_USE_COOPMAT_HIDDEN3_DA=1`.
+`NrcKhrPropagateHiddenDActivationCoopmat` implements the experimental cooperative-matrix `dA` helper. It stages hidden-layer `dPre` values as fp16 in the active tile, loads hidden-layer weights through a transposed cooperative-matrix view, writes the fp16 source derivative to the retired activation snapshot whose ReLU mask has already been consumed, and reads the derivative back into the per-invocation local array. It is currently wired behind `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1`, `NRC_KHR_USE_COOPMAT_HIDDEN3_DA=1`, and `NRC_KHR_USE_COOPMAT_HIDDEN2_DA=1`.
 
 The hidden-layer-0 mode preserves the hidden-layer-0 activation snapshot at `NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE` for the ReLU mask and stages encoded input into `NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE`, which is no longer needed by that point in backpropagation. This avoids increasing the 98304-byte KHR training shared-memory requirement.
 

@@ -139,6 +139,7 @@ The tradeoff is that the shader will need to stream/reduce tiles rather than kee
 ```text
 NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1
 NRC_KHR_USE_COOPMAT_HIDDEN3_DA=1
+NRC_KHR_USE_COOPMAT_HIDDEN2_DA=1
 ```
 
 The helper uses existing shared-memory regions:
@@ -153,8 +154,9 @@ The full `dPre` staging occupies the active tile at offset 0. The fp16 source-de
 ```text
 final-hidden -> hidden3: NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE
 hidden3 -> hidden2:      NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE
+hidden2 -> hidden1:      NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE
 ```
 
 This is safe for the currently wired propagation points because the corresponding hidden-layer `dW` accumulation has already consumed that layer's activation snapshot before the source derivative is produced.
 
-This path does not increase the 6144-uvec4 / 98304-byte KHR training shared-memory requirement. Extending the same approach to hidden2-to-hidden1 and hidden1-to-hidden0 should similarly reuse the activation snapshot whose ReLU mask has just been consumed, but each remaining step still needs explicit lifetime validation before being enabled.
+This path does not increase the 6144-uvec4 / 98304-byte KHR training shared-memory requirement. Extending the same approach to hidden1-to-hidden0 should similarly reuse the activation snapshot whose ReLU mask has just been consumed, but the remaining step still needs explicit lifetime validation before being enabled.
