@@ -24,6 +24,29 @@ target_include_directories(nrc_shaders INTERFACE
 
 option(NRC_BUILD_SAMPLE_PATH_TRACER "Build the NRC reference path tracer sample" ON)
 option(NRC_BUILD_TESTS "Build NRC tests" ON)
+option(NRC_BUILD_VULKAN_RUNTIME "Build optional Vulkan runtime helpers" ON)
+
+if(NRC_BUILD_VULKAN_RUNTIME)
+    find_package(Vulkan QUIET)
+    if(NOT Vulkan_FOUND AND EXISTS "D:/VulkanSDK/1.4.335.0/Include/vulkan/vulkan.h")
+        add_library(Vulkan::Vulkan UNKNOWN IMPORTED)
+        set_target_properties(Vulkan::Vulkan PROPERTIES
+            IMPORTED_LOCATION "D:/VulkanSDK/1.4.335.0/Lib/vulkan-1.lib"
+            INTERFACE_INCLUDE_DIRECTORIES "D:/VulkanSDK/1.4.335.0/Include")
+        set(Vulkan_FOUND TRUE)
+    endif()
+
+    if(Vulkan_FOUND)
+        add_library(nrc_vulkan STATIC)
+        target_sources(nrc_vulkan PRIVATE
+            runtime/vulkan/nrc_vulkan_capabilities.cpp)
+        target_link_libraries(nrc_vulkan PUBLIC
+            nrc_core
+            Vulkan::Vulkan)
+    else()
+        message(WARNING "Vulkan SDK was not found; nrc_vulkan will not be built")
+    endif()
+endif()
 
 if(NRC_BUILD_SAMPLE_PATH_TRACER)
     add_subdirectory(sample/path_tracer)

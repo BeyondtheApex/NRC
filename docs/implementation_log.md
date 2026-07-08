@@ -222,3 +222,65 @@ Start Milestone 3 by adding either:
 
 - Vulkan capability query translation into `nrc::DeviceCapabilitiesView`, or
 - the scalar/reference NN backend and CPU-side reference tests for forward inference.
+
+## 2026-07-08 - Milestone 3 Vulkan Capability Query Contract
+
+### Implemented
+
+- Added optional `nrc_vulkan` static library target behind `NRC_BUILD_VULKAN_RUNTIME`.
+- Added Vulkan SDK discovery fallback for the local SDK:
+  - `D:/VulkanSDK/1.4.335.0/Include`
+  - `D:/VulkanSDK/1.4.335.0/Lib/vulkan-1.lib`
+- Added public Vulkan helper API:
+  - `include/nrc/vulkan/nrc_vulkan_capabilities.hpp`
+- Added implementation:
+  - `runtime/vulkan/nrc_vulkan_capabilities.cpp`
+- Added Vulkan capability translation test:
+  - `tests/vulkan_capabilities_test.cpp`
+
+### Capability Query Behavior
+
+- Queries device extension availability for:
+  - `VK_KHR_cooperative_matrix`
+  - `VK_EXT_shader_atomic_float`
+- Queries feature support for:
+  - shader float16.
+  - storage buffer 16-bit access.
+  - shader buffer float32 atomic add.
+  - subgroup size control.
+  - full compute subgroups.
+  - KHR cooperative matrix feature.
+- Queries subgroup size properties and translates min/max subgroup size into a list of powers of two.
+- Translates `VkCooperativeMatrixPropertiesKHR` into `nrc::CooperativeMatrixCapability`.
+- Rejects cooperative matrix properties that are not compute-stage capable or not subgroup-scope.
+
+### Integration Decision
+
+The query function does not directly link against `vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR`. Instead, it accepts an optional `PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR` and otherwise attempts to load it through `vkGetInstanceProcAddr`.
+
+Reason: extension commands are not guaranteed to be exported through `vulkan-1.lib`. This also fits downstream projects that already use volk or another Vulkan loader.
+
+### Validation
+
+- Full Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `3/3 tests passed`.
+
+### Issues Found and Fixed
+
+- Initial build missed `<string_view>` and `<limits>` includes in the Vulkan implementation; fixed.
+- Initial link used the extension command directly and failed with an unresolved external symbol for `vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR`; fixed by switching to function pointer loading/injection.
+
+### Current Limitations
+
+- `query_device_capabilities` has not yet been run against a real physical device in a sample executable.
+- The fallback `vkGetInstanceProcAddr(VK_NULL_HANDLE, ...)` may not work with all loaders. Robust integrations should pass the function pointer explicitly from their Vulkan loader.
+- No profile is compiled or dispatched yet; capability selection is still host-side only.
+- No KHR cooperative matrix shader backend exists yet.
+
+### Next Step
+
+Start Milestone 4 with a scalar/reference NN backend and CPU tests, or begin KHR inference shader scaffolding once the reference path is available for correctness comparison.

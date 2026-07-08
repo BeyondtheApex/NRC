@@ -6,6 +6,7 @@
 namespace nrc {
 
 enum class ComponentType : std::uint8_t {
+    Unknown,
     Float16,
     Float32,
 };

@@ -5,6 +5,13 @@ target_link_libraries(nrc_profile_layout_test PRIVATE nrc_core)
 
 add_test(NAME nrc_profile_layout_test COMMAND nrc_profile_layout_test)
 
+if(TARGET nrc_vulkan)
+    add_executable(nrc_vulkan_capabilities_test
+        vulkan_capabilities_test.cpp)
+    target_link_libraries(nrc_vulkan_capabilities_test PRIVATE nrc_vulkan)
+    add_test(NAME nrc_vulkan_capabilities_test COMMAND nrc_vulkan_capabilities_test)
+endif()
+
 find_program(NRC_GLSLC
     NAMES glslc glslc.exe
     HINTS
