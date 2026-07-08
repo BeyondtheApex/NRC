@@ -39,5 +39,6 @@ Total weight count:
 
 - CPU reference: `nrc::reference_forward`, using float weights.
 - GLSL scalar backend: `NrcScalarForward`, reading packed fp16 weights from `uvec4`.
+- Vulkan scalar dispatch test: uploads packed fp16 weights/inputs, dispatches `NrcScalarForward`, and compares the result against `nrc::reference_forward` using the same fp16-rounded data.
 
 The scalar shader backend is intended for correctness and debugging. It is not a production fallback for high-performance integrations.

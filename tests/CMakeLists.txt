@@ -63,6 +63,34 @@ if(NRC_GLSLC)
             "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_khr_smoke.comp"
             "-o"
             "${CMAKE_CURRENT_BINARY_DIR}/nrc_khr_sg16_smoke.spv")
+
+    if(TARGET nrc_vulkan)
+        set(NRC_SCALAR_DISPATCH_SPV "${CMAKE_CURRENT_BINARY_DIR}/nrc_scalar_dispatch.spv")
+        add_custom_command(
+            OUTPUT "${NRC_SCALAR_DISPATCH_SPV}"
+            COMMAND "${NRC_GLSLC}"
+                "--target-env=vulkan1.1"
+                "-I${PROJECT_SOURCE_DIR}/shaders"
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_scalar_dispatch.comp"
+                "-o"
+                "${NRC_SCALAR_DISPATCH_SPV}"
+            DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_scalar_dispatch.comp"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/backend/scalar/NrcNNScalar.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcEncoding.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcTypes.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcConstants.glsl"
+            VERBATIM)
+        add_custom_target(nrc_scalar_dispatch_shader
+            DEPENDS "${NRC_SCALAR_DISPATCH_SPV}")
+
+        add_executable(nrc_vulkan_scalar_dispatch_test
+            vulkan_scalar_dispatch_test.cpp)
+        target_link_libraries(nrc_vulkan_scalar_dispatch_test PRIVATE nrc_vulkan)
+        add_dependencies(nrc_vulkan_scalar_dispatch_test nrc_scalar_dispatch_shader)
+        add_test(NAME nrc_vulkan_scalar_dispatch_test
+            COMMAND nrc_vulkan_scalar_dispatch_test "${NRC_SCALAR_DISPATCH_SPV}")
+    endif()
 else()
     message(WARNING "glslc was not found; shader compile smoke test will not be registered")
 endif()

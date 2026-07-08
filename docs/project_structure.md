@@ -22,7 +22,7 @@ sample/path_tracer/
   Reference path tracing pipeline used to validate NRC behavior. It is not part of the reusable core.
 
 tests/
-  ABI, profile selection, shader compilation, queue behavior, and NN reference tests.
+  ABI, profile selection, shader compilation, queue behavior, NN reference tests, and GPU dispatch validation.
 
 docs/
   Implementation log, design notes, integration guide, and milestone results.

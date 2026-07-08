@@ -440,3 +440,62 @@ Start Milestone 6 by adding a minimal compute dispatch harness for the scalar sh
 ### Next Step
 
 Start Milestone 7 by building a minimal Vulkan compute dispatch test harness. The first target should dispatch the scalar backend with deterministic packed weights and compare against `nrc::reference_forward`; after that, reuse the harness for KHR backend validation on devices that support the selected profile.
+
+## 2026-07-08 - Milestone 7 Vulkan Scalar Dispatch Harness
+
+### Implemented
+
+- Added scalar dispatch shader:
+  - `tests/shader_compile/nrc_scalar_dispatch.comp`
+- Added Vulkan compute runtime validation test:
+  - `tests/vulkan_scalar_dispatch_test.cpp`
+- Registered generated SPIR-V build target:
+  - `nrc_scalar_dispatch_shader`
+- Registered CTest test:
+  - `nrc_vulkan_scalar_dispatch_test`
+- Added design note:
+  - `docs/vulkan_dispatch_harness.md`
+
+### Behavior
+
+- The dispatch shader binds:
+  - binding 0: packed fp16 weights, using `NrcNNScalar.glsl`'s existing layout.
+  - binding 1: packed fp16 encoded inputs.
+  - binding 2: output `vec4` values.
+- The shader uses `local_size_x = 64` and one invocation per sample.
+- The test dispatches 73 samples, intentionally not a multiple of the workgroup size, to validate the sample-count guard.
+- CPU expected values are computed with `nrc::reference_forward` after both weights and inputs are rounded through the same fp16 packing path that the shader sees.
+- The test creates a minimal Vulkan 1.1 compute pipeline, host-visible coherent storage buffers, descriptor set, push constant, command buffer, and host/GPU memory barriers.
+- If no compatible Vulkan compute device or host-visible coherent storage buffer memory is available, the test prints `SKIP:` and exits successfully.
+
+### Design Decision
+
+This is deliberately a test harness, not the final reusable Vulkan runtime abstraction. The reusable runtime should be extracted only after the inference queue pass, KHR profile pipeline creation, and barrier/resource ownership contracts are clearer.
+
+### Validation
+
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Full Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Build generated:
+  - `G:/cpp/radiance/NRC/build/tests/nrc_scalar_dispatch.spv`
+  - `G:/cpp/radiance/NRC/build/tests/Debug/nrc_vulkan_scalar_dispatch_test.exe`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `9/9 tests passed`.
+- The scalar Vulkan dispatch test passed on the current machine as a real Vulkan dispatch, not as a skip.
+
+### Current Limitations
+
+- The Vulkan harness validates only the scalar backend.
+- KHR cooperative matrix backend is still compile-validated only.
+- The harness uses host-visible coherent buffers for simplicity; it does not yet validate staging buffers or device-local production resources.
+- No reusable descriptor/pipeline runtime API has been promoted from the test yet.
+- No inference pass consumes `NrcEvalRecord` queues yet.
+- No gradient/backpropagation or optimizer GPU pass has been implemented yet.
+
+### Next Step
+
+Use the dispatch harness pattern for KHR cooperative matrix numerical validation on devices that support an implemented profile. After that, implement the first inference pass that consumes `NrcEvalRecord` records and writes results through an integration-ready descriptor contract.

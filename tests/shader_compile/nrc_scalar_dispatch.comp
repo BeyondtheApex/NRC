@@ -1,0 +1,36 @@
+#version 460
+
+#define NRC_NN_SET 0
+#define NRC_NN_WEIGHTS_BINDING 0
+#include "nrc/backend/scalar/NrcNNScalar.glsl"
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 1) readonly buffer NrcScalarDispatchInput {
+    uvec4 value[];
+} nrcScalarDispatchInput;
+
+layout(std430, set = 0, binding = 2) buffer NrcScalarDispatchOutput {
+    vec4 value[];
+} nrcScalarDispatchOutput;
+
+layout(push_constant) uniform NrcScalarDispatchConstants {
+    uint sampleCount;
+} nrcScalarDispatchConstants;
+
+void main() {
+    uint sampleIndex = gl_GlobalInvocationID.x;
+    if (sampleIndex >= nrcScalarDispatchConstants.sampleCount) {
+        return;
+    }
+
+    uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT];
+    uint inputBase = sampleIndex * NRC_ENCODED_INPUT_UVEC4_COUNT;
+    for (uint i = 0u; i < NRC_ENCODED_INPUT_UVEC4_COUNT; ++i) {
+        encoded[i] = nrcScalarDispatchInput.value[inputBase + i];
+    }
+
+    vec3 outputValue;
+    NrcScalarForward(encoded, outputValue);
+    nrcScalarDispatchOutput.value[sampleIndex] = vec4(outputValue, 1.0);
+}
