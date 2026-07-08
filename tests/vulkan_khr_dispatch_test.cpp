@@ -503,13 +503,18 @@ private:
     const char *selected_spirv_path(const char *sg32SpirvPath,
                                     const char *sg16SpirvPath,
                                     const char *m8Sg32SpirvPath) const {
-        if (selectedProfile_->id == nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128) {
+        const nrc::ProfileShaderConfig *config = nrc::find_profile_shader_config(selectedProfile_->id);
+        if (config == nullptr || config->backend != nrc::BackendKind::KhrCooperativeMatrix) {
+            throw std::runtime_error("selected KHR profile has no shader config");
+        }
+
+        if (config->cooperativeMatrixM == 16u && config->subgroupSize == 32u) {
             return sg32SpirvPath;
         }
-        if (selectedProfile_->id == nrc::ProfileId::KhrFp16M16N16K16Sg16Wg128) {
+        if (config->cooperativeMatrixM == 16u && config->subgroupSize == 16u) {
             return sg16SpirvPath;
         }
-        if (selectedProfile_->id == nrc::ProfileId::KhrFp16M8N16K16Sg32Wg128) {
+        if (config->cooperativeMatrixM == 8u && config->subgroupSize == 32u) {
             return m8Sg32SpirvPath;
         }
         throw std::runtime_error("selected KHR profile has no dispatch SPIR-V");

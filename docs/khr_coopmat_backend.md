@@ -75,3 +75,5 @@ Profiles carry an `implemented` flag. The implemented KHR inference profiles are
 - `KHR_FP16_M8N16K16_SG32_WG128`
 
 `choose_profile` still prefers the M16 profiles when the device reports both M16 and M8 support. M8 is selected when it is the first implemented matching profile for the reported matrix properties and subgroup size.
+
+After selecting a profile, integrations should call `nrc::find_profile_shader_config` and use the returned workgroup, subgroup, and cooperative-matrix dimensions to select or compile the matching shader variant. The Vulkan KHR dispatch test uses this path to choose between SG32, SG16, and M8/SG32 SPIR-V files.

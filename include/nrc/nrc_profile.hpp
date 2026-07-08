@@ -70,8 +70,23 @@ struct Profile {
     bool implemented = false;
 };
 
+struct ProfileShaderConfig {
+    ProfileId id = ProfileId::None;
+    BackendKind backend = BackendKind::None;
+    const char *shaderHeader = "";
+    std::uint32_t workgroupSize = 0;
+    std::uint32_t subgroupSize = 0;
+    std::uint32_t cooperativeMatrixM = 0;
+    std::uint32_t cooperativeMatrixN = 0;
+    std::uint32_t cooperativeMatrixK = 0;
+    bool requireFullSubgroups = false;
+    bool requireSubgroupSizeControl = false;
+};
+
 std::span<const Profile> profiles();
 const Profile *find_profile(ProfileId id);
+std::span<const ProfileShaderConfig> profile_shader_configs();
+const ProfileShaderConfig *find_profile_shader_config(ProfileId id);
 bool supports_profile(const DeviceCapabilitiesView &capabilities,
                       const ProfileRequirements &requirements,
                       const Profile &profile);

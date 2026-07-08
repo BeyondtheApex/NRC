@@ -1885,3 +1885,72 @@ M: 8 or 16
 ### Next Step
 
 Start the KHR training backend design, or add a profile-specific validation layer that records pipeline creation success and numerical validation status separately from capability selection. The latter is useful before allowing downstream integrations to enable a KHR profile automatically.
+
+## 2026-07-09 - Milestone 25 Profile Shader Configuration Contract
+
+### Implemented
+
+- Added public shader configuration ABI:
+  - `nrc::ProfileShaderConfig`
+  - `nrc::profile_shader_configs`
+  - `nrc::find_profile_shader_config`
+- Added profile-to-shader config records for:
+  - `KHR_FP16_M16N16K16_SG32_WG128`
+  - `KHR_FP16_M16N16K16_SG16_WG128`
+  - `KHR_FP16_M8N16K16_SG32_WG128`
+  - `SCALAR_REFERENCE_WG64`
+- Extended `nrc_profile_layout_test` to verify:
+  - every implemented profile has a shader config;
+  - config backend matches profile backend;
+  - config workgroup size matches profile workgroup size;
+  - KHR config subgroup and cooperative matrix dimensions match the selected profile;
+  - scalar config does not claim subgroup/cooperative-matrix requirements.
+- Updated `nrc_vulkan_khr_dispatch_test` to choose SG32, SG16, or M8/SG32 SPIR-V through `find_profile_shader_config`.
+- Updated documentation:
+  - `docs/profile_and_layout.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/vulkan_dispatch_harness.md`
+
+### Behavior
+
+Downstream integrations can now use one profile-selection path:
+
+1. query capabilities;
+2. call `choose_profile`;
+3. call `find_profile_shader_config`;
+4. select or compile the shader variant using the returned workgroup, subgroup, and cooperative-matrix dimensions.
+
+For KHR cooperative matrix profiles, the config corresponds to shader defines:
+
+```text
+NRC_KHR_WORKGROUP_SIZE
+NRC_KHR_SUBGROUP_SIZE
+NRC_KHR_COOPMAT_M
+NRC_KHR_COOPMAT_N
+NRC_KHR_COOPMAT_K
+```
+
+This keeps C++ profile selection synchronized with shader compilation as matrix-size support grows.
+
+### Validation
+
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_profile_layout_test`
+- Targeted test succeeded:
+  - `ctest --test-dir build -C Debug -R nrc_profile_layout_test --output-on-failure`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- The config describes shader variants; it still does not prove the selected driver's pipeline creation or numerical execution succeeds.
+- There is not yet a reusable Vulkan pipeline-validation API that records capability support, shader compile variant, pipeline creation status, and numerical validation status in one report.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Add a profile validation report API, preferably in `runtime/vulkan`, that consumes queried capabilities plus profile shader config and reports why a profile is unavailable or whether it has passed pipeline creation/numerical validation. This will make downstream automatic profile enablement less brittle.

@@ -17,6 +17,29 @@ The scalar profile is for correctness and CI. It is never selected unless explic
 
 Profile selection proves that a backend is a valid candidate for the reported capabilities. It does not prove that the driver can compile and run the backend shader. Integrations should also validate pipeline creation and, where possible, run the backend numerical validation before enabling a production KHR profile.
 
+## Shader Configuration
+
+`nrc::find_profile_shader_config(profileId)` maps a selected profile to the shader-side configuration needed by an integration:
+
+- backend kind;
+- shader header path;
+- workgroup size;
+- required subgroup size;
+- cooperative matrix `M`, `N`, and `K`;
+- whether full subgroups and subgroup-size control are required.
+
+For KHR cooperative matrix profiles, integrations should use these fields to select or compile shader variants with:
+
+```text
+NRC_KHR_WORKGROUP_SIZE
+NRC_KHR_SUBGROUP_SIZE
+NRC_KHR_COOPMAT_M
+NRC_KHR_COOPMAT_N
+NRC_KHR_COOPMAT_K
+```
+
+This keeps profile selection and shader compilation synchronized as more matrix sizes are added.
+
 ## Capability Input
 
 `nrc::DeviceCapabilitiesView` is renderer-neutral. Vulkan-specific code should query device features and cooperative matrix properties, then translate them into this view.

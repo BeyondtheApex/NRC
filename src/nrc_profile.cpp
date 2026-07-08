@@ -57,6 +57,57 @@ constexpr std::array<Profile, 4> kProfiles = {{
     },
 }};
 
+constexpr std::array<ProfileShaderConfig, 4> kProfileShaderConfigs = {{
+    {
+        ProfileId::KhrFp16M16N16K16Sg32Wg128,
+        BackendKind::KhrCooperativeMatrix,
+        "nrc/backend/khr_coopmat/NrcNNKhr.glsl",
+        128,
+        32,
+        16,
+        16,
+        16,
+        true,
+        true,
+    },
+    {
+        ProfileId::KhrFp16M16N16K16Sg16Wg128,
+        BackendKind::KhrCooperativeMatrix,
+        "nrc/backend/khr_coopmat/NrcNNKhr.glsl",
+        128,
+        16,
+        16,
+        16,
+        16,
+        true,
+        true,
+    },
+    {
+        ProfileId::KhrFp16M8N16K16Sg32Wg128,
+        BackendKind::KhrCooperativeMatrix,
+        "nrc/backend/khr_coopmat/NrcNNKhr.glsl",
+        128,
+        32,
+        8,
+        16,
+        16,
+        true,
+        true,
+    },
+    {
+        ProfileId::ScalarReferenceWg64,
+        BackendKind::ScalarReference,
+        "nrc/backend/scalar/NrcNNScalar.glsl",
+        64,
+        0,
+        0,
+        0,
+        0,
+        false,
+        false,
+    },
+}};
+
 bool has_subgroup_size(std::span<const std::uint32_t> sizes, std::uint32_t required) {
     for (std::uint32_t size : sizes) {
         if (size == required) {
@@ -93,6 +144,19 @@ const Profile *find_profile(ProfileId id) {
     for (const Profile &profile : kProfiles) {
         if (profile.id == id) {
             return &profile;
+        }
+    }
+    return nullptr;
+}
+
+std::span<const ProfileShaderConfig> profile_shader_configs() {
+    return kProfileShaderConfigs;
+}
+
+const ProfileShaderConfig *find_profile_shader_config(ProfileId id) {
+    for (const ProfileShaderConfig &config : kProfileShaderConfigs) {
+        if (config.id == id) {
+            return &config;
         }
     }
     return nullptr;

@@ -4,6 +4,7 @@
 #include "nrc/nrc_resource_layout.hpp"
 
 #include <array>
+#include <cstring>
 #include <cstdlib>
 #include <iostream>
 
@@ -136,6 +137,54 @@ int main() {
     ok &= require(nrc::choose_profile(emptyCaps, {.allowReferenceBackend = true}) ==
                       nrc::ProfileId::ScalarReferenceWg64,
                   "reference fallback is explicit");
+
+    ok &= require(nrc::find_profile_shader_config(nrc::ProfileId::None) == nullptr,
+                  "no shader config for none profile");
+
+    for (const nrc::Profile &profile : nrc::profiles()) {
+        if (!profile.implemented) {
+            continue;
+        }
+
+        const nrc::ProfileShaderConfig *config = nrc::find_profile_shader_config(profile.id);
+        ok &= require(config != nullptr, "implemented profile has shader config");
+        if (config == nullptr) {
+            continue;
+        }
+
+        ok &= require(config->id == profile.id, "shader config profile id matches");
+        ok &= require(config->backend == profile.backend, "shader config backend matches");
+        ok &= require(config->workgroupSize == profile.workgroupSize, "shader config workgroup matches profile");
+        ok &= require(config->shaderHeader != nullptr && config->shaderHeader[0] != '\0',
+                      "shader config has a header");
+
+        if (profile.backend == nrc::BackendKind::KhrCooperativeMatrix) {
+            ok &= require(config->subgroupSize == profile.requiredSubgroupSize,
+                          "KHR shader config subgroup matches profile");
+            ok &= require(config->cooperativeMatrixM == profile.matrixM,
+                          "KHR shader config M matches profile");
+            ok &= require(config->cooperativeMatrixN == profile.matrixN,
+                          "KHR shader config N matches profile");
+            ok &= require(config->cooperativeMatrixK == profile.matrixK,
+                          "KHR shader config K matches profile");
+            ok &= require(config->requireFullSubgroups, "KHR shader config requires full subgroups");
+            ok &= require(config->requireSubgroupSizeControl,
+                          "KHR shader config requires subgroup size control");
+            ok &= require(std::strcmp(config->shaderHeader,
+                                      "nrc/backend/khr_coopmat/NrcNNKhr.glsl") == 0,
+                          "KHR shader config header path");
+        } else if (profile.backend == nrc::BackendKind::ScalarReference) {
+            ok &= require(config->subgroupSize == 0u, "scalar shader config has no subgroup");
+            ok &= require(config->cooperativeMatrixM == 0u &&
+                              config->cooperativeMatrixN == 0u &&
+                              config->cooperativeMatrixK == 0u,
+                          "scalar shader config has no cooperative matrix dimensions");
+            ok &= require(!config->requireFullSubgroups,
+                          "scalar shader config does not require full subgroups");
+            ok &= require(!config->requireSubgroupSizeControl,
+                          "scalar shader config does not require subgroup size control");
+        }
+    }
 
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
