@@ -528,6 +528,37 @@ void NrcKhrAccumulateFinalHiddenDWeightsWorkgroup(uint layer,
     barrier();
 }
 
+void NrcKhrAccumulateFinalHiddenDWeightsSubgroup(uint layer,
+                                                 uint activationBaseOffset,
+                                                 uint sourceBaseOffset) {
+    uint layerOffset = NrcKhrLayerWeightFloatOffset(layer);
+    for (uint weight = gl_SubgroupID;
+         weight < NRC_NN_HIDDEN_WIDTH * NRC_NN_HIDDEN_WIDTH;
+         weight += NRC_KHR_SUBGROUP_COUNT) {
+        uint row = weight / NRC_NN_HIDDEN_WIDTH;
+        uint col = weight - row * NRC_NN_HIDDEN_WIDTH;
+        float partial = 0.0;
+        for (uint sampleIndexInGroup = gl_SubgroupInvocationID;
+             sampleIndexInGroup < NRC_KHR_WORKGROUP_SIZE;
+             sampleIndexInGroup += NRC_KHR_SUBGROUP_SIZE) {
+            float activation = NrcKhrReadBackpropActivationFrom(activationBaseOffset,
+                                                                sampleIndexInGroup,
+                                                                row);
+            float dActivation = NrcKhrPropagateSharedOutputDActivation(sampleIndexInGroup, row);
+            float dPreActivation = activation > 0.0 ? dActivation : 0.0;
+            float srcActivation = NrcKhrReadBackpropActivationFrom(sourceBaseOffset,
+                                                                   sampleIndexInGroup,
+                                                                   col);
+            partial += dPreActivation * srcActivation;
+        }
+        float value = subgroupAdd(partial);
+        if (subgroupElect()) {
+            NrcKhrGradientAtomicAdd(layerOffset + row * NRC_NN_HIDDEN_WIDTH + col, value);
+        }
+    }
+    barrier();
+}
+
 void NrcKhrStoreSharedDPreActivations(uint activationBaseOffset,
                                       float dActivation[NRC_NN_HIDDEN_WIDTH]) {
     uint sampleIndex = gl_LocalInvocationID.x;

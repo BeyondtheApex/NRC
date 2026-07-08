@@ -23,7 +23,7 @@ Implemented:
   - encoded-input source staging for hidden-layer 0 `dW`;
   - subgroup-arithmetic output-layer `dW` accumulation in the shared row-major weight layout;
   - scalar output-derivative propagation to final hidden activations;
-  - scalar workgroup-reduced final hidden-layer `dW` accumulation in the shared row-major weight layout;
+  - subgroup-arithmetic final hidden-layer `dW` accumulation in the shared row-major weight layout;
   - fp32 shared `dZ` scratch that reuses the active tile and retired final-hidden activation snapshot;
   - scalar workgroup-reduced hidden-layer 3/2/1/0 `dW` accumulation in the shared row-major weight layout;
   - generic scalar hidden-layer derivative propagation helper;
@@ -33,8 +33,8 @@ Implemented:
 
 Not implemented yet:
 
-- Cooperative-matrix `dW` reduction beyond the current output subgroup reduction and hidden-layer scalar workgroup reductions.
-- Subgroup/cooperative-matrix gradient accumulation/reduction for hidden layers.
+- Cooperative-matrix `dW` reduction beyond the current output/final-hidden subgroup reductions and remaining hidden-layer scalar workgroup reductions.
+- Subgroup/cooperative-matrix gradient accumulation/reduction for hidden layers 3/2/1/0.
 - Production KHR training pass memory/reduction plan.
 - Runtime numerical validation on a driver that can create the KHR cooperative matrix pipelines successfully.
 
@@ -56,9 +56,9 @@ NRC_KHR_SUBGROUP_SIZE=16
 NRC_KHR_SUBGROUP_SIZE=32, NRC_KHR_COOPMAT_M=8
 ```
 
-CTest also compiles the same three variants with `NRC_NN_BACKPROPAGATION` enabled through `tests/shader_compile/nrc_khr_backprop_smoke.comp`. The backprop smoke test exercises the gradient buffer declaration, output derivative, output-layer subgroup `dW` reduction helper, output-to-hidden derivative propagation, final-hidden workgroup `dW` reduction helper, shared `dZ` scratch, hidden-layer 3/2/1 workgroup `dW` reduction helpers, hidden-layer 0 encoded-source staging and workgroup `dW` reduction helper, atomic add helper, and forward path in one translation unit.
+CTest also compiles the same three variants with `NRC_NN_BACKPROPAGATION` enabled through `tests/shader_compile/nrc_khr_backprop_smoke.comp`. The backprop smoke test exercises the gradient buffer declaration, output derivative, output-layer subgroup `dW` reduction helper, output-to-hidden derivative propagation, final-hidden subgroup `dW` reduction helper, shared `dZ` scratch, hidden-layer 3/2/1 workgroup `dW` reduction helpers, hidden-layer 0 encoded-source staging and workgroup `dW` reduction helper, atomic add helper, and forward path in one translation unit.
 
-`tests/shader_compile/nrc_gradient_khr_dispatch.comp` compile-validates the KHR train-record pass for the same three profile shader shapes. It proves the pass-level binding ABI, push constants, train-count handling, integration-provided unpack hook, current output-layer subgroup `dW` reduction, hidden-layer 4/3/2/1/0 workgroup `dW` reductions, and encoded-source staging compile together.
+`tests/shader_compile/nrc_gradient_khr_dispatch.comp` compile-validates the KHR train-record pass for the same three profile shader shapes. It proves the pass-level binding ABI, push constants, train-count handling, integration-provided unpack hook, current output-layer and final-hidden subgroup `dW` reductions, hidden-layer 3/2/1/0 workgroup `dW` reductions, and encoded-source staging compile together.
 
 `tests/khr_gradient_reference_test.cpp` validates the reusable host-side KHR fp16 oracle. It proves the CPU oracle covers every hidden/output gradient region before that oracle is used by the Vulkan KHR runtime test.
 
