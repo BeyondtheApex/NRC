@@ -869,3 +869,86 @@ The Vulkan queue ops test:
 ### Next Step
 
 Start turning `sample/path_tracer` from a placeholder into a minimal Vulkan reference integration. The first useful sample milestone should use queue reset, synthetic/simple eval record production, scalar inference, and readback so the sample exercises the same integration seams a real renderer will use before full ray tracing and training are added.
+
+## 2026-07-08 - Milestone 12 Minimal Reference Sample Integration
+
+### Implemented
+
+- Replaced the reference path tracer placeholder with a minimal Vulkan integration skeleton:
+  - `sample/path_tracer/sample.cpp`
+- Added sample producer shader:
+  - `sample/path_tracer/shaders/sample_producer.comp`
+- Added sample scalar inference wrapper:
+  - `sample/path_tracer/shaders/sample_inference_scalar.comp`
+- Added generated sample config template:
+  - `sample/path_tracer/sample_config.hpp.in`
+- Updated sample CMake to:
+  - compile sample SPIR-V with `glslc`;
+  - generate `sample_config.hpp` with SPIR-V paths;
+  - link the real sample against `nrc_vulkan`;
+  - fall back to the placeholder only when Vulkan/glslc is unavailable.
+- Registered CTest smoke test:
+  - `nrc_sample_reference_path_tracer_smoke`
+- Added documentation:
+  - `docs/sample_path_tracer.md`
+- Updated:
+  - `docs/project_structure.md`
+
+### Runtime Flow
+
+The sample now records a real Vulkan compute command buffer:
+
+1. Upload a `4x4` bias/factor-R image and factor-GB image.
+2. Dispatch `sample_producer.comp` in reset mode.
+3. Dispatch `sample_producer.comp` in producer mode.
+4. Dispatch `sample_inference_scalar.comp`.
+5. Copy the resolved screen image back to the CPU.
+
+The producer emits one screen eval record per pixel using `NrcQueueOps.glsl`.
+
+The inference wrapper provides a deterministic fake `NrcUnpackPackedInput` and uses `NrcInferenceScalar.glsl`.
+
+The host configures deterministic weights so the scalar MLP predicts:
+
+```text
+vec3(0.25, 0.5, 0.75)
+```
+
+### Validated Behavior
+
+The sample verifies:
+
+- `evalCount == 16`;
+- all train batch counts remain zero;
+- every `4x4` pixel has exactly one eval record;
+- scalar inference resolves every screen pixel as `bias + factor * prediction`;
+- output alpha is `0.0`, matching the inference pass contract.
+
+### Validation
+
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Manual sample run succeeded:
+  - `build/sample/path_tracer/Debug/nrc_reference_path_tracer.exe`
+- Manual sample output:
+  - `NRC reference path tracer minimal integration passed: 16 eval records, scalar inference screen resolve.`
+  - `This milestone is a synthetic integration skeleton; full ray tracing is pending.`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `15/15 tests passed`
+
+### Current Limitations
+
+- This is not yet a full path tracer.
+- No acceleration structure, ray query, material system, BRDF sampling, scene loading, or visual output file exists yet.
+- The scene unpack function is deterministic fake data.
+- The sample produces screen eval records only; it does not produce train records yet.
+- KHR cooperative matrix inference is not used in the sample because KHR pipeline creation is driver-gated on the current AMD machine.
+- No gradient/backpropagation or optimizer pass is connected yet.
+
+### Next Step
+
+Add a small scene/hit representation to the sample and replace the synthetic producer with real `PackedNrcInput` generation. After that, add train-record production so the sample begins covering the path tracer-to-training side of VkNRC's workflow.

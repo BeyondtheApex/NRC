@@ -212,3 +212,8 @@ if(NRC_GLSLC)
 else()
     message(WARNING "glslc was not found; shader compile smoke test will not be registered")
 endif()
+
+if(TARGET nrc_reference_path_tracer)
+    add_test(NAME nrc_sample_reference_path_tracer_smoke
+        COMMAND nrc_reference_path_tracer)
+endif()
