@@ -94,6 +94,7 @@ Current behavior:
 Experimental KHR output-layer cooperative-matrix reduction:
 
 - `NrcKhrAccumulateOutputDWeightsCoopmat` stages each invocation's output derivative as fp16, multiplies final hidden activations by the staged derivative through KHR cooperative matrices, stores one fp16 partial dW tile per subgroup, then unpacks and reduces those subgroup partials into the existing fp32 gradient buffer with one atomic add per output weight per workgroup.
+- After reducing the output partials, the helper restores each invocation's fp32 `dOutput` into `nrcKhrSharedBuffer[gl_LocalInvocationID.x]`. The final-hidden `dW` helper depends on that shared fp32 derivative cache.
 - `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1` switches `NrcGradientKhr.glsl` to this helper for output-layer `dW`.
 - `nrc_vulkan_gradient_khr_coopmat_output_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors fp16 output-derivative staging and fp16 output partial storage.
 - The default KHR gradient pass still uses the subgroup-arithmetic output helper until runtime numerical validation succeeds on a driver that can create the KHR gradient pipeline.

@@ -68,6 +68,8 @@ The same dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_OU
 
 `tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-output` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_output_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1`. That mode compares output-layer gradients against a test-side oracle that mirrors fp16 output derivative staging and fp16 output partial storage, while hidden-layer gradients still use `nrc::reference_backward_khr_fp16`.
 
+The optional output-coopmat helper restores the fp32 shared output derivative cache after reducing output dW. This keeps the downstream final-hidden dW helper on the same shared derivative contract as the default subgroup output path.
+
 These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support, gradient correctness, or training performance.
 
 ## Runtime Dispatch Test

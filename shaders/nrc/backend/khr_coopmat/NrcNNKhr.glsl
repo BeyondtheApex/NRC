@@ -529,6 +529,12 @@ void NrcKhrAccumulateOutputDWeightsCoopmat(float dOutput[NRC_NN_OUTPUT_WIDTH]) {
         }
         NrcKhrGradientAtomicAdd(outputOffset + outputRow * NRC_NN_HIDDEN_WIDTH + hiddenCol, value);
     }
+
+    nrcKhrSharedBuffer[gl_LocalInvocationID.x] =
+        uvec4(floatBitsToUint(dOutput[0]),
+              floatBitsToUint(dOutput[1]),
+              floatBitsToUint(dOutput[2]),
+              0u);
     barrier();
 }
 

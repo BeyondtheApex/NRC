@@ -4130,3 +4130,68 @@ This gives the output cooperative-matrix dW helper a separate validation route w
 ### Next Step
 
 Either validate the output-coopmat runtime path on a driver that successfully creates the KHR gradient pipeline, or design the hidden-layer cooperative-matrix dW memory plan before adding code. The hidden plan should decide whether to reorder dA propagation before dW partial storage, reduce one tile at a time, accept more atomics, or introduce a separate profile with larger shared-memory requirements.
+
+## 2026-07-09 - Milestone 63 Preserve Shared dOutput After Output Coopmat dW
+
+### Implemented
+
+- Fixed `NrcKhrAccumulateOutputDWeightsCoopmat` so it restores each invocation's fp32 output derivative into:
+
+```text
+nrcKhrSharedBuffer[gl_LocalInvocationID.x]
+```
+
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+
+### Behavior
+
+The optional output-coopmat dW helper temporarily uses shared memory for:
+
+```text
+fp16 staged dOutput
+fp16 per-subgroup output dW partials
+```
+
+After those partials are reduced and atomically accumulated into the output gradient region, the helper rewrites the shared cache back to the same fp32 derivative layout used by the default subgroup-output helper:
+
+```text
+shared[sample].x = floatBitsToUint(dOutput.r)
+shared[sample].y = floatBitsToUint(dOutput.g)
+shared[sample].z = floatBitsToUint(dOutput.b)
+```
+
+This is required because `NrcKhrAccumulateFinalHiddenDWeightsSubgroup` reads output derivatives from shared memory for every sample while accumulating hidden-layer 4 `dW`. Without this restore step, a driver that successfully ran the optional output-coopmat path would compare output-layer gradients against the output-coopmat oracle but corrupt downstream hidden-layer gradients.
+
+### Validation
+
+- Targeted KHR shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr_coopmat_output|nrc_shader_khr_backprop" --output-on-failure -V`
+- Test result:
+  - `6/6 tests passed`
+- Targeted KHR gradient test build succeeded and regenerated default plus output-coopmat runtime SPIR-V:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR runtime tests succeeded with controlled skips:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr" --output-on-failure -V`
+- Test result:
+  - `2/2 tests passed`
+- Local skip results:
+  - default KHR gradient: `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+  - output-coopmat KHR gradient: `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `37/37 tests passed`
+
+### Current Limitations
+
+- This fix is still compile/skip validated locally because the local AMD driver does not create the KHR gradient pipeline.
+- The output-coopmat path still needs real runtime numerical validation on a successful KHR pipeline creation path.
+- Hidden-layer cooperative-matrix dW still needs an explicit scratch lifetime and pass-order plan.
+
+### Next Step
+
+Return to the host-side KHR shared-memory layout model so shader shared-memory assumptions, derivative cache lifetime, and future hidden-dW partial storage constraints are visible from tests and profile diagnostics before more hidden cooperative-matrix code is added.
