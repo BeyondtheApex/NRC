@@ -127,6 +127,16 @@ int main() {
     ok &= require(invalidShaderModule.validation.vkResult == VK_ERROR_INITIALIZATION_FAILED,
                   "invalid shader module request records initialization failure");
 
+    const nrc::vulkan::VulkanComputePipelineCreateResult invalidBasicPipeline =
+        nrc::vulkan::create_compute_pipeline({});
+    ok &= require(invalidBasicPipeline.pipeline == VK_NULL_HANDLE,
+                  "invalid basic pipeline request returns null pipeline");
+    ok &= require(invalidBasicPipeline.validation.status ==
+                      nrc::vulkan::VulkanValidationStepStatus::Failed,
+                  "invalid basic pipeline request fails safely");
+    ok &= require(invalidBasicPipeline.validation.vkResult == VK_ERROR_INITIALIZATION_FAILED,
+                  "invalid basic pipeline request records initialization failure");
+
     const nrc::vulkan::VulkanComputePipelineCreateResult invalidPipeline =
         nrc::vulkan::create_profile_compute_pipeline({});
     ok &= require(invalidPipeline.pipeline == VK_NULL_HANDLE,

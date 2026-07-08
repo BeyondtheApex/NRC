@@ -36,36 +36,26 @@ VulkanComputePipelineCreateResult make_invalid_result() {
     return result;
 }
 
-} // namespace
+bool valid_basic_create_info(const VulkanBasicComputePipelineCreateInfo &createInfo) {
+    return createInfo.device != VK_NULL_HANDLE &&
+           createInfo.pipelineLayout != VK_NULL_HANDLE &&
+           createInfo.shaderModule != VK_NULL_HANDLE &&
+           createInfo.entryPoint != nullptr &&
+           createInfo.entryPoint[0] != '\0';
+}
 
-VulkanComputePipelineCreateResult create_profile_compute_pipeline(
-    const VulkanComputePipelineCreateInfo &createInfo) {
-    if (createInfo.device == VK_NULL_HANDLE ||
-        createInfo.pipelineLayout == VK_NULL_HANDLE ||
-        createInfo.shaderModule == VK_NULL_HANDLE ||
-        createInfo.shaderConfig == nullptr ||
-        createInfo.entryPoint == nullptr ||
-        createInfo.entryPoint[0] == '\0') {
+VulkanComputePipelineCreateResult create_compute_pipeline_impl(
+    const VulkanBasicComputePipelineCreateInfo &createInfo,
+    const void *shaderStagePNext,
+    VkPipelineShaderStageCreateFlags extraStageFlags) {
+    if (!valid_basic_create_info(createInfo)) {
         return make_invalid_result();
-    }
-
-    VkPipelineShaderStageRequiredSubgroupSizeCreateInfo requiredSubgroupSize{};
-    requiredSubgroupSize.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO;
-    requiredSubgroupSize.requiredSubgroupSize = createInfo.shaderConfig->subgroupSize;
-
-    VkPipelineShaderStageCreateFlags stageFlags = createInfo.shaderStageFlags;
-    const bool useRequiredSubgroupSize =
-        createInfo.shaderConfig->requireSubgroupSizeControl &&
-        createInfo.shaderConfig->subgroupSize != 0;
-    if (createInfo.shaderConfig->requireFullSubgroups) {
-        stageFlags |= VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
     }
 
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.pNext = useRequiredSubgroupSize ? &requiredSubgroupSize : nullptr;
-    stageInfo.flags = stageFlags;
+    stageInfo.pNext = shaderStagePNext;
+    stageInfo.flags = createInfo.shaderStageFlags | extraStageFlags;
     stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     stageInfo.module = createInfo.shaderModule;
     stageInfo.pName = createInfo.entryPoint;
@@ -109,6 +99,56 @@ VulkanComputePipelineCreateResult create_profile_compute_pipeline(
     result.validation.status = VulkanValidationStepStatus::Passed;
     result.pipeline = pipeline;
     return result;
+}
+
+} // namespace
+
+VulkanComputePipelineCreateResult create_compute_pipeline(
+    const VulkanBasicComputePipelineCreateInfo &createInfo) {
+    return create_compute_pipeline_impl(createInfo, nullptr, 0);
+}
+
+VulkanComputePipelineCreateResult create_profile_compute_pipeline(
+    const VulkanComputePipelineCreateInfo &createInfo) {
+    if (createInfo.device == VK_NULL_HANDLE ||
+        createInfo.pipelineLayout == VK_NULL_HANDLE ||
+        createInfo.shaderModule == VK_NULL_HANDLE ||
+        createInfo.shaderConfig == nullptr ||
+        createInfo.entryPoint == nullptr ||
+        createInfo.entryPoint[0] == '\0') {
+        return make_invalid_result();
+    }
+
+    VkPipelineShaderStageRequiredSubgroupSizeCreateInfo requiredSubgroupSize{};
+    requiredSubgroupSize.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO;
+    requiredSubgroupSize.requiredSubgroupSize = createInfo.shaderConfig->subgroupSize;
+
+    VkPipelineShaderStageCreateFlags stageFlags = createInfo.shaderStageFlags;
+    const bool useRequiredSubgroupSize =
+        createInfo.shaderConfig->requireSubgroupSizeControl &&
+        createInfo.shaderConfig->subgroupSize != 0;
+    if (createInfo.shaderConfig->requireFullSubgroups) {
+        stageFlags |= VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
+    }
+
+    VulkanBasicComputePipelineCreateInfo basicCreateInfo{};
+    basicCreateInfo.device = createInfo.device;
+    basicCreateInfo.pipelineLayout = createInfo.pipelineLayout;
+    basicCreateInfo.shaderModule = createInfo.shaderModule;
+    basicCreateInfo.entryPoint = createInfo.entryPoint;
+    basicCreateInfo.pipelineCache = createInfo.pipelineCache;
+    basicCreateInfo.pipelineFlags = createInfo.pipelineFlags;
+    basicCreateInfo.shaderStageFlags = stageFlags;
+    basicCreateInfo.specializationInfo = createInfo.specializationInfo;
+    basicCreateInfo.allocator = createInfo.allocator;
+    basicCreateInfo.basePipelineHandle = createInfo.basePipelineHandle;
+    basicCreateInfo.basePipelineIndex = createInfo.basePipelineIndex;
+
+    return create_compute_pipeline_impl(
+        basicCreateInfo,
+        useRequiredSubgroupSize ? &requiredSubgroupSize : nullptr,
+        0);
 }
 
 } // namespace nrc::vulkan

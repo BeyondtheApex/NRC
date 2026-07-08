@@ -129,9 +129,9 @@ Common presets are available for the dispatch validation path:
 
 The helper is deliberately limited to memory barriers. It does not perform image layout transitions or buffer/image memory barriers yet.
 
-## Profile Compute Pipeline Helper
+## Compute Pipeline Helpers
 
-`nrc::vulkan::create_profile_compute_pipeline` creates a compute pipeline from a caller-owned device, shader module, pipeline layout, and `ProfileShaderConfig`.
+`nrc::vulkan::create_compute_pipeline` creates a plain compute pipeline from a caller-owned device, shader module, and pipeline layout. `nrc::vulkan::create_profile_compute_pipeline` adds NRC profile-specific shader-stage requirements on top of the same guarded creation path.
 
 Header:
 
@@ -139,7 +139,9 @@ Header:
 #include "nrc/vulkan/nrc_vulkan_pipeline.hpp"
 ```
 
-For KHR cooperative matrix profiles, the helper applies the shader-stage requirements carried by the profile config:
+Use the plain helper for non-profile utility passes such as queue, prepare, gradient, and optimize dispatches.
+
+For KHR cooperative matrix profiles, the profile helper applies the shader-stage requirements carried by the profile config:
 
 - `VkPipelineShaderStageRequiredSubgroupSizeCreateInfo` when subgroup size control is required;
 - `VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT` when full subgroups are required.
@@ -151,8 +153,8 @@ The result contains:
 - `VkResult`;
 - `structuredException`, set when MSVC/Windows catches a structured exception from `vkCreateComputePipelines`.
 
-The helper does not own the returned pipeline. Callers must destroy it with `vkDestroyPipeline`.
+The helpers do not own returned pipelines. Callers must destroy them with `vkDestroyPipeline`.
 
 ## Current Limit
 
-This module reports capabilities, aggregates profile validation state, creates shader modules from already-loaded SPIR-V words, writes simple storage-buffer descriptors, records simple memory barriers, and provides a small profile-aware compute pipeline creation helper. It does not create devices, enable features, compile shaders, read shader files, create pipeline layouts, allocate descriptor pools/sets, create resources, perform image layout transitions, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own renderer code, then feed shader/pipeline/numerical outcomes back into `VulkanProfileValidationRequirements`.
+This module reports capabilities, aggregates profile validation state, creates shader modules from already-loaded SPIR-V words, writes simple storage-buffer descriptors, records simple memory barriers, and provides small compute pipeline creation helpers. It does not create devices, enable features, compile shaders, read shader files, create pipeline layouts, allocate descriptor pools/sets, create resources, perform image layout transitions, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own renderer code, then feed shader/pipeline/numerical outcomes back into `VulkanProfileValidationRequirements`.

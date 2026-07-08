@@ -2463,3 +2463,54 @@ The full scalar training step keeps the same binding order across prepare, gradi
 ### Next Step
 
 Adopt shader module and compute pipeline helpers in queue/gradient/training tests, or add image descriptor/layout transition helpers for scalar inference and the sample path tracer.
+
+## 2026-07-09 - Milestone 34 Basic Compute Pipeline Helper Adoption
+
+### Implemented
+
+- Added a plain compute pipeline helper for non-profile passes:
+  - `nrc::vulkan::VulkanBasicComputePipelineCreateInfo`
+  - `nrc::vulkan::create_compute_pipeline`
+- Kept `nrc::vulkan::create_profile_compute_pipeline` for KHR/profile-aware dispatches and made it share the guarded creation path used by the plain helper.
+- Extended `nrc_vulkan_capabilities_test` to cover invalid plain compute pipeline creation requests.
+- Refactored additional Vulkan validation tests to use:
+  - `nrc::vulkan::create_shader_module`
+  - `nrc::vulkan::create_compute_pipeline`
+- Updated tests:
+  - `nrc_vulkan_queue_ops_test`
+  - `nrc_vulkan_gradient_scalar_test`
+  - `nrc_vulkan_training_step_test`
+- Updated documentation:
+  - `docs/vulkan_capability_query.md`
+  - `docs/vulkan_dispatch_harness.md`
+  - `README.md`
+
+### Behavior
+
+The new plain helper is for utility passes that are not NRC profile implementations: queue ops, train prepare, scalar gradient, and optimizer dispatches. It creates a standard compute pipeline and records `VkResult` plus the MSVC/Windows structured-exception flag in `VulkanValidationStep`.
+
+Profile-aware KHR inference still uses `create_profile_compute_pipeline`, which applies subgroup size and full-subgroup requirements from `ProfileShaderConfig`.
+
+### Validation
+
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_capabilities_test nrc_vulkan_queue_ops_test nrc_vulkan_gradient_scalar_test nrc_vulkan_training_step_test`
+- Targeted verbose tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_capabilities_test|nrc_vulkan_queue_ops_test|nrc_vulkan_gradient_scalar_test|nrc_vulkan_training_step_test" --output-on-failure -V`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- Scalar dispatch still uses local shader module and compute pipeline creation.
+- Scalar inference still uses local shader module, pipeline, descriptor image, and image transition boilerplate.
+- The helper creates one compute pipeline at a time and does not manage pipeline caches beyond accepting a caller-owned `VkPipelineCache`.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Adopt shader module/plain compute pipeline helpers in scalar dispatch, or start the image descriptor and image layout transition helper needed by scalar inference and the sample path tracer.

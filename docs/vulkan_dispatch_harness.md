@@ -73,6 +73,7 @@ Inference-specific behavior:
 
 Training/queue-specific behavior:
 
+- Queue ops, scalar gradient, and scalar full-training-step tests now use `nrc::vulkan::create_shader_module` plus plain `nrc::vulkan::create_compute_pipeline` for their non-profile compute pipelines.
 - Queue ops, scalar gradient, and scalar full-training-step tests now use `nrc::vulkan::create_storage_buffer_descriptor_set_layout` and `nrc::vulkan::update_storage_buffer_descriptors` for their storage-buffer descriptor set layout/update paths.
 - Queue ops, scalar gradient, and scalar full-training-step tests now route their host/compute memory barriers through `nrc::vulkan::cmd_memory_barrier`.
 - The full-training-step test also uses the helper for its compute-to-indirect-dispatch dependency.
