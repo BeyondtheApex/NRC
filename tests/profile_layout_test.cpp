@@ -1,5 +1,6 @@
 #include "nrc/nrc_constants.hpp"
 #include "nrc/nrc_profile.hpp"
+#include "nrc/nrc_records.hpp"
 #include "nrc/nrc_resource_layout.hpp"
 
 #include <array>

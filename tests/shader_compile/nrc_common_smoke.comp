@@ -1,0 +1,47 @@
+#version 460
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+#include "nrc/common/NrcQueue.glsl"
+
+layout(std430, binding = 0) buffer SmokeOutput {
+    NrcEvalRecord evalRecord;
+    NrcTrainRecord trainRecord;
+    uvec4 encodedInput[NRC_ENCODED_INPUT_UVEC4_COUNT];
+    uvec4 decoded;
+} outputData;
+
+void main() {
+    NrcUnpackedInput sampleInput;
+    sampleInput.position = vec3(0.25, 0.5, 0.75);
+    sampleInput.scatteredDir = vec2(0.1, 0.9);
+    sampleInput.normal = vec2(0.5, 0.5);
+    sampleInput.roughness = 0.35;
+    sampleInput.diffuse = vec3(0.8, 0.7, 0.6);
+    sampleInput.specular = vec3(0.1, 0.2, 0.3);
+
+    uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT];
+    NrcEncodeInput(sampleInput, encoded);
+
+    for (uint i = 0u; i < NRC_ENCODED_INPUT_UVEC4_COUNT; ++i) {
+        outputData.encodedInput[i] = encoded[i];
+    }
+
+    PackedNrcInput packedInput;
+    packedInput.primitiveId = 7u;
+    packedInput.flipBitInstanceId = 3u;
+    packedInput.barycentric2x16U = packUnorm2x16(vec2(0.25, 0.5));
+    packedInput.scatteredDir2x16U = packUnorm2x16(sampleInput.scatteredDir);
+
+    outputData.evalRecord = NrcMakeEvalScreen(packedInput, uvec2(11u, 13u));
+    outputData.trainRecord = NrcMakeTrainRecord(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), packedInput);
+
+    uint batch;
+    uint left;
+    uint right;
+    uint trainDst = NrcEncodeEvalDstTrain(2u, 4u, 8u);
+    NrcDecodeEvalDstTrain(trainDst, batch, left, right);
+
+    outputData.decoded =
+        uvec4(NrcEvalDstType(outputData.evalRecord.dst), NrcDecodeEvalDstScreen(outputData.evalRecord.dst), batch + left + right);
+}

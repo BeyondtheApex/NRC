@@ -166,3 +166,59 @@ Create and commit the bootstrap repository state, then start Milestone 1 by defi
 ### Next Step
 
 Start Milestone 2 by adding Vulkan capability query helpers or, if keeping Vulkan out of the core first, by adding shader-side NRC record/encoding headers and ABI tests that mirror the C++ layout constants.
+
+## 2026-07-08 - Milestone 2 Shader Record and Encoding ABI
+
+### Implemented
+
+- Added C++ record ABI in `include/nrc/nrc_records.hpp`.
+- Updated resource layout constants to use the C++ record structs through `sizeof`.
+- Added shader constants in `shaders/nrc/common/NrcConstants.glsl`.
+- Added shader record/destination encoding in `shaders/nrc/common/NrcTypes.glsl`.
+- Added shader input encoding in `shaders/nrc/common/NrcEncoding.glsl`.
+- Added basic shader queue record construction helpers in `shaders/nrc/common/NrcQueue.glsl`.
+- Added shader compile smoke test: `tests/shader_compile/nrc_common_smoke.comp`.
+- Registered a `glslc`-based CTest test named `nrc_shader_common_compile`.
+
+### VkNRC Compatibility Decisions
+
+- Destination packing follows VkNRC:
+  - screen destination: `(x | (y << 15)) << 1`.
+  - train destination: `(batch | (left << 2) | (right << 16)) << 1 | 1`.
+- Input encoding follows VkNRC's current shader behavior:
+  - 3D position frequency encoding.
+  - scattered direction one-blob encoding.
+  - normal one-blob encoding.
+  - roughness encoded as `1 - exp(-roughness)`.
+  - diffuse/specular packed into the final encoded block.
+- The shader-side common headers currently avoid binding declarations so downstream renderers can decide descriptor layout.
+
+### Validation
+
+- Full Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `2/2 tests passed`.
+- The shader compile test uses:
+  - `D:/VulkanSDK/1.4.335.0/Bin/glslc.exe`
+  - `--target-env=vulkan1.3`
+
+### Issues Found and Fixed
+
+- GLSL reserves `input` as a keyword. The first compile test caught this in `NrcEncoding.glsl` and `NrcQueue.glsl`; parameters and local variables were renamed to avoid the reserved word.
+
+### Current Limitations
+
+- Shader queue helpers only construct records and validate indices; they do not yet provide atomic reservation helpers because the final descriptor/buffer ownership contract is still being designed.
+- Scene unpacking is not implemented yet. The reusable shader layer only defines `NrcUnpackedInput`; each renderer or sample must still translate its own hit/material data into that form.
+- No inference, gradient, optimizer, or KHR cooperative matrix backend shader has been implemented yet.
+- No runtime Vulkan capability query has been implemented yet.
+
+### Next Step
+
+Start Milestone 3 by adding either:
+
+- Vulkan capability query translation into `nrc::DeviceCapabilitiesView`, or
+- the scalar/reference NN backend and CPU-side reference tests for forward inference.

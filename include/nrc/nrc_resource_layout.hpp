@@ -1,5 +1,7 @@
 #pragma once
 
+#include "nrc/nrc_records.hpp"
+
 #include <cstdint>
 
 namespace nrc {
@@ -29,23 +31,23 @@ struct ResourceLayout {
 };
 
 struct PackedInputLayout {
-    static constexpr std::uint64_t size = 16;
+    static constexpr std::uint64_t size = sizeof(PackedNrcInput);
 };
 
 struct EvalRecordLayout {
-    static constexpr std::uint64_t size = 20;
+    static constexpr std::uint64_t size = sizeof(NrcEvalRecord);
 };
 
 struct TrainRecordLayout {
-    static constexpr std::uint64_t size = 40;
+    static constexpr std::uint64_t size = sizeof(NrcTrainRecord);
 };
 
 struct OptimizerStateLayout {
-    static constexpr std::uint64_t size = 20;
+    static constexpr std::uint64_t size = sizeof(NrcOptimizerState);
 };
 
 struct OptimizerEntryLayout {
-    static constexpr std::uint64_t size = 16;
+    static constexpr std::uint64_t size = sizeof(NrcOptimizerEntry);
 };
 
 ResourceLayout compute_resource_layout(Extent2D extent);
