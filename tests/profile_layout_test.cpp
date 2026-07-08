@@ -76,6 +76,81 @@ int main() {
     ok &= require(nrc::choose_profile(caps16) ==
                       nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128,
                   "prefer SG32 16x16x16 KHR profile");
+    const nrc::TrainingProfileSelection defaultTraining =
+        nrc::choose_training_profile(caps16);
+    ok &= require(defaultTraining.selected,
+                  "default training profile selection succeeds for valid KHR capabilities");
+    ok &= require(defaultTraining.status ==
+                      nrc::TrainingProfileSelectionStatus::SelectedKhrGroundwork,
+                  "default training profile uses KHR groundwork mode");
+    ok &= require(defaultTraining.implementation ==
+                      nrc::TrainingImplementationKind::KhrGroundwork,
+                  "default training implementation records KHR groundwork");
+    ok &= require(defaultTraining.profileId ==
+                      nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128,
+                  "default training profile records selected KHR profile id");
+    ok &= require(defaultTraining.shaderConfig != nullptr &&
+                      defaultTraining.shaderConfig->id == defaultTraining.profileId,
+                  "default training profile carries shader config");
+    ok &= require(defaultTraining.requiredSharedMemoryBytes ==
+                      kRequiredKhrTrainingSharedBytes,
+                  "default training profile reports required shared memory");
+    ok &= require(!defaultTraining.fallback,
+                  "default KHR training selection is not a fallback");
+    ok &= require(!defaultTraining.useKhrCoopmatAllDWeights &&
+                      !defaultTraining.useKhrCoopmatAllDActivation,
+                  "default KHR training selection does not enable experimental all-coopmat flags");
+    ok &= require(defaultTraining.khrProfileSupport.supported,
+                  "default training selection carries supported KHR report");
+
+    const nrc::TrainingProfileSelection allCoopmatTraining =
+        nrc::choose_training_profile(
+            caps16,
+            {.enableExperimentalAllCoopmat = true});
+    ok &= require(allCoopmatTraining.selected,
+                  "experimental all-coopmat training selection succeeds");
+    ok &= require(allCoopmatTraining.status ==
+                      nrc::TrainingProfileSelectionStatus::SelectedKhrAllCoopmat,
+                  "experimental all-coopmat training records selected status");
+    ok &= require(allCoopmatTraining.implementation ==
+                      nrc::TrainingImplementationKind::KhrAllCoopmat,
+                  "experimental all-coopmat training records implementation");
+    ok &= require(allCoopmatTraining.profileId ==
+                      nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128,
+                  "experimental all-coopmat training keeps selected KHR profile");
+    ok &= require(allCoopmatTraining.useKhrCoopmatAllDWeights &&
+                      allCoopmatTraining.useKhrCoopmatAllDActivation,
+                  "experimental all-coopmat training enables both all-dW and all-dA flags");
+
+    const nrc::TrainingProfileSelection noAllowedKhrTraining =
+        nrc::choose_training_profile(
+            caps16,
+            {false, false, false});
+    ok &= require(!noAllowedKhrTraining.selected,
+                  "training selection rejects valid KHR profile when all KHR modes are disabled");
+    ok &= require(noAllowedKhrTraining.status ==
+                      nrc::TrainingProfileSelectionStatus::NoSupportedTrainingProfile,
+                  "disabled KHR training modes record no supported training profile");
+    ok &= require(noAllowedKhrTraining.khrProfileSupport.supported,
+                  "disabled KHR training modes still carry supported KHR capability report");
+
+    const nrc::TrainingProfileSelection scalarBecauseKhrDisabled =
+        nrc::choose_training_profile(
+            caps16,
+            {false, false, true});
+    ok &= require(scalarBecauseKhrDisabled.selected,
+                  "training selection can fall back to scalar when KHR modes are disabled");
+    ok &= require(scalarBecauseKhrDisabled.status ==
+                      nrc::TrainingProfileSelectionStatus::SelectedScalarReference,
+                  "scalar fallback records selected scalar status");
+    ok &= require(scalarBecauseKhrDisabled.implementation ==
+                      nrc::TrainingImplementationKind::ScalarReference,
+                  "scalar fallback records scalar implementation");
+    ok &= require(scalarBecauseKhrDisabled.profileId ==
+                      nrc::ProfileId::ScalarReferenceWg64,
+                  "scalar fallback records scalar profile id");
+    ok &= require(scalarBecauseKhrDisabled.fallback,
+                  "scalar training selection records fallback");
 
     const nrc::Profile *sg32Profile =
         nrc::find_profile(nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128);
@@ -107,6 +182,24 @@ int main() {
         ok &= require(sharedMemoryReport.status ==
                           nrc::ProfileSupportStatus::MissingSharedMemory,
                       "support report records missing shared memory");
+        const nrc::TrainingProfileSelection missingSharedTraining =
+            nrc::choose_training_profile(insufficientSharedMemory);
+        ok &= require(!missingSharedTraining.selected,
+                      "training selection rejects insufficient KHR shared memory by default");
+        ok &= require(missingSharedTraining.khrProfileSupport.status ==
+                          nrc::ProfileSupportStatus::MissingSharedMemory,
+                      "training selection carries missing shared memory KHR reason");
+        const nrc::TrainingProfileSelection sharedMemoryScalarFallback =
+            nrc::choose_training_profile(
+                insufficientSharedMemory,
+                {false, true, true});
+        ok &= require(sharedMemoryScalarFallback.selected,
+                      "training selection can fall back to scalar on insufficient shared memory");
+        ok &= require(sharedMemoryScalarFallback.status ==
+                          nrc::TrainingProfileSelectionStatus::SelectedScalarReference,
+                      "insufficient shared memory fallback selects scalar status");
+        ok &= require(sharedMemoryScalarFallback.fallback,
+                      "insufficient shared memory scalar selection records fallback");
     }
 
     const std::array<std::uint32_t, 1> sg16 = {16};
@@ -125,6 +218,9 @@ int main() {
     ok &= require(nrc::choose_profile(caps16Sg16) ==
                       nrc::ProfileId::KhrFp16M16N16K16Sg16Wg128,
                   "choose SG16 profile when SG32 is unavailable");
+    ok &= require(nrc::choose_training_profile(caps16Sg16).profileId ==
+                      nrc::ProfileId::KhrFp16M16N16K16Sg16Wg128,
+                  "training selection chooses SG16 profile when SG32 is unavailable");
 
     const nrc::DeviceCapabilitiesView noAtomic{
         true,
@@ -264,6 +360,9 @@ int main() {
     ok &= require(nrc::choose_profile(capsM8Only) ==
                       nrc::ProfileId::KhrFp16M8N16K16Sg32Wg128,
                   "choose implemented M8 profile when M16 is unavailable");
+    ok &= require(nrc::choose_training_profile(capsM8Only).profileId ==
+                      nrc::ProfileId::KhrFp16M8N16K16Sg32Wg128,
+                  "training selection chooses implemented M8 profile when M16 is unavailable");
 
     const nrc::DeviceCapabilitiesView emptyCaps{};
     ok &= require(nrc::choose_profile(emptyCaps) == nrc::ProfileId::None,
@@ -271,6 +370,23 @@ int main() {
     ok &= require(nrc::choose_profile(emptyCaps, {.allowReferenceBackend = true}) ==
                       nrc::ProfileId::ScalarReferenceWg64,
                   "reference fallback is explicit");
+    const nrc::TrainingProfileSelection emptyTraining =
+        nrc::choose_training_profile(emptyCaps);
+    ok &= require(!emptyTraining.selected,
+                  "training selection rejects empty capabilities by default");
+    ok &= require(emptyTraining.khrProfileSupport.status ==
+                      nrc::ProfileSupportStatus::MissingRequiredFeature,
+                  "training selection records missing KHR features for empty capabilities");
+    const nrc::TrainingProfileSelection emptyScalarFallback =
+        nrc::choose_training_profile(emptyCaps, {false, true, true});
+    ok &= require(emptyScalarFallback.selected,
+                  "training selection can fall back to scalar for empty capabilities");
+    ok &= require(emptyScalarFallback.status ==
+                      nrc::TrainingProfileSelectionStatus::SelectedScalarReference,
+                  "empty capability fallback records scalar status");
+    ok &= require(emptyScalarFallback.khrProfileSupport.status ==
+                      nrc::ProfileSupportStatus::MissingRequiredFeature,
+                  "empty capability fallback preserves KHR rejection reason");
     const nrc::Profile *scalarProfile =
         nrc::find_profile(nrc::ProfileId::ScalarReferenceWg64);
     ok &= require(scalarProfile != nullptr, "find scalar reference profile");

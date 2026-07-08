@@ -15,6 +15,8 @@ nrc::vulkan::VulkanDeviceCapabilities caps =
     nrc::vulkan::query_device_capabilities(physicalDevice, getCoopMatrixPropertiesKHR);
 
 nrc::ProfileId profile = nrc::choose_profile(caps.view());
+nrc::TrainingProfileSelection training =
+    nrc::choose_training_profile(caps.view());
 ```
 
 `getCoopMatrixPropertiesKHR` should usually come from the application's Vulkan loader, for example volk or `vkGetInstanceProcAddr`.
@@ -94,6 +96,29 @@ nrc::vulkan::VulkanProfileValidationReport report =
 ```
 
 `report.usable` is true only when the profile capabilities and shader config are valid and all required validation stages have passed. Failed stages always make the report unusable. `NotRun` and `Skipped` stages only block usability when the corresponding `require...` flag is set.
+
+## Training Selection Policy
+
+Use `nrc::choose_training_profile` when integrating the training path rather than directly treating `choose_profile` as a production policy decision:
+
+```cpp
+nrc::TrainingProfileSelectionOptions options{};
+options.enableExperimentalAllCoopmat = false;
+options.allowKhrGroundwork = true;
+options.allowScalarReferenceFallback = false;
+
+nrc::TrainingProfileSelection selection =
+    nrc::choose_training_profile(caps.view(), options);
+```
+
+The default selection chooses the supported KHR training shader profile but keeps the current KHR groundwork gradient behavior. Enabling `enableExperimentalAllCoopmat` selects the same KHR profile with both all-coopmat compile switches requested:
+
+```text
+NRC_KHR_USE_COOPMAT_ALL_DW=1
+NRC_KHR_USE_COOPMAT_ALL_DA=1
+```
+
+The selection carries the decisive KHR `ProfileSupportReport`, so integrations can log why a device rejected KHR training, such as missing subgroup arithmetic, missing matrix shape, or insufficient `maxComputeSharedMemorySize`. Scalar fallback is available only when `allowScalarReferenceFallback` is set.
 
 ## Shader Module Helper
 

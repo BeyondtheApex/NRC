@@ -187,7 +187,7 @@ The test:
 
 Current local result:
 
-- The default KHR gradient test, optional output-coopmat KHR gradient test, optional final-hidden-coopmat KHR gradient test, optional hidden-layer-3-coopmat KHR gradient test, optional hidden-layer-2-coopmat KHR gradient test, optional hidden-layer-1-coopmat KHR gradient test, optional hidden-layer-0-coopmat KHR gradient test, and optional all-dW-coopmat KHR gradient test all report:
+- The default KHR gradient test, optional output-coopmat KHR gradient test, optional hidden/output all-dW-coopmat KHR gradient tests, optional hidden-to-hidden dA-coopmat KHR gradient tests, optional all-dA-coopmat KHR gradient test, and optional all-coopmat KHR gradient test all report:
   - `SKIP: no Vulkan device supports an implemented NRC KHR cooperative matrix training profile`
 - This skip happens at profile selection because the current training profile requires the 98304-byte KHR backprop shared-memory layout.
 - The KHR inference dispatch test still uses `requireTraining = false`, so it is not blocked by the training shared-memory gate and can still reach pipeline creation on devices that report the inference profile.
@@ -205,3 +205,5 @@ Profiles carry an `implemented` flag. The implemented KHR inference profiles are
 After selecting a profile, integrations should call `nrc::find_profile_shader_config` and use the returned workgroup, subgroup, and cooperative-matrix dimensions to select or compile the matching shader variant. The Vulkan KHR dispatch test uses this path to choose between SG32, SG16, and M8/SG32 SPIR-V files, then uses `nrc::vulkan::create_profile_compute_pipeline` for profile-specific pipeline creation.
 
 Training profile selection additionally requires subgroup arithmetic support because the current KHR gradient helpers use `subgroupAdd` for hidden/output `dW` reductions, fp32 buffer atomic add for gradient accumulation, and enough compute shared memory for the current KHR backprop layout. Inference-only selection can pass `ProfileRequirements{.requireTraining = false}` and does not require subgroup arithmetic, fp32 buffer atomic add, or the training shared-memory allocation.
+
+`nrc::choose_training_profile` is the higher-level integration policy for training. By default it selects the supported KHR training profile with `TrainingImplementationKind::KhrGroundwork`, keeps the experimental all-coopmat switches off, and refuses silent scalar fallback. Setting `TrainingProfileSelectionOptions::enableExperimentalAllCoopmat = true` requests the same KHR profile with `NRC_KHR_USE_COOPMAT_ALL_DW=1` and `NRC_KHR_USE_COOPMAT_ALL_DA=1`. Setting `allowScalarReferenceFallback = true` allows an explicit debug/reference fallback when no allowed KHR training implementation can be selected.

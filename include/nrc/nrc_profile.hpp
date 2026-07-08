@@ -72,6 +72,20 @@ enum class ProfileSupportStatus : std::uint8_t {
     MissingSharedMemory,
 };
 
+enum class TrainingImplementationKind : std::uint8_t {
+    None,
+    KhrGroundwork,
+    KhrAllCoopmat,
+    ScalarReference,
+};
+
+enum class TrainingProfileSelectionStatus : std::uint8_t {
+    SelectedKhrGroundwork,
+    SelectedKhrAllCoopmat,
+    SelectedScalarReference,
+    NoSupportedTrainingProfile,
+};
+
 struct Profile {
     ProfileId id = ProfileId::None;
     BackendKind backend = BackendKind::None;
@@ -106,10 +120,33 @@ struct ProfileSupportReport {
     bool supported = false;
 };
 
+struct TrainingProfileSelectionOptions {
+    bool enableExperimentalAllCoopmat = false;
+    bool allowKhrGroundwork = true;
+    bool allowScalarReferenceFallback = false;
+};
+
+struct TrainingProfileSelection {
+    TrainingProfileSelectionStatus status =
+        TrainingProfileSelectionStatus::NoSupportedTrainingProfile;
+    TrainingImplementationKind implementation = TrainingImplementationKind::None;
+    ProfileId profileId = ProfileId::None;
+    const char *profileName = "NONE";
+    const ProfileShaderConfig *shaderConfig = nullptr;
+    ProfileSupportReport khrProfileSupport;
+    ProfileSupportReport scalarProfileSupport;
+    std::uint32_t requiredSharedMemoryBytes = 0;
+    bool selected = false;
+    bool fallback = false;
+    bool useKhrCoopmatAllDWeights = false;
+    bool useKhrCoopmatAllDActivation = false;
+};
+
 std::span<const Profile> profiles();
 const Profile *find_profile(ProfileId id);
 std::span<const ProfileShaderConfig> profile_shader_configs();
 const ProfileShaderConfig *find_profile_shader_config(ProfileId id);
+std::uint32_t required_training_shared_memory_bytes(const Profile &profile);
 ProfileSupportReport evaluate_profile_support(const DeviceCapabilitiesView &capabilities,
                                                const ProfileRequirements &requirements,
                                                const Profile &profile);
@@ -118,5 +155,8 @@ bool supports_profile(const DeviceCapabilitiesView &capabilities,
                       const Profile &profile);
 ProfileId choose_profile(const DeviceCapabilitiesView &capabilities,
                          const ProfileRequirements &requirements = {});
+TrainingProfileSelection choose_training_profile(
+    const DeviceCapabilitiesView &capabilities,
+    const TrainingProfileSelectionOptions &options = {});
 
 } // namespace nrc

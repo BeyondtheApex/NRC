@@ -17,6 +17,39 @@ The scalar profile is for correctness and CI. It is never selected unless explic
 
 Profile selection proves that a backend is a valid candidate for the reported capabilities. It does not prove that the driver can compile and run the backend shader. Integrations should also validate pipeline creation and, where possible, run the backend numerical validation before enabling a production KHR profile.
 
+## Training Profile Selection
+
+`nrc::choose_training_profile(capabilities, options)` is the integration-facing training policy layer built on top of `choose_profile`.
+
+The default policy is deliberately conservative:
+
+- choose a supported KHR cooperative-matrix training profile when one satisfies the capability, subgroup, matrix-shape, atomic-float, subgroup-arithmetic, and shared-memory requirements;
+- select `TrainingImplementationKind::KhrGroundwork`, which keeps the default KHR gradient shader behavior;
+- keep the experimental all-coopmat training switches disabled;
+- do not silently fall back to scalar reference training.
+
+The returned `TrainingProfileSelection` records:
+
+- selected implementation kind:
+  - `KhrGroundwork`
+  - `KhrAllCoopmat`
+  - `ScalarReference`
+- selected `ProfileId`, profile name, and `ProfileShaderConfig`;
+- the decisive KHR support report;
+- the scalar fallback support report, when scalar fallback was considered;
+- required KHR training shared-memory bytes;
+- whether the result is selected and whether it is a fallback;
+- whether integrations should compile the KHR gradient shader with:
+
+```text
+NRC_KHR_USE_COOPMAT_ALL_DW=1
+NRC_KHR_USE_COOPMAT_ALL_DA=1
+```
+
+`TrainingProfileSelectionOptions::enableExperimentalAllCoopmat = true` selects `KhrAllCoopmat` when the same KHR training profile is supported. This is intentionally opt-in until all-coopmat runtime numerical validation has passed on a device that can create and dispatch the training pipeline.
+
+`TrainingProfileSelectionOptions::allowScalarReferenceFallback = true` allows `ScalarReference` when no allowed KHR training implementation can be selected. This is intended for tests, diagnostics, and bring-up paths. Production integrations should treat scalar fallback as an explicit debug/reference choice.
+
 ## Support Diagnostics
 
 `nrc::evaluate_profile_support(capabilities, requirements, profile)` returns a `ProfileSupportReport` for one profile. It uses the same checks as `supports_profile`, but records the first decisive support status:

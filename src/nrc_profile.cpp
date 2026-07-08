@@ -140,17 +140,6 @@ bool has_matrix(const DeviceCapabilitiesView &capabilities, const Profile &profi
     return false;
 }
 
-std::uint32_t required_training_shared_memory_bytes(const Profile &profile) {
-    const ProfileShaderConfig *config = find_profile_shader_config(profile.id);
-    if (config == nullptr || config->backend != BackendKind::KhrCooperativeMatrix) {
-        return 0;
-    }
-
-    const KhrShaderSharedMemoryLayout layout =
-        compute_khr_shader_shared_memory_layout(*config);
-    return layout.valid ? layout.sharedBytes : 0;
-}
-
 bool has_required_feature_set(const DeviceCapabilitiesView &capabilities) {
     return capabilities.khrCooperativeMatrix &&
            capabilities.shaderFloat16 &&
@@ -171,6 +160,15 @@ ProfileSupportReport make_report(const Profile &profile, ProfileSupportStatus st
         profile.name,
         status,
         status == ProfileSupportStatus::Supported,
+    };
+}
+
+ProfileSupportReport make_empty_report() {
+    return {
+        ProfileId::None,
+        "NONE",
+        ProfileSupportStatus::UnsupportedBackend,
+        false,
     };
 }
 
@@ -200,6 +198,17 @@ const ProfileShaderConfig *find_profile_shader_config(ProfileId id) {
         }
     }
     return nullptr;
+}
+
+std::uint32_t required_training_shared_memory_bytes(const Profile &profile) {
+    const ProfileShaderConfig *config = find_profile_shader_config(profile.id);
+    if (config == nullptr || config->backend != BackendKind::KhrCooperativeMatrix) {
+        return 0;
+    }
+
+    const KhrShaderSharedMemoryLayout layout =
+        compute_khr_shader_shared_memory_layout(*config);
+    return layout.valid ? layout.sharedBytes : 0;
 }
 
 ProfileSupportReport evaluate_profile_support(const DeviceCapabilitiesView &capabilities,
@@ -269,6 +278,86 @@ ProfileId choose_profile(const DeviceCapabilitiesView &capabilities,
         }
     }
     return ProfileId::None;
+}
+
+TrainingProfileSelection choose_training_profile(
+    const DeviceCapabilitiesView &capabilities,
+    const TrainingProfileSelectionOptions &options) {
+    TrainingProfileSelection selection{};
+    selection.khrProfileSupport = make_empty_report();
+    selection.scalarProfileSupport = make_empty_report();
+
+    const ProfileRequirements khrTrainingRequirements{
+        true,
+        false,
+    };
+    const Profile *selectedKhrProfile = nullptr;
+    for (const Profile &profile : kProfiles) {
+        if (profile.backend != BackendKind::KhrCooperativeMatrix) {
+            continue;
+        }
+
+        const ProfileSupportReport report =
+            evaluate_profile_support(capabilities, khrTrainingRequirements, profile);
+        if (selection.khrProfileSupport.profileId == ProfileId::None) {
+            selection.khrProfileSupport = report;
+        }
+        if (report.supported) {
+            selection.khrProfileSupport = report;
+            selectedKhrProfile = &profile;
+            break;
+        }
+    }
+
+    if (selectedKhrProfile != nullptr) {
+        if (options.enableExperimentalAllCoopmat) {
+            selection.status = TrainingProfileSelectionStatus::SelectedKhrAllCoopmat;
+            selection.implementation = TrainingImplementationKind::KhrAllCoopmat;
+            selection.profileId = selectedKhrProfile->id;
+            selection.profileName = selectedKhrProfile->name;
+            selection.shaderConfig = find_profile_shader_config(selectedKhrProfile->id);
+            selection.requiredSharedMemoryBytes =
+                required_training_shared_memory_bytes(*selectedKhrProfile);
+            selection.selected = true;
+            selection.useKhrCoopmatAllDWeights = true;
+            selection.useKhrCoopmatAllDActivation = true;
+            return selection;
+        }
+
+        if (options.allowKhrGroundwork) {
+            selection.status = TrainingProfileSelectionStatus::SelectedKhrGroundwork;
+            selection.implementation = TrainingImplementationKind::KhrGroundwork;
+            selection.profileId = selectedKhrProfile->id;
+            selection.profileName = selectedKhrProfile->name;
+            selection.shaderConfig = find_profile_shader_config(selectedKhrProfile->id);
+            selection.requiredSharedMemoryBytes =
+                required_training_shared_memory_bytes(*selectedKhrProfile);
+            selection.selected = true;
+            return selection;
+        }
+    }
+
+    const Profile *scalarProfile = find_profile(ProfileId::ScalarReferenceWg64);
+    if (scalarProfile != nullptr) {
+        const ProfileRequirements scalarRequirements{
+            true,
+            options.allowScalarReferenceFallback,
+        };
+        selection.scalarProfileSupport =
+            evaluate_profile_support(capabilities, scalarRequirements, *scalarProfile);
+        if (selection.scalarProfileSupport.supported) {
+            selection.status = TrainingProfileSelectionStatus::SelectedScalarReference;
+            selection.implementation = TrainingImplementationKind::ScalarReference;
+            selection.profileId = scalarProfile->id;
+            selection.profileName = scalarProfile->name;
+            selection.shaderConfig = find_profile_shader_config(scalarProfile->id);
+            selection.selected = true;
+            selection.fallback = true;
+            return selection;
+        }
+    }
+
+    return selection;
 }
 
 } // namespace nrc

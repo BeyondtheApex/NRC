@@ -5689,3 +5689,93 @@ The combined mode does not add new shader storage. It relies on the existing all
 ### Next Step
 
 Start moving from experimental test profiles toward an integration-facing KHR training profile contract. The next useful step is to document and implement profile-selection policy for when cooperative-matrix training should be enabled by default, including explicit device capability requirements, shared-memory limits, subgroup size selection, matrix shape selection, and a clean fallback to the scalar/subgroup KHR path when a device cannot satisfy the all-coopmat profile.
+
+## 2026-07-09 - Milestone 83 Training Profile Selection Contract
+
+### Implemented
+
+- Added an integration-facing training profile selection layer in `nrc_profile`:
+  - `TrainingImplementationKind`
+  - `TrainingProfileSelectionStatus`
+  - `TrainingProfileSelectionOptions`
+  - `TrainingProfileSelection`
+  - `choose_training_profile`
+- Exposed `required_training_shared_memory_bytes` so integrations can report the exact KHR training shared-memory requirement for a selected profile.
+- Kept `choose_profile` unchanged. It still selects a raw profile candidate from renderer-neutral capabilities.
+- Added conservative default training policy:
+  - select a supported KHR training profile when the device satisfies the existing training requirements;
+  - choose `TrainingImplementationKind::KhrGroundwork`;
+  - keep `NRC_KHR_USE_COOPMAT_ALL_DW` and `NRC_KHR_USE_COOPMAT_ALL_DA` disabled by default;
+  - refuse silent scalar fallback.
+- Added explicit experimental all-coopmat selection:
+  - `TrainingProfileSelectionOptions::enableExperimentalAllCoopmat = true`;
+  - selected implementation becomes `TrainingImplementationKind::KhrAllCoopmat`;
+  - returned flags request both all-coopmat compile switches:
+    - `NRC_KHR_USE_COOPMAT_ALL_DW=1`
+    - `NRC_KHR_USE_COOPMAT_ALL_DA=1`
+- Added explicit scalar-reference fallback policy:
+  - `TrainingProfileSelectionOptions::allowScalarReferenceFallback = true`;
+  - scalar selection records `fallback = true`;
+  - the decisive KHR rejection report is preserved for diagnostics.
+- Extended `nrc_profile_layout_test` to cover:
+  - default KHR groundwork selection;
+  - explicit all-coopmat selection;
+  - disabled KHR modes;
+  - scalar fallback when KHR modes are disabled;
+  - scalar fallback when KHR training shared memory is insufficient;
+  - SG16 training profile selection when SG32 is unavailable;
+  - M8 training profile selection when M16 is unavailable;
+  - empty-capability KHR rejection with optional scalar fallback.
+- Updated current documentation:
+  - `docs/profile_and_layout.md`
+  - `docs/vulkan_capability_query.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/vulkan_dispatch_harness.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+The new selection layer separates three decisions that were previously implicit:
+
+```text
+choose_profile:           select a raw implemented shader profile
+choose_training_profile:  choose a training implementation policy for integration
+Vulkan validation:        prove shader module, pipeline, and numerical execution status
+```
+
+Default integration behavior is intentionally conservative:
+
+```text
+caps support KHR training -> KhrGroundwork
+caps support KHR training + enableExperimentalAllCoopmat -> KhrAllCoopmat
+KHR unsupported + allowScalarReferenceFallback -> ScalarReference
+KHR unsupported without scalar fallback -> NoSupportedTrainingProfile
+```
+
+This keeps all-coopmat available for integration testing without declaring it the production default before real-device numerical validation exists.
+
+### Validation
+
+- Targeted profile contract build succeeded:
+  - `cmake --build build --config Debug --target nrc_profile_layout_test`
+- Targeted profile contract test succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_profile_layout_test" --output-on-failure -V`
+- Targeted profile contract result:
+  - `1/1 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `85/85 tests passed`
+
+### Current Limitations
+
+- `choose_training_profile` is a capability/profile policy layer. It does not prove Vulkan shader module creation, pipeline creation, dispatch, numerical correctness, or performance.
+- All-coopmat remains experimental and opt-in through `enableExperimentalAllCoopmat`.
+- Local KHR training runtime numerical comparison is still blocked by the 98304-byte shared-memory profile gate on the current device.
+- The current selection contract does not yet include runtime validation cache/state. Integrations still need to feed shader module, pipeline, and numerical validation results through the existing Vulkan validation report path.
+
+### Next Step
+
+Connect the training selection contract to the Vulkan runtime harness and sample-facing integration path. The useful next shape is a small host-side plan object that combines `TrainingProfileSelection`, `ProfileShaderConfig`, shader compile defines, and Vulkan validation results, so an application can log exactly which NRC training path it is using and why it fell back.
