@@ -120,10 +120,9 @@ void NrcGradientKhrMain() {
 
     float dHidden4[NRC_NN_HIDDEN_WIDTH];
     NrcKhrPropagateOutputDActivation(dOutput, dHidden4);
-    NrcKhrAccumulateHiddenDWeights(NRC_NN_HIDDEN_LAYER_COUNT - 1u,
-                                   NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE,
-                                   NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE,
-                                   dHidden4);
+    NrcKhrAccumulateFinalHiddenDWeightsWorkgroup(NRC_NN_HIDDEN_LAYER_COUNT - 1u,
+                                                 NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE,
+                                                 NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE);
 
     float dHidden3[NRC_NN_HIDDEN_WIDTH];
     NrcKhrPropagateHiddenDActivation(NRC_NN_HIDDEN_LAYER_COUNT - 1u,

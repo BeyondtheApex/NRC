@@ -3523,3 +3523,58 @@ This preserves the current row-major fp32 gradient layout and keeps the hidden-l
 ### Next Step
 
 Use the same `nrc::reference_backward_khr_fp16` oracle while replacing more scalar accumulation with subgroup or cooperative-matrix reduction, starting with a tighter output-layer reduction strategy or the first hidden-layer region.
+
+## 2026-07-09 - Milestone 53 KHR Final Hidden Workgroup Gradient Reduction
+
+### Implemented
+
+- Added shared-output-derivative helpers to `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl`:
+  - `NrcKhrReadSharedOutputDerivative`
+  - `NrcKhrPropagateSharedOutputDActivation`
+- Added `NrcKhrAccumulateFinalHiddenDWeightsWorkgroup`, a scalar workgroup reduction helper for hidden-layer 4 `dW`.
+- Changed `shaders/nrc/passes/NrcGradientKhr.glsl` so hidden-layer 4 uses the workgroup-reduced helper after output-to-hidden derivative propagation.
+- Updated `tests/shader_compile/nrc_khr_backprop_smoke.comp` so the backprop compile smoke test exercises the same final-hidden helper as the pass.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+The output-layer workgroup reduction leaves each invocation's 3-value output derivative in the active shared-memory tile. The new final-hidden helper reuses that cached `dOutput` to recompute each sample's hidden-layer 4 derivative for the specific row being reduced:
+
+```text
+dA4[row] = transpose(Wout)[row] * dOutput
+dZ4[row] = A4[row] > 0 ? dA4[row] : 0
+dW4[row, col] = sum_samples(dZ4[row] * A3[col])
+```
+
+Each invocation owns a strided subset of the 64x64 hidden-layer 4 weight region, sums that weight across the full workgroup, and emits one fp32 atomic add per covered weight per workgroup. This preserves the existing row-major fp32 gradient layout and keeps `dHidden4` available locally for hidden-layer 3 propagation.
+
+### Validation
+
+- Targeted KHR shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr|nrc_shader_khr_backprop" --output-on-failure -V`
+- Targeted KHR gradient test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime test succeeded with controlled skip:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr_test" --output-on-failure -V`
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `33/33 tests passed`
+
+### Current Limitations
+
+- Output-layer and hidden-layer 4 `dW` reductions are scalar workgroup loops, not cooperative-matrix or subgroup reductions.
+- Hidden-layer 3/2/1/0 `dW` helpers still use scalar per-sample accumulation.
+- The current correctness path still depends on fp32 storage-buffer atomic add.
+- Runtime numerical comparison for the KHR shader still did not execute on this machine because the local AMD KHR pipeline creation path reports a controlled structured-exception skip.
+- The final-hidden helper deliberately recomputes hidden-layer 4 derivatives from cached output derivatives instead of storing a full fp32 `dA4` tile in shared memory. This avoids overwriting saved activation snapshots but is not yet the final performance plan.
+
+### Next Step
+
+Plan the next hidden-layer reduction step. Hidden-layer 3 and earlier cannot reuse only the cached 3-value output derivative; they need either a compact shared derivative snapshot, a recomputation strategy, or a subgroup/cooperative-matrix reduction design that preserves the saved activation snapshots and remains stable across SG16/SG32 and M8/M16 profiles.

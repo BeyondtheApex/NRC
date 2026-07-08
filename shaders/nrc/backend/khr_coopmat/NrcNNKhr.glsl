@@ -446,6 +446,48 @@ void NrcKhrAccumulateHiddenDWeights(uint layer,
     }
 }
 
+float NrcKhrReadSharedOutputDerivative(uint sampleIndex, uint row) {
+    return uintBitsToFloat(nrcKhrSharedBuffer[sampleIndex][row]);
+}
+
+float NrcKhrPropagateSharedOutputDActivation(uint sampleIndex, uint col) {
+    uint outputOffset = NrcKhrLayerWeightFloatOffset(NRC_NN_HIDDEN_LAYER_COUNT);
+    float value = 0.0;
+    for (uint row = 0u; row < NRC_NN_OUTPUT_WIDTH; ++row) {
+        value += NrcKhrLoadWeightFloat(outputOffset + row * NRC_NN_HIDDEN_WIDTH + col) *
+                 NrcKhrReadSharedOutputDerivative(sampleIndex, row);
+    }
+    return value;
+}
+
+void NrcKhrAccumulateFinalHiddenDWeightsWorkgroup(uint layer,
+                                                 uint activationBaseOffset,
+                                                 uint sourceBaseOffset) {
+    uint layerOffset = NrcKhrLayerWeightFloatOffset(layer);
+    for (uint weight = gl_LocalInvocationID.x;
+         weight < NRC_NN_HIDDEN_WIDTH * NRC_NN_HIDDEN_WIDTH;
+         weight += NRC_KHR_WORKGROUP_SIZE) {
+        uint row = weight / NRC_NN_HIDDEN_WIDTH;
+        uint col = weight - row * NRC_NN_HIDDEN_WIDTH;
+        float value = 0.0;
+        for (uint sampleIndexInGroup = 0u;
+             sampleIndexInGroup < NRC_KHR_WORKGROUP_SIZE;
+             ++sampleIndexInGroup) {
+            float activation = NrcKhrReadBackpropActivationFrom(activationBaseOffset,
+                                                                sampleIndexInGroup,
+                                                                row);
+            float dActivation = NrcKhrPropagateSharedOutputDActivation(sampleIndexInGroup, row);
+            float dPreActivation = activation > 0.0 ? dActivation : 0.0;
+            float srcActivation = NrcKhrReadBackpropActivationFrom(sourceBaseOffset,
+                                                                   sampleIndexInGroup,
+                                                                   col);
+            value += dPreActivation * srcActivation;
+        }
+        NrcKhrGradientAtomicAdd(layerOffset + row * NRC_NN_HIDDEN_WIDTH + col, value);
+    }
+    barrier();
+}
+
 void NrcKhrAccumulateInputHiddenDWeights(float dActivation[NRC_NN_HIDDEN_WIDTH],
                                          uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT]) {
     uint sampleIndex = gl_LocalInvocationID.x;
