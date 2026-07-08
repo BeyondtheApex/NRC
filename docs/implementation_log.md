@@ -603,3 +603,68 @@ SKIP: vkCreateComputePipelines raised a structured exception for the KHR coopera
 ### Next Step
 
 Add a reusable backend validation/runtime contract that distinguishes capability support, pipeline creation success, and numerical validation status. Then continue toward the first queue-consuming inference pass, using scalar dispatch as the correctness anchor while the KHR backend remains driver-gated.
+
+## 2026-07-08 - Milestone 9 Scalar Queue Inference Pass Header
+
+### Implemented
+
+- Added first queue-consuming inference pass header:
+  - `shaders/nrc/passes/NrcInferenceScalar.glsl`
+- Added shader compile smoke test:
+  - `tests/shader_compile/nrc_inference_scalar_smoke.comp`
+- Registered CTest test:
+  - `nrc_shader_inference_scalar_compile`
+- Added design note:
+  - `docs/inference_pass.md`
+- Updated project structure documentation to describe shader-header passes.
+
+### VkNRC Compatibility Decisions
+
+- The pass mirrors VkNRC's inference responsibilities:
+  - consume `NrcEvalRecord`;
+  - unpack packed renderer input;
+  - encode the 64-value NRC input;
+  - run NN inference;
+  - clamp prediction to non-negative values;
+  - apply `bias + factor * prediction` to either screen output or train-record bias.
+- Screen output keeps VkNRC's split:
+  - `rgba32f` image stores `bias.rgb` and `factor.r`;
+  - `rg32f` image stores `factor.g` and `factor.b`.
+- Train output uses this repository's flat train-record resource layout:
+  - `batch * NRC_TRAIN_BATCH_SIZE + index`
+  - This differs from VkNRC's descriptor-array-of-batches model but preserves the data semantics and is easier for downstream engines that do not want descriptor arrays.
+
+### Integration Boundary
+
+The pass deliberately does not know scene or material layout. Integrations must provide:
+
+```glsl
+NrcUnpackedInput NrcUnpackPackedInput(PackedNrcInput packedInput);
+```
+
+This keeps the NRC library reusable while preserving VkNRC's packed input record and encoding behavior.
+
+### Validation
+
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `11/11 tests passed`
+- The new inference pass is compile-validated through a smoke shader that provides a fake deterministic scene unpack function.
+
+### Current Limitations
+
+- The scalar inference pass has not yet been dispatched on Vulkan.
+- No test yet verifies actual screen image or train-record mutation.
+- No KHR inference pass exists yet; KHR remains blocked on driver pipeline creation on the current AMD machine.
+- Scene/material unpacking is still only represented by a test fake. The reference path tracer must provide the real implementation.
+- No indirect dispatch generation or eval count reset/update pass exists yet.
+- No gradient/backpropagation or optimizer GPU pass has been implemented yet.
+
+### Next Step
+
+Add a Vulkan dispatch test for `NrcInferenceScalar.glsl` with a fake scene unpack and small screen/train buffers. That test should verify that screen destinations and train destinations are both updated exactly as expected before moving on to the reference path tracer integration.

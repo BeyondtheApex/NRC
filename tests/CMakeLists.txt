@@ -47,6 +47,13 @@ if(NRC_GLSLC)
             "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_scalar_smoke.comp"
             "-o"
             "${CMAKE_CURRENT_BINARY_DIR}/nrc_scalar_smoke.spv")
+    add_test(NAME nrc_shader_inference_scalar_compile
+        COMMAND "${NRC_GLSLC}"
+            "--target-env=vulkan1.3"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_inference_scalar_smoke.comp"
+            "-o"
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_inference_scalar_smoke.spv")
     add_test(NAME nrc_shader_khr_sg32_compile
         COMMAND "${NRC_GLSLC}"
             "--target-env=vulkan1.3"

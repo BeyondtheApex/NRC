@@ -13,7 +13,7 @@ shaders/nrc/backend/
   Neural-network execution backends. KHR cooperative matrix is the first production target.
 
 shaders/nrc/passes/
-  Standard compute passes: indirect dispatch generation, inference, train preparation, gradient, and optimizer.
+  Standard shader-header passes: indirect dispatch generation, inference, train preparation, gradient, and optimizer.
 
 runtime/vulkan/
   Optional Vulkan helper implementation for applications that want a ready-made runtime wrapper.

@@ -1,0 +1,31 @@
+#version 460
+
+#define NRC_NN_SET 0
+#define NRC_NN_WEIGHTS_BINDING 0
+#define NRC_INFERENCE_SET 0
+
+#include "nrc/common/NrcEncoding.glsl"
+
+NrcUnpackedInput NrcUnpackPackedInput(PackedNrcInput packedInput) {
+    vec2 barycentric = unpackUnorm2x16(packedInput.barycentric2x16U);
+    vec2 scatteredDir = unpackUnorm2x16(packedInput.scatteredDir2x16U);
+    uint primitiveBits = packedInput.primitiveId;
+    uint instanceBits = packedInput.flipBitInstanceId & 0x7fffffffu;
+
+    NrcUnpackedInput unpackedInput;
+    unpackedInput.position = vec3(barycentric, float(primitiveBits & 255u) / 255.0);
+    unpackedInput.scatteredDir = scatteredDir;
+    unpackedInput.normal = vec2(float(instanceBits & 255u) / 255.0, 0.5);
+    unpackedInput.roughness = 0.35;
+    unpackedInput.diffuse = vec3(0.7, 0.6, 0.5);
+    unpackedInput.specular = vec3(0.1, 0.2, 0.3);
+    return unpackedInput;
+}
+
+#include "nrc/passes/NrcInferenceScalar.glsl"
+
+layout(local_size_x = NRC_INFERENCE_WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    NrcInferenceScalarMain();
+}
