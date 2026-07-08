@@ -173,13 +173,15 @@ HiddenLayers reference_forward_hidden_layers_fp16(std::span<const float> weights
 std::vector<float> make_expected_khr_groundwork_gradients(std::span<const float> gpuVisibleWeights,
                                                           const std::vector<nrc::NrcTrainRecord> &trainRecords) {
     std::vector<float> gradients(nrc::weight_count(), 0.0f);
-    constexpr std::uint32_t firstCoveredHiddenLayer = nrc::kNnHiddenLayerCount - 4u;
+    constexpr std::uint32_t firstCoveredHiddenLayer = 0u;
     const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
 
     for (std::uint32_t i = 0; i < kTrainCount; ++i) {
         nrc::EncodedInput encoded{};
         nrc::encode_input(unpack_test_input(trainRecords[i].packedInput), encoded);
 
+        HiddenVector inputActivation{};
+        std::copy(encoded.begin(), encoded.end(), inputActivation.begin());
         const HiddenLayers hiddenLayers = reference_forward_hidden_layers_fp16(gpuVisibleWeights, encoded);
         const HiddenVector &finalHidden = hiddenLayers[nrc::kNnHiddenLayerCount - 1u];
 
@@ -228,7 +230,7 @@ std::vector<float> make_expected_khr_groundwork_gradients(std::span<const float>
             const auto layer = static_cast<std::uint32_t>(signedLayer);
             const std::size_t layerOffset = nrc::layer_weight_offset(layer);
             const HiddenVector &activation = hiddenLayers[layer];
-            const HiddenVector &sourceActivation = hiddenLayers[layer - 1u];
+            const HiddenVector &sourceActivation = layer == 0u ? inputActivation : hiddenLayers[layer - 1u];
 
             for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
                 const float dPreActivation = activation[row] > 0.0f ? dActivation[row] : 0.0f;
@@ -851,8 +853,7 @@ int main(int argc, char **argv) {
 
         bool ok = true;
         std::uint32_t mismatchCount = 0;
-        const std::size_t firstCoveredHiddenOffset =
-            nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 4u);
+        const std::size_t firstCoveredHiddenOffset = nrc::layer_weight_offset(0u);
         const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
         for (std::uint32_t i = 0; i < nrc::weight_count(); ++i) {
             const bool coveredHiddenWeight = i >= firstCoveredHiddenOffset && i < outputOffset;

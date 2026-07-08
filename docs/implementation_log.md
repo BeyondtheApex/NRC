@@ -3354,3 +3354,64 @@ while preserving the existing output-layer and hidden-layer 4/3/2 gradient behav
 ### Next Step
 
 Add hidden-layer 0 coverage by saving the encoded input activation tile before the first hidden layer, then compare the full hidden/output KHR gradient layout against the scalar reference shape before moving to cooperative-matrix/subgroup reduction work.
+
+## 2026-07-09 - Milestone 50 KHR Full Hidden/Output Gradient Groundwork
+
+### Implemented
+
+- Extended `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl` with encoded-input source reads for hidden-layer 0 `dW`.
+- Added `NrcKhrAccumulateInputHiddenDWeights`, which:
+  - uses the saved hidden-layer 0 activation snapshot for the ReLU gate;
+  - reads the encoded input from the invocation-local encoded array;
+  - writes hidden-layer 0 `dW` into the same row-major fp32 gradient layout as the scalar path.
+- Updated `shaders/nrc/passes/NrcGradientKhr.glsl` so the current KHR gradient path now:
+  1. accumulates output-layer `dW`;
+  2. backpropagates and accumulates hidden-layer 4 `dW`;
+  3. backpropagates and accumulates hidden-layer 3 `dW`;
+  4. backpropagates and accumulates hidden-layer 2 `dW`;
+  5. backpropagates and accumulates hidden-layer 1 `dW`;
+  6. backpropagates and accumulates hidden-layer 0 `dW`.
+- Updated `tests/shader_compile/nrc_khr_backprop_smoke.comp` to exercise the hidden-layer 0 path.
+- Extended `tests/vulkan_gradient_khr_test.cpp` so the fp16-rounded KHR CPU oracle and comparison cover every hidden/output weight region.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+This milestone completes the correctness-groundwork gradient coverage for the current 5-hidden-layer NRC network shape. The shader pass now computes hidden-layer 0 gradients as:
+
+```text
+dA0 = transpose(W1) * dZ1
+dW0 = dZ0 * transpose(encodedInput)
+```
+
+The encoded input is kept in the invocation-local array instead of adding another full shared-memory activation snapshot. This keeps the current scalar layer-0 accumulation path aligned with the existing pass ABI while avoiding additional shared-memory pressure.
+
+### Validation
+
+- Targeted KHR shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr|nrc_shader_khr_backprop" --output-on-failure -V`
+- Targeted KHR gradient test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `32/32 tests passed`
+- Targeted KHR gradient runtime test succeeded with controlled skip:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr_test" --output-on-failure -V`
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+
+### Current Limitations
+
+- Full hidden/output `dW` coverage exists, but the helpers are still scalar per sample invocation and not cooperative-matrix/subgroup reductions.
+- The current correctness path still depends on fp32 storage-buffer atomic add.
+- Runtime numerical comparison for the full KHR gradient did not execute on this machine because the current local AMD KHR pipeline creation path still reports a controlled structured-exception skip.
+- Saved activation snapshots still cover five 128-sample activation tiles in shared memory. The layer-0 encoded input is kept local, but the broader saved-activation strategy remains a correctness-groundwork choice rather than the final production-memory plan.
+
+### Next Step
+
+Compare and document the full KHR-gradient groundwork against the scalar/reference gradient shape in more detail, then begin replacing scalar per-sample accumulation with cooperative-matrix/subgroup reduction while keeping the same full hidden/output coverage.

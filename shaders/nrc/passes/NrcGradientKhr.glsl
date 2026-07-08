@@ -154,6 +154,13 @@ void NrcGradientKhrMain() {
                                    NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE,
                                    NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE,
                                    dHidden1);
+
+    float dHidden0[NRC_NN_HIDDEN_WIDTH];
+    NrcKhrPropagateHiddenDActivation(NRC_NN_HIDDEN_LAYER_COUNT - 4u,
+                                     NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE,
+                                     dHidden1,
+                                     dHidden0);
+    NrcKhrAccumulateInputHiddenDWeights(dHidden0, encoded);
 }
 
 #endif

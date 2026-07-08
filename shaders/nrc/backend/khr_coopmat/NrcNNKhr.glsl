@@ -339,6 +339,11 @@ float NrcKhrReadBackpropOldestSourceActivation(uint sampleIndex, uint feature) {
                                             feature);
 }
 
+float NrcKhrReadEncodedActivation(uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT], uint feature) {
+    return NrcKhrUnpackFeature(encoded[feature / NRC_FP16_PER_UVEC4],
+                               feature & (NRC_FP16_PER_UVEC4 - 1u));
+}
+
 void NrcKhrOutputDerivative(vec3 prediction, vec3 target, out float dOutput[NRC_NN_OUTPUT_WIDTH]) {
     float luminance = dot(vec3(0.299, 0.587, 0.114), max(prediction, vec3(0.0)));
     float denominator = luminance * luminance + 0.01;
@@ -409,6 +414,20 @@ void NrcKhrAccumulateHiddenDWeights(uint layer,
                                                                    sampleIndex,
                                                                    col);
             NrcKhrGradientAtomicAdd(layerOffset + row * NRC_NN_HIDDEN_WIDTH + col,
+                                    dPreActivation * srcActivation);
+        }
+    }
+}
+
+void NrcKhrAccumulateInputHiddenDWeights(float dActivation[NRC_NN_HIDDEN_WIDTH],
+                                         uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT]) {
+    uint sampleIndex = gl_LocalInvocationID.x;
+    for (uint row = 0u; row < NRC_NN_HIDDEN_WIDTH; ++row) {
+        float activation = NrcKhrReadBackpropOldestSourceActivation(sampleIndex, row);
+        float dPreActivation = activation > 0.0 ? dActivation[row] : 0.0;
+        for (uint col = 0u; col < NRC_NN_HIDDEN_WIDTH; ++col) {
+            float srcActivation = NrcKhrReadEncodedActivation(encoded, col);
+            NrcKhrGradientAtomicAdd(row * NRC_NN_HIDDEN_WIDTH + col,
                                     dPreActivation * srcActivation);
         }
     }
