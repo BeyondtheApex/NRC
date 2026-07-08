@@ -49,6 +49,7 @@ Unsupported component types are mapped to `ComponentType::Unknown` and therefore
 
 - capability/profile support from `nrc::evaluate_profile_support`;
 - shader config lookup through `nrc::find_profile_shader_config`;
+- shader module creation status supplied by the caller;
 - pipeline creation status supplied by the caller;
 - numerical validation status supplied by the caller.
 
@@ -66,8 +67,10 @@ Strict integration check after a renderer has tried to create and validate its p
 
 ```cpp
 nrc::vulkan::VulkanProfileValidationRequirements validation{};
+validation.requireShaderModuleCreation = true;
 validation.requirePipelineCreation = true;
 validation.requireNumericalValidation = true;
+validation.shaderModuleCreation.status = nrc::vulkan::VulkanValidationStepStatus::Passed;
 validation.pipelineCreation.status = nrc::vulkan::VulkanValidationStepStatus::Passed;
 validation.numericalValidation.status = nrc::vulkan::VulkanValidationStepStatus::Passed;
 
@@ -76,6 +79,18 @@ nrc::vulkan::VulkanProfileValidationReport report =
 ```
 
 `report.usable` is true only when the profile capabilities and shader config are valid and all required validation stages have passed. Failed stages always make the report unusable. `NotRun` and `Skipped` stages only block usability when the corresponding `require...` flag is set.
+
+## Shader Module Helper
+
+`nrc::vulkan::create_shader_module` creates a `VkShaderModule` from caller-supplied SPIR-V words and returns a `VulkanValidationStep`.
+
+Header:
+
+```cpp
+#include "nrc/vulkan/nrc_vulkan_shader.hpp"
+```
+
+The helper does not read files or own the returned shader module. Callers keep control of their asset system and must destroy the result with `vkDestroyShaderModule`.
 
 ## Profile Compute Pipeline Helper
 
@@ -103,4 +118,4 @@ The helper does not own the returned pipeline. Callers must destroy it with `vkD
 
 ## Current Limit
 
-This module reports capabilities, aggregates profile validation state, and provides a small profile-aware compute pipeline creation helper. It does not create devices, enable features, compile shaders, create shader modules, create pipeline layouts, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own renderer code, then feed pipeline/numerical outcomes back into `VulkanProfileValidationRequirements`.
+This module reports capabilities, aggregates profile validation state, creates shader modules from already-loaded SPIR-V words, and provides a small profile-aware compute pipeline creation helper. It does not create devices, enable features, compile shaders, read shader files, create pipeline layouts, create descriptors/resources, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own renderer code, then feed shader/pipeline/numerical outcomes back into `VulkanProfileValidationRequirements`.

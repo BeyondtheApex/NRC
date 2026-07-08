@@ -3,6 +3,7 @@
 #include "nrc/nrc_weights.hpp"
 #include "nrc/vulkan/nrc_vulkan_capabilities.hpp"
 #include "nrc/vulkan/nrc_vulkan_pipeline.hpp"
+#include "nrc/vulkan/nrc_vulkan_shader.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -388,6 +389,7 @@ private:
 
             physicalDevice_ = device;
             selectedProfile_ = profile;
+            selectedCapabilities_ = std::move(capabilities);
             queueFamilyIndex_ = computeQueue;
             vkGetPhysicalDeviceMemoryProperties(device, &memoryProperties_);
             return;
@@ -502,20 +504,36 @@ private:
     void create_pipeline(const char *spirvPath) {
         const std::vector<std::uint32_t> spirv = read_spirv(spirvPath);
 
-        VkShaderModuleCreateInfo shaderInfo{};
-        shaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        shaderInfo.codeSize = spirv.size() * sizeof(std::uint32_t);
-        shaderInfo.pCode = spirv.data();
-
-        VkShaderModule shaderModule = VK_NULL_HANDLE;
-        check_vk(vkCreateShaderModule(device_, &shaderInfo, nullptr, &shaderModule), "vkCreateShaderModule");
-
         const nrc::ProfileShaderConfig *config = nrc::find_profile_shader_config(selectedProfile_->id);
         if (config == nullptr) {
-            vkDestroyShaderModule(device_, shaderModule, nullptr);
             throw std::runtime_error("selected KHR profile has no shader config");
         }
 
+        nrc::ProfileRequirements profileRequirements{};
+        profileRequirements.requireTraining = false;
+        profileRequirements.allowReferenceBackend = false;
+
+        nrc::vulkan::VulkanShaderModuleCreateInfo shaderCreateInfo{};
+        shaderCreateInfo.device = device_;
+        shaderCreateInfo.code = std::span<const std::uint32_t>(spirv.data(), spirv.size());
+        const nrc::vulkan::VulkanShaderModuleCreateResult shaderResult =
+            nrc::vulkan::create_shader_module(shaderCreateInfo);
+
+        nrc::vulkan::VulkanProfileValidationRequirements validationRequirements{};
+        validationRequirements.requireShaderModuleCreation = true;
+        validationRequirements.shaderModuleCreation = shaderResult.validation;
+        nrc::vulkan::VulkanProfileValidationReport validationReport =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                selectedCapabilities_,
+                profileRequirements,
+                *selectedProfile_,
+                validationRequirements);
+        if (!validationReport.usable) {
+            check_vk(validationReport.shaderModuleCreation.vkResult, "vkCreateShaderModule");
+            throw std::runtime_error("selected KHR profile failed Vulkan shader module validation");
+        }
+
+        VkShaderModule shaderModule = shaderResult.shaderModule;
         nrc::vulkan::VulkanComputePipelineCreateInfo pipelineCreateInfo{};
         pipelineCreateInfo.device = device_;
         pipelineCreateInfo.pipelineLayout = pipelineLayout_;
@@ -525,10 +543,22 @@ private:
         const nrc::vulkan::VulkanComputePipelineCreateResult pipelineResult =
             nrc::vulkan::create_profile_compute_pipeline(pipelineCreateInfo);
         vkDestroyShaderModule(device_, shaderModule, nullptr);
-        if (pipelineResult.validation.structuredException) {
+
+        validationRequirements.requirePipelineCreation = true;
+        validationRequirements.pipelineCreation = pipelineResult.validation;
+        validationReport =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                selectedCapabilities_,
+                profileRequirements,
+                *selectedProfile_,
+                validationRequirements);
+        if (validationReport.pipelineCreation.structuredException) {
             throw SkipTest("vkCreateComputePipelines raised a structured exception for the KHR cooperative matrix shader");
         }
-        check_vk(pipelineResult.validation.vkResult, "vkCreateComputePipelines");
+        if (!validationReport.usable) {
+            check_vk(validationReport.pipelineCreation.vkResult, "vkCreateComputePipelines");
+            throw std::runtime_error("selected KHR profile failed Vulkan pipeline validation");
+        }
         pipeline_ = pipelineResult.pipeline;
     }
 
@@ -723,6 +753,7 @@ private:
     VkQueue queue_ = VK_NULL_HANDLE;
     std::uint32_t queueFamilyIndex_ = 0;
     const nrc::Profile *selectedProfile_ = nullptr;
+    nrc::vulkan::VulkanDeviceCapabilities selectedCapabilities_{};
     PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR getCooperativeMatrixProperties_ = nullptr;
     VkDescriptorSetLayout descriptorSetLayout_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;

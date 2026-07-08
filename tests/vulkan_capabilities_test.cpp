@@ -1,5 +1,6 @@
 #include "nrc/vulkan/nrc_vulkan_capabilities.hpp"
 #include "nrc/vulkan/nrc_vulkan_pipeline.hpp"
+#include "nrc/vulkan/nrc_vulkan_shader.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -59,6 +60,16 @@ int main() {
     auto noSubgroup = nrc::vulkan::translate_cooperative_matrix_property(property, VK_SHADER_STAGE_COMPUTE_BIT);
     ok &= require(!noSubgroup.has_value(), "reject non-subgroup cooperative matrix property");
 
+    const nrc::vulkan::VulkanShaderModuleCreateResult invalidShaderModule =
+        nrc::vulkan::create_shader_module({});
+    ok &= require(invalidShaderModule.shaderModule == VK_NULL_HANDLE,
+                  "invalid shader module request returns null shader module");
+    ok &= require(invalidShaderModule.validation.status ==
+                      nrc::vulkan::VulkanValidationStepStatus::Failed,
+                  "invalid shader module request fails safely");
+    ok &= require(invalidShaderModule.validation.vkResult == VK_ERROR_INITIALIZATION_FAILED,
+                  "invalid shader module request records initialization failure");
+
     const nrc::vulkan::VulkanComputePipelineCreateResult invalidPipeline =
         nrc::vulkan::create_profile_compute_pipeline({});
     ok &= require(invalidPipeline.pipeline == VK_NULL_HANDLE,
@@ -107,12 +118,64 @@ int main() {
         ok &= require(report.shaderConfig != nullptr &&
                           report.shaderConfig->id == khrProfile->id,
                       "Vulkan validation report carries shader config");
+        ok &= require(report.shaderModuleCreation.status ==
+                          nrc::vulkan::VulkanValidationStepStatus::NotRun,
+                      "Vulkan validation defaults shader module creation to not run");
         ok &= require(report.pipelineCreation.status ==
                           nrc::vulkan::VulkanValidationStepStatus::NotRun,
                       "Vulkan validation defaults pipeline creation to not run");
         ok &= require(report.numericalValidation.status ==
                           nrc::vulkan::VulkanValidationStepStatus::NotRun,
                       "Vulkan validation defaults numerical validation to not run");
+
+        nrc::vulkan::VulkanProfileValidationRequirements requireShaderModule{};
+        requireShaderModule.requireShaderModuleCreation = true;
+        const nrc::vulkan::VulkanProfileValidationReport missingShaderModule =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                validCapabilities,
+                {},
+                *khrProfile,
+                requireShaderModule);
+        ok &= require(!missingShaderModule.usable,
+                      "required shader module creation blocks usable report when not run");
+        ok &= require(missingShaderModule.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::ShaderModuleCreationNotRun,
+                      "Vulkan validation reports missing shader module creation");
+
+        requireShaderModule.shaderModuleCreation.status = nrc::vulkan::VulkanValidationStepStatus::Passed;
+        const nrc::vulkan::VulkanProfileValidationReport passedShaderModule =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                validCapabilities,
+                {},
+                *khrProfile,
+                requireShaderModule);
+        ok &= require(passedShaderModule.usable,
+                      "passed required shader module creation allows usable report");
+
+        requireShaderModule.shaderModuleCreation.status = nrc::vulkan::VulkanValidationStepStatus::Skipped;
+        const nrc::vulkan::VulkanProfileValidationReport skippedShaderModule =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                validCapabilities,
+                {},
+                *khrProfile,
+                requireShaderModule);
+        ok &= require(skippedShaderModule.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::ShaderModuleCreationSkipped,
+                      "Vulkan validation reports skipped required shader module creation");
+
+        requireShaderModule.shaderModuleCreation.status = nrc::vulkan::VulkanValidationStepStatus::Failed;
+        requireShaderModule.shaderModuleCreation.vkResult = VK_ERROR_UNKNOWN;
+        const nrc::vulkan::VulkanProfileValidationReport failedShaderModule =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                validCapabilities,
+                {},
+                *khrProfile,
+                requireShaderModule);
+        ok &= require(failedShaderModule.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::ShaderModuleCreationFailed,
+                      "Vulkan validation reports failed shader module creation");
+        ok &= require(failedShaderModule.shaderModuleCreation.vkResult == VK_ERROR_UNKNOWN,
+                      "Vulkan validation preserves shader module VkResult");
 
         nrc::vulkan::VulkanProfileValidationRequirements requirePipeline{};
         requirePipeline.requirePipelineCreation = true;

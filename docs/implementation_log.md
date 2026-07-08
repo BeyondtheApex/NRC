@@ -2144,3 +2144,77 @@ Structured exceptions are treated as `VulkanValidationStepStatus::Skipped` with 
 ### Next Step
 
 Promote reusable shader module loading and validation-step plumbing from the dispatch tests into `runtime/vulkan`, then wire KHR dispatch pipeline creation results into `VulkanProfileValidationReport` in the test path.
+
+## 2026-07-09 - Milestone 29 Vulkan Shader Module Validation Plumbing
+
+### Implemented
+
+- Added reusable Vulkan shader module helper API:
+  - `include/nrc/vulkan/nrc_vulkan_shader.hpp`
+  - `runtime/vulkan/nrc_vulkan_shader.cpp`
+  - `nrc::vulkan::VulkanShaderModuleCreateInfo`
+  - `nrc::vulkan::VulkanShaderModuleCreateResult`
+  - `nrc::vulkan::create_shader_module`
+- Extended Vulkan profile validation reports with shader module stage state:
+  - `requireShaderModuleCreation`
+  - `shaderModuleCreation`
+  - `ShaderModuleCreationNotRun`
+  - `ShaderModuleCreationSkipped`
+  - `ShaderModuleCreationFailed`
+- Refactored `nrc_vulkan_khr_dispatch_test` so the KHR path now:
+  - creates shader modules through `nrc::vulkan::create_shader_module`;
+  - records shader module creation in `VulkanProfileValidationReport`;
+  - creates profile compute pipelines through `nrc::vulkan::create_profile_compute_pipeline`;
+  - records pipeline creation in the same validation report.
+- Extended `nrc_vulkan_capabilities_test` to cover:
+  - invalid shader module creation requests;
+  - required shader module creation not run;
+  - passed shader module creation;
+  - skipped shader module creation;
+  - failed shader module creation with preserved `VkResult`.
+- Updated documentation:
+  - `docs/vulkan_capability_query.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/vulkan_dispatch_harness.md`
+  - `README.md`
+
+### Behavior
+
+The Vulkan validation chain is now:
+
+1. profile capability support;
+2. shader config lookup and backend match;
+3. shader module creation;
+4. profile compute pipeline creation;
+5. numerical validation.
+
+`create_shader_module` intentionally accepts already-loaded SPIR-V words instead of reading files. That keeps the helper usable for engines with custom package formats, asset caches, or hot-reload systems.
+
+`evaluate_vulkan_profile_validation` treats failed shader module creation as a decisive profile rejection. `NotRun` and `Skipped` only block when `requireShaderModuleCreation` is enabled, matching the existing pipeline/numerical validation policy.
+
+### Validation
+
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_capabilities_test nrc_vulkan_khr_dispatch_test`
+- Targeted verbose tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_capabilities_test|nrc_vulkan_khr_dispatch_test" --output-on-failure -V`
+- Verbose KHR dispatch test still reports a controlled local skip:
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR cooperative matrix shader`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- The helper does not read SPIR-V files, compile GLSL, or own/destroy the returned shader module.
+- The dispatch tests still keep their local SPIR-V file loading helpers.
+- The report stores coarse shader/pipeline stage state but not detailed driver diagnostic strings.
+- The local AMD KHR dispatch path still cannot numerically validate because pipeline creation raises a structured exception and is reported as a controlled skip.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Promote a small reusable SPIR-V file loading helper for tests/sample use, or move the next layer up and extract descriptor/resource barrier helpers needed by scalar and KHR dispatch validation.

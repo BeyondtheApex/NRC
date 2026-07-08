@@ -208,6 +208,7 @@ VulkanProfileValidationReport evaluate_vulkan_profile_validation(
     VulkanProfileValidationReport report{};
     report.profileSupport =
         evaluate_profile_support(capabilities.view(), profileRequirements, profile);
+    report.shaderModuleCreation = validationRequirements.shaderModuleCreation;
     report.pipelineCreation = validationRequirements.pipelineCreation;
     report.numericalValidation = validationRequirements.numericalValidation;
 
@@ -225,6 +226,21 @@ VulkanProfileValidationReport evaluate_vulkan_profile_validation(
     if (report.shaderConfig->backend != profile.backend) {
         report.status = VulkanProfileValidationStatus::ShaderConfigMismatch;
         return report;
+    }
+
+    if (is_failed(report.shaderModuleCreation.status)) {
+        report.status = VulkanProfileValidationStatus::ShaderModuleCreationFailed;
+        return report;
+    }
+    if (validationRequirements.requireShaderModuleCreation) {
+        if (is_not_run(report.shaderModuleCreation.status)) {
+            report.status = VulkanProfileValidationStatus::ShaderModuleCreationNotRun;
+            return report;
+        }
+        if (is_skipped(report.shaderModuleCreation.status)) {
+            report.status = VulkanProfileValidationStatus::ShaderModuleCreationSkipped;
+            return report;
+        }
     }
 
     if (is_failed(report.pipelineCreation.status)) {

@@ -34,6 +34,9 @@ enum class VulkanProfileValidationStatus : std::uint8_t {
     ProfileNotSupported,
     MissingShaderConfig,
     ShaderConfigMismatch,
+    ShaderModuleCreationNotRun,
+    ShaderModuleCreationSkipped,
+    ShaderModuleCreationFailed,
     PipelineCreationNotRun,
     PipelineCreationSkipped,
     PipelineCreationFailed,
@@ -49,8 +52,10 @@ struct VulkanValidationStep {
 };
 
 struct VulkanProfileValidationRequirements {
+    bool requireShaderModuleCreation = false;
     bool requirePipelineCreation = false;
     bool requireNumericalValidation = false;
+    VulkanValidationStep shaderModuleCreation;
     VulkanValidationStep pipelineCreation;
     VulkanValidationStep numericalValidation;
 };
@@ -58,6 +63,7 @@ struct VulkanProfileValidationRequirements {
 struct VulkanProfileValidationReport {
     ProfileSupportReport profileSupport;
     const ProfileShaderConfig *shaderConfig = nullptr;
+    VulkanValidationStep shaderModuleCreation;
     VulkanValidationStep pipelineCreation;
     VulkanValidationStep numericalValidation;
     VulkanProfileValidationStatus status = VulkanProfileValidationStatus::ProfileNotSupported;
