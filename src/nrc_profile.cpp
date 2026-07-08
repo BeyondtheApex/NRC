@@ -134,6 +134,29 @@ bool has_matrix(const DeviceCapabilitiesView &capabilities, const Profile &profi
     return false;
 }
 
+bool has_required_feature_set(const DeviceCapabilitiesView &capabilities) {
+    return capabilities.khrCooperativeMatrix &&
+           capabilities.shaderFloat16 &&
+           capabilities.storageBuffer16BitAccess &&
+           capabilities.subgroupSizeControl &&
+           capabilities.computeFullSubgroups;
+}
+
+bool is_reference_allowed(const ProfileRequirements &requirements, const Profile &profile) {
+    return profile.backend == BackendKind::ScalarReference &&
+           profile.implemented &&
+           requirements.allowReferenceBackend;
+}
+
+ProfileSupportReport make_report(const Profile &profile, ProfileSupportStatus status) {
+    return {
+        profile.id,
+        profile.name,
+        status,
+        status == ProfileSupportStatus::Supported,
+    };
+}
+
 } // namespace
 
 std::span<const Profile> profiles() {
@@ -162,38 +185,50 @@ const ProfileShaderConfig *find_profile_shader_config(ProfileId id) {
     return nullptr;
 }
 
-bool supports_profile(const DeviceCapabilitiesView &capabilities,
-                      const ProfileRequirements &requirements,
-                      const Profile &profile) {
+ProfileSupportReport evaluate_profile_support(const DeviceCapabilitiesView &capabilities,
+                                               const ProfileRequirements &requirements,
+                                               const Profile &profile) {
     if (profile.backend == BackendKind::ScalarReference) {
-        return profile.implemented && requirements.allowReferenceBackend;
+        if (!profile.implemented) {
+            return make_report(profile, ProfileSupportStatus::ProfileNotImplemented);
+        }
+        if (!is_reference_allowed(requirements, profile)) {
+            return make_report(profile, ProfileSupportStatus::ReferenceBackendNotAllowed);
+        }
+        return make_report(profile, ProfileSupportStatus::Supported);
     }
 
     if (profile.backend != BackendKind::KhrCooperativeMatrix) {
-        return false;
+        return make_report(profile, ProfileSupportStatus::UnsupportedBackend);
     }
 
     if (!profile.implemented) {
-        return false;
+        return make_report(profile, ProfileSupportStatus::ProfileNotImplemented);
     }
 
-    if (!capabilities.khrCooperativeMatrix ||
-        !capabilities.shaderFloat16 ||
-        !capabilities.storageBuffer16BitAccess ||
-        !capabilities.subgroupSizeControl ||
-        !capabilities.computeFullSubgroups) {
-        return false;
+    if (!has_required_feature_set(capabilities)) {
+        return make_report(profile, ProfileSupportStatus::MissingRequiredFeature);
     }
 
     if (requirements.requireTraining && !capabilities.shaderBufferFloat32AtomicAdd) {
-        return false;
+        return make_report(profile, ProfileSupportStatus::MissingTrainingAtomicFloat);
     }
 
     if (!has_subgroup_size(capabilities.supportedSubgroupSizes, profile.requiredSubgroupSize)) {
-        return false;
+        return make_report(profile, ProfileSupportStatus::MissingSubgroupSize);
     }
 
-    return has_matrix(capabilities, profile);
+    if (!has_matrix(capabilities, profile)) {
+        return make_report(profile, ProfileSupportStatus::MissingCooperativeMatrixShape);
+    }
+
+    return make_report(profile, ProfileSupportStatus::Supported);
+}
+
+bool supports_profile(const DeviceCapabilitiesView &capabilities,
+                      const ProfileRequirements &requirements,
+                      const Profile &profile) {
+    return evaluate_profile_support(capabilities, requirements, profile).supported;
 }
 
 ProfileId choose_profile(const DeviceCapabilitiesView &capabilities,

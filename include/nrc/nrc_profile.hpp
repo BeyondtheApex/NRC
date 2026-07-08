@@ -57,6 +57,17 @@ struct ProfileRequirements {
     bool allowReferenceBackend = false;
 };
 
+enum class ProfileSupportStatus : std::uint8_t {
+    Supported,
+    ProfileNotImplemented,
+    ReferenceBackendNotAllowed,
+    UnsupportedBackend,
+    MissingRequiredFeature,
+    MissingTrainingAtomicFloat,
+    MissingSubgroupSize,
+    MissingCooperativeMatrixShape,
+};
+
 struct Profile {
     ProfileId id = ProfileId::None;
     BackendKind backend = BackendKind::None;
@@ -83,10 +94,20 @@ struct ProfileShaderConfig {
     bool requireSubgroupSizeControl = false;
 };
 
+struct ProfileSupportReport {
+    ProfileId profileId = ProfileId::None;
+    const char *profileName = "NONE";
+    ProfileSupportStatus status = ProfileSupportStatus::UnsupportedBackend;
+    bool supported = false;
+};
+
 std::span<const Profile> profiles();
 const Profile *find_profile(ProfileId id);
 std::span<const ProfileShaderConfig> profile_shader_configs();
 const ProfileShaderConfig *find_profile_shader_config(ProfileId id);
+ProfileSupportReport evaluate_profile_support(const DeviceCapabilitiesView &capabilities,
+                                               const ProfileRequirements &requirements,
+                                               const Profile &profile);
 bool supports_profile(const DeviceCapabilitiesView &capabilities,
                       const ProfileRequirements &requirements,
                       const Profile &profile);

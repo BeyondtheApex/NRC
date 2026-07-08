@@ -17,6 +17,23 @@ The scalar profile is for correctness and CI. It is never selected unless explic
 
 Profile selection proves that a backend is a valid candidate for the reported capabilities. It does not prove that the driver can compile and run the backend shader. Integrations should also validate pipeline creation and, where possible, run the backend numerical validation before enabling a production KHR profile.
 
+## Support Diagnostics
+
+`nrc::evaluate_profile_support(capabilities, requirements, profile)` returns a `ProfileSupportReport` for one profile. It uses the same checks as `supports_profile`, but records the first decisive support status:
+
+- `Supported`
+- `ProfileNotImplemented`
+- `ReferenceBackendNotAllowed`
+- `UnsupportedBackend`
+- `MissingRequiredFeature`
+- `MissingTrainingAtomicFloat`
+- `MissingSubgroupSize`
+- `MissingCooperativeMatrixShape`
+
+The report also carries the profile id, profile name, and final `supported` bool. This is intended for integration logs and user-facing diagnostics when a renderer queries matrix support across different vendors.
+
+These diagnostics are capability-level only. They do not prove that a Vulkan device can create the selected shader pipeline or that numerical validation has passed.
+
 ## Shader Configuration
 
 `nrc::find_profile_shader_config(profileId)` maps a selected profile to the shader-side configuration needed by an integration:

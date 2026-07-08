@@ -1954,3 +1954,57 @@ This keeps C++ profile selection synchronized with shader compilation as matrix-
 ### Next Step
 
 Add a profile validation report API, preferably in `runtime/vulkan`, that consumes queried capabilities plus profile shader config and reports why a profile is unavailable or whether it has passed pipeline creation/numerical validation. This will make downstream automatic profile enablement less brittle.
+
+## 2026-07-09 - Milestone 26 Profile Support Diagnostics
+
+### Implemented
+
+- Added public capability-level profile diagnostics:
+  - `nrc::ProfileSupportStatus`
+  - `nrc::ProfileSupportReport`
+  - `nrc::evaluate_profile_support`
+- Kept `nrc::supports_profile` behavior synchronized by delegating it to `evaluate_profile_support(...).supported`.
+- Added diagnostic statuses for:
+  - supported profile;
+  - unimplemented profile;
+  - scalar reference backend not explicitly allowed;
+  - unsupported backend;
+  - missing required feature bundle;
+  - missing training float atomic add;
+  - missing required subgroup size;
+  - missing cooperative matrix shape.
+- Updated `docs/profile_and_layout.md` with the support diagnostics contract.
+
+### Behavior
+
+`evaluate_profile_support` reports the first decisive rejection reason for one profile and carries the matched profile id/name plus the final supported bool. This keeps automatic profile selection simple while giving downstream integrations enough information to explain why a vendor/device profile was rejected.
+
+The check order is intentionally conservative:
+
+1. scalar reference backend requires explicit opt-in;
+2. unsupported backend/profile implementation status are rejected before capability checks;
+3. KHR profiles require the common feature bundle before training atomics;
+4. subgroup size is checked before matrix shape.
+
+### Validation
+
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_profile_layout_test`
+- Targeted test succeeded:
+  - `ctest --test-dir build -C Debug -R nrc_profile_layout_test --output-on-failure`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- Diagnostics are still capability-level only.
+- The report does not include Vulkan shader module creation, pipeline creation, dispatch success, or numerical validation status.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Add a Vulkan runtime validation report that combines profile support diagnostics, shader config selection, pipeline creation status, and optional numerical validation into one integration-facing result.

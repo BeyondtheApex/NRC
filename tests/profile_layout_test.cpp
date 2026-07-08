@@ -73,6 +73,21 @@ int main() {
                       nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128,
                   "prefer SG32 16x16x16 KHR profile");
 
+    const nrc::Profile *sg32Profile =
+        nrc::find_profile(nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128);
+    ok &= require(sg32Profile != nullptr, "find SG32 KHR profile");
+    if (sg32Profile != nullptr) {
+        const nrc::ProfileSupportReport report =
+            nrc::evaluate_profile_support(caps16, {}, *sg32Profile);
+        ok &= require(report.supported, "support report marks valid KHR profile supported");
+        ok &= require(report.status == nrc::ProfileSupportStatus::Supported,
+                      "support report records supported status");
+        ok &= require(report.profileId == sg32Profile->id,
+                      "support report records profile id");
+        ok &= require(std::strcmp(report.profileName, sg32Profile->name) == 0,
+                      "support report records profile name");
+    }
+
     const std::array<std::uint32_t, 1> sg16 = {16};
     const nrc::DeviceCapabilitiesView caps16Sg16{
         true,
@@ -103,6 +118,72 @@ int main() {
     ok &= require(nrc::choose_profile(noAtomic, {.requireTraining = false}) ==
                       nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128,
                   "inference-only profile can skip float atomic add");
+    if (sg32Profile != nullptr) {
+        const nrc::ProfileSupportReport trainingAtomicReport =
+            nrc::evaluate_profile_support(noAtomic, {}, *sg32Profile);
+        ok &= require(!trainingAtomicReport.supported,
+                      "support report rejects missing training atomic add");
+        ok &= require(trainingAtomicReport.status ==
+                          nrc::ProfileSupportStatus::MissingTrainingAtomicFloat,
+                      "support report records missing training atomic add");
+
+        const nrc::ProfileSupportReport inferenceOnlyReport =
+            nrc::evaluate_profile_support(noAtomic, {.requireTraining = false}, *sg32Profile);
+        ok &= require(inferenceOnlyReport.supported,
+                      "support report accepts inference-only profile without atomic add");
+        ok &= require(inferenceOnlyReport.status == nrc::ProfileSupportStatus::Supported,
+                      "support report records inference-only support");
+
+        const nrc::DeviceCapabilitiesView missingFeature{
+            false,
+            true,
+            true,
+            true,
+            true,
+            true,
+            sg32,
+            mat16,
+        };
+        const nrc::ProfileSupportReport missingFeatureReport =
+            nrc::evaluate_profile_support(missingFeature, {}, *sg32Profile);
+        ok &= require(missingFeatureReport.status ==
+                          nrc::ProfileSupportStatus::MissingRequiredFeature,
+                      "support report records missing required feature");
+
+        const std::array<std::uint32_t, 1> sg64 = {64};
+        const nrc::DeviceCapabilitiesView missingSubgroup{
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            sg64,
+            mat16,
+        };
+        const nrc::ProfileSupportReport missingSubgroupReport =
+            nrc::evaluate_profile_support(missingSubgroup, {}, *sg32Profile);
+        ok &= require(missingSubgroupReport.status ==
+                          nrc::ProfileSupportStatus::MissingSubgroupSize,
+                      "support report records missing subgroup size");
+
+        const std::array<nrc::CooperativeMatrixCapability, 0> noMatrices{};
+        const nrc::DeviceCapabilitiesView missingMatrix{
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            sg32,
+            noMatrices,
+        };
+        const nrc::ProfileSupportReport missingMatrixReport =
+            nrc::evaluate_profile_support(missingMatrix, {}, *sg32Profile);
+        ok &= require(missingMatrixReport.status ==
+                          nrc::ProfileSupportStatus::MissingCooperativeMatrixShape,
+                      "support report records missing cooperative matrix shape");
+    }
 
     const std::array<nrc::CooperativeMatrixCapability, 1> mat8 = {{
         {
@@ -137,6 +218,52 @@ int main() {
     ok &= require(nrc::choose_profile(emptyCaps, {.allowReferenceBackend = true}) ==
                       nrc::ProfileId::ScalarReferenceWg64,
                   "reference fallback is explicit");
+    const nrc::Profile *scalarProfile =
+        nrc::find_profile(nrc::ProfileId::ScalarReferenceWg64);
+    ok &= require(scalarProfile != nullptr, "find scalar reference profile");
+    if (scalarProfile != nullptr) {
+        const nrc::ProfileSupportReport disallowedReferenceReport =
+            nrc::evaluate_profile_support(emptyCaps, {}, *scalarProfile);
+        ok &= require(!disallowedReferenceReport.supported,
+                      "support report rejects scalar reference by default");
+        ok &= require(disallowedReferenceReport.status ==
+                          nrc::ProfileSupportStatus::ReferenceBackendNotAllowed,
+                      "support report records reference backend not allowed");
+
+        const nrc::ProfileSupportReport allowedReferenceReport =
+            nrc::evaluate_profile_support(emptyCaps, {.allowReferenceBackend = true}, *scalarProfile);
+        ok &= require(allowedReferenceReport.supported,
+                      "support report accepts explicitly allowed scalar reference");
+        ok &= require(allowedReferenceReport.status == nrc::ProfileSupportStatus::Supported,
+                      "support report records scalar reference support");
+    }
+
+    const nrc::Profile noneProfile{};
+    const nrc::ProfileSupportReport noneReport =
+        nrc::evaluate_profile_support(caps16, {}, noneProfile);
+    ok &= require(!noneReport.supported, "support report rejects none backend");
+    ok &= require(noneReport.status == nrc::ProfileSupportStatus::UnsupportedBackend,
+                  "support report records unsupported backend");
+
+    const nrc::Profile unimplementedProfile{
+        nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128,
+        nrc::BackendKind::KhrCooperativeMatrix,
+        "UNIMPLEMENTED_KHR_PROFILE",
+        16,
+        16,
+        16,
+        32,
+        128,
+        true,
+        false,
+    };
+    const nrc::ProfileSupportReport unimplementedReport =
+        nrc::evaluate_profile_support(caps16, {}, unimplementedProfile);
+    ok &= require(!unimplementedReport.supported,
+                  "support report rejects unimplemented profile");
+    ok &= require(unimplementedReport.status ==
+                      nrc::ProfileSupportStatus::ProfileNotImplemented,
+                  "support report records profile not implemented");
 
     ok &= require(nrc::find_profile_shader_config(nrc::ProfileId::None) == nullptr,
                   "no shader config for none profile");
