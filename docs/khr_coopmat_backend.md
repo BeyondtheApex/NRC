@@ -97,7 +97,9 @@ The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_ALL_DW=
 
 `tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-all-dw` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_all_dw_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_ALL_DW=1`. That mode compares output and every hidden-layer gradient region against a combined test-side oracle built from the output and hidden coopmat expectations.
 
-The KHR gradient runtime batch contains 67 train records. That remains inside one 128-wide workgroup but crosses multiple SG32 and SG16 subgroup ranges, so the optional coopmat oracles validate cross-subgroup partial accumulation.
+The KHR gradient runtime batch contains 197 train records. That spans two 128-wide workgroups with a partial final workgroup, so the optional coopmat oracles validate per-workgroup/per-subgroup partial accumulation before fp32 gradient accumulation.
+
+The test-side coopmat oracles share one `KhrBackpropSample` helper that computes encoded input, fp16 forward activations, output derivative, and every hidden-layer derivative once per sample. The output, single-hidden-region, and all-`dW` modes therefore use the same hidden derivative chain, which keeps future cooperative-matrix `dA` oracle variants from duplicating the full backpropagation chain again.
 
 The optional output-coopmat helper restores the fp32 shared output derivative cache after reducing output dW. This keeps the downstream final-hidden dW helper on the same shared derivative contract as the default subgroup output path.
 

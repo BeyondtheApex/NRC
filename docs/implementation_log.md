@@ -5131,3 +5131,79 @@ The shader dispatch path already computed group count from `trainCount` and the 
 ### Next Step
 
 Refactor the duplicated KHR coopmat oracle backpropagation code into shared helpers, or start porting KHR `dA` propagation toward cooperative-matrix form so the training path moves closer to VkNRC's fully fused shape.
+
+## 2026-07-09 - Milestone 76 Shared KHR Coopmat Oracle Backprop State
+
+### Implemented
+
+- Refactored `tests/vulkan_gradient_khr_test.cpp` so the optional KHR coopmat `dW` oracles share one per-sample backpropagation state.
+- Added `KhrBackpropSample`, which stores:
+  - encoded NRC input;
+  - fp16-rounded hidden activations for every hidden layer;
+  - output derivative;
+  - hidden-layer derivatives for every hidden layer.
+- Added shared helper functions for:
+  - propagating output derivatives into the final hidden layer;
+  - propagating a hidden derivative through a hidden layer's ReLU gate and weights;
+  - constructing a complete per-sample KHR backprop state;
+  - reading the correct source activation for any hidden layer, including encoded input for hidden layer 0.
+- Replaced the five duplicated hidden-layer coopmat oracle bodies with one layer-parameterized helper:
+  - final hidden layer;
+  - hidden layer 3;
+  - hidden layer 2;
+  - hidden layer 1;
+  - hidden layer 0.
+- Kept the existing public test helper names as thin wrappers so the runtime modes and all-`dW` composition did not need to change.
+- Updated the output-layer coopmat oracle to reuse the same per-sample backprop state for fp16 forward activations and `dOutput`.
+- Updated current documentation:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+- Fixed stale current documentation in `docs/khr_coopmat_backend.md` that still described the runtime KHR gradient batch as a 67-record single-workgroup batch. The current batch is 197 records and spans two 128-wide workgroups with a partial final workgroup.
+
+### Behavior
+
+This milestone is intended to preserve numerical behavior. It changes the expected-value implementation shape, not the shader contract:
+
+```text
+default:                 KHR groundwork oracle
+--coopmat-output:        output-layer fp16 coopmat dW oracle
+--coopmat-final-hidden:  hidden layer 4 fp16 coopmat dW oracle
+--coopmat-hidden3:       hidden layer 3 fp16 coopmat dW oracle
+--coopmat-hidden2:       hidden layer 2 fp16 coopmat dW oracle
+--coopmat-hidden1:       hidden layer 1 fp16 coopmat dW oracle
+--coopmat-hidden0:       hidden layer 0 fp16 coopmat dW oracle
+--coopmat-all-dw:        output and all hidden dW regions use fp16 coopmat oracles
+```
+
+The hidden-layer coopmat oracle now has one derivative chain to audit before adding cooperative-matrix `dA` variants. That should make the next shader/oracle expansion much less brittle than updating five separate hidden-layer backpropagation copies.
+
+### Validation
+
+- Diff whitespace check succeeded:
+  - `git diff --check`
+- Targeted KHR gradient runtime test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr" --output-on-failure -V`
+- Targeted KHR gradient runtime result:
+  - `8/8 tests passed`
+- Current local KHR training skip result for all eight runtime modes remains:
+  - `SKIP: no Vulkan device supports an implemented NRC KHR cooperative matrix training profile`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `61/61 tests passed`
+
+### Current Limitations
+
+- This is a test-oracle refactor and does not add cooperative-matrix `dA` shader execution yet.
+- The multi-workgroup KHR coopmat runtime comparison is still wired but not numerically executed locally because the current device does not satisfy the 98304-byte KHR training shared-memory profile gate.
+- The default KHR gradient path still uses subgroup arithmetic for output and every hidden-layer `dW`.
+- KHR `dA` propagation still uses scalar arrays rather than cooperative matrices.
+- The coopmat `dW` modes still use one fp32 atomic add per output/hidden weight per workgroup after reducing fp16 subgroup partials.
+
+### Next Step
+
+Start the KHR cooperative-matrix `dA` port with a hidden-to-hidden derivative propagation helper and matching CPU oracle mode, using the shared backprop sample state as the expected-value foundation.

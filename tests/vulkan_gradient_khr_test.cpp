@@ -235,6 +235,14 @@ void store_khr_coopmat_partials(std::vector<float> &gradients,
 
 using HiddenVector = std::array<float, nrc::kNnHiddenWidth>;
 using HiddenLayers = std::array<HiddenVector, nrc::kNnHiddenLayerCount>;
+using HiddenDerivatives = std::array<HiddenVector, nrc::kNnHiddenLayerCount>;
+
+struct KhrBackpropSample {
+    nrc::EncodedInput encoded{};
+    HiddenLayers hiddenLayers{};
+    nrc::ReferenceOutput dOutput{};
+    HiddenDerivatives dHidden{};
+};
 
 HiddenLayers forward_hidden_layers_fp16(std::span<const float> weights,
                                         const nrc::ReferenceInput &input) {
@@ -285,6 +293,75 @@ nrc::ReferenceOutput relative_luminance_output_derivative(const nrc::ReferenceOu
     return dOutput;
 }
 
+HiddenVector propagate_output_derivative(std::span<const float> weights,
+                                         const nrc::ReferenceOutput &dOutput) {
+    HiddenVector dHidden{};
+    const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
+    for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
+        for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
+            dHidden[col] +=
+                weights[outputOffset + row * nrc::kNnHiddenWidth + col] *
+                dOutput[row];
+        }
+    }
+    return dHidden;
+}
+
+HiddenVector propagate_hidden_derivative(std::span<const float> weights,
+                                         std::uint32_t layer,
+                                         const HiddenVector &activation,
+                                         const HiddenVector &dActivation) {
+    HiddenVector dSource{};
+    const std::size_t layerOffset = nrc::layer_weight_offset(layer);
+    for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
+        for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
+            const float dPre = activation[row] > 0.0f ? dActivation[row] : 0.0f;
+            dSource[col] +=
+                weights[layerOffset + row * nrc::kNnHiddenWidth + col] *
+                dPre;
+        }
+    }
+    return dSource;
+}
+
+KhrBackpropSample make_khr_backprop_sample(
+    std::span<const float> gpuVisibleWeights,
+    const nrc::NrcTrainRecord &record) {
+    KhrBackpropSample sample{};
+    nrc::encode_input(unpack_test_input(record.packedInput), sample.encoded);
+    sample.hiddenLayers = forward_hidden_layers_fp16(gpuVisibleWeights, sample.encoded);
+
+    const HiddenVector &finalHidden = sample.hiddenLayers[nrc::kNnHiddenLayerCount - 1u];
+    const nrc::ReferenceOutput prediction =
+        output_from_final_hidden_fp16(gpuVisibleWeights, finalHidden);
+    const nrc::ReferenceOutput target{
+        record.biasR,
+        record.biasG,
+        record.biasB,
+    };
+    sample.dOutput = relative_luminance_output_derivative(prediction, target);
+
+    sample.dHidden[nrc::kNnHiddenLayerCount - 1u] =
+        propagate_output_derivative(gpuVisibleWeights, sample.dOutput);
+    for (std::uint32_t reverseLayer = 1u;
+         reverseLayer < nrc::kNnHiddenLayerCount;
+         ++reverseLayer) {
+        const std::uint32_t layer = nrc::kNnHiddenLayerCount - reverseLayer;
+        sample.dHidden[layer - 1u] =
+            propagate_hidden_derivative(gpuVisibleWeights,
+                                        layer,
+                                        sample.hiddenLayers[layer],
+                                        sample.dHidden[layer]);
+    }
+    return sample;
+}
+
+float khr_hidden_source_activation(const KhrBackpropSample &sample,
+                                   std::uint32_t layer,
+                                   std::uint32_t col) {
+    return layer == 0u ? sample.encoded[col] : sample.hiddenLayers[layer - 1u][col];
+}
+
 std::vector<float> make_expected_khr_output_coopmat_gradients(
     std::span<const float> gpuVisibleWeights,
     const std::vector<nrc::NrcTrainRecord> &trainRecords,
@@ -304,22 +381,12 @@ std::vector<float> make_expected_khr_output_coopmat_gradients(
     for (std::uint32_t i = 0; i < kTrainCount; ++i) {
         const std::uint32_t workgroup = khr_oracle_workgroup(i);
         const std::uint32_t subgroup = khr_oracle_subgroup(i, subgroupSize);
-        nrc::EncodedInput encoded{};
-        nrc::encode_input(unpack_test_input(trainRecords[i].packedInput), encoded);
-        const HiddenLayers hiddenLayers = forward_hidden_layers_fp16(gpuVisibleWeights, encoded);
-        const HiddenVector &finalHidden = hiddenLayers[nrc::kNnHiddenLayerCount - 1u];
-        const nrc::ReferenceOutput prediction =
-            output_from_final_hidden_fp16(gpuVisibleWeights, finalHidden);
-        const nrc::ReferenceOutput target{
-            trainRecords[i].biasR,
-            trainRecords[i].biasG,
-            trainRecords[i].biasB,
-        };
-        const nrc::ReferenceOutput dOutput =
-            relative_luminance_output_derivative(prediction, target);
+        const KhrBackpropSample sample =
+            make_khr_backprop_sample(gpuVisibleWeights, trainRecords[i]);
+        const HiddenVector &finalHidden = sample.hiddenLayers[nrc::kNnHiddenLayerCount - 1u];
 
         for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
-            const float stagedDOutput = fp16_round(dOutput[row]);
+            const float stagedDOutput = fp16_round(sample.dOutput[row]);
             for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
                 outputPartials[workgroup][subgroup][row * nrc::kNnHiddenWidth + col] +=
                     finalHidden[col] * stagedDOutput;
@@ -331,426 +398,103 @@ std::vector<float> make_expected_khr_output_coopmat_gradients(
     return gradients;
 }
 
-std::vector<float> make_expected_khr_final_hidden_coopmat_gradients(
+std::vector<float> make_expected_khr_hidden_layer_coopmat_gradients(
     std::span<const float> gpuVisibleWeights,
     const std::vector<nrc::NrcTrainRecord> &trainRecords,
+    std::uint32_t layer,
+    const char *label,
     std::uint32_t subgroupSize) {
+    if (layer >= nrc::kNnHiddenLayerCount) {
+        throw std::invalid_argument("invalid KHR hidden-layer coopmat oracle layer");
+    }
+
     std::vector<float> gradients =
         make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
 
     const std::uint32_t subgroupCount =
-        khr_oracle_subgroup_count(subgroupSize, "final-hidden-coopmat");
+        khr_oracle_subgroup_count(subgroupSize, label);
 
-    const std::uint32_t layer = nrc::kNnHiddenLayerCount - 1u;
     const std::size_t layerOffset = nrc::layer_weight_offset(layer);
     std::fill(gradients.begin() + static_cast<std::ptrdiff_t>(layerOffset),
               gradients.begin() + static_cast<std::ptrdiff_t>(layerOffset + nrc::hidden_layer_weight_count()),
               0.0f);
 
     KhrCoopmatPartials<nrc::kNnHiddenWidth * nrc::kNnHiddenWidth> hiddenPartials{};
-    const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
     for (std::uint32_t i = 0; i < kTrainCount; ++i) {
         const std::uint32_t workgroup = khr_oracle_workgroup(i);
         const std::uint32_t subgroup = khr_oracle_subgroup(i, subgroupSize);
-        nrc::EncodedInput encoded{};
-        nrc::encode_input(unpack_test_input(trainRecords[i].packedInput), encoded);
-        const HiddenLayers hiddenLayers = forward_hidden_layers_fp16(gpuVisibleWeights, encoded);
-        const HiddenVector &finalHidden = hiddenLayers[nrc::kNnHiddenLayerCount - 1u];
-        const HiddenVector &sourceHidden = hiddenLayers[nrc::kNnHiddenLayerCount - 2u];
-        const nrc::ReferenceOutput prediction =
-            output_from_final_hidden_fp16(gpuVisibleWeights, finalHidden);
-        const nrc::ReferenceOutput target{
-            trainRecords[i].biasR,
-            trainRecords[i].biasG,
-            trainRecords[i].biasB,
-        };
-        const nrc::ReferenceOutput dOutput =
-            relative_luminance_output_derivative(prediction, target);
-
-        HiddenVector dHidden{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
-                dHidden[col] +=
-                    gpuVisibleWeights[outputOffset + row * nrc::kNnHiddenWidth + col] *
-                    dOutput[row];
-            }
-        }
+        const KhrBackpropSample sample =
+            make_khr_backprop_sample(gpuVisibleWeights, trainRecords[i]);
+        const HiddenVector &activationHidden = sample.hiddenLayers[layer];
+        const HiddenVector &dHidden = sample.dHidden[layer];
 
         for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-            const float dPre = finalHidden[row] > 0.0f ? dHidden[row] : 0.0f;
+            const float dPre = activationHidden[row] > 0.0f ? dHidden[row] : 0.0f;
             const float stagedDPre = fp16_round(dPre);
             for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
                 hiddenPartials[workgroup][subgroup][row * nrc::kNnHiddenWidth + col] +=
-                    stagedDPre * sourceHidden[col];
+                    stagedDPre * khr_hidden_source_activation(sample, layer, col);
             }
         }
     }
 
     store_khr_coopmat_partials(gradients, layerOffset, hiddenPartials, subgroupCount);
     return gradients;
+}
+
+std::vector<float> make_expected_khr_final_hidden_coopmat_gradients(
+    std::span<const float> gpuVisibleWeights,
+    const std::vector<nrc::NrcTrainRecord> &trainRecords,
+    std::uint32_t subgroupSize) {
+    return make_expected_khr_hidden_layer_coopmat_gradients(gpuVisibleWeights,
+                                                            trainRecords,
+                                                            nrc::kNnHiddenLayerCount - 1u,
+                                                            "final-hidden-coopmat",
+                                                            subgroupSize);
 }
 
 std::vector<float> make_expected_khr_hidden3_coopmat_gradients(
     std::span<const float> gpuVisibleWeights,
     const std::vector<nrc::NrcTrainRecord> &trainRecords,
     std::uint32_t subgroupSize) {
-    std::vector<float> gradients =
-        make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
-
-    const std::uint32_t subgroupCount =
-        khr_oracle_subgroup_count(subgroupSize, "hidden3-coopmat");
-
-    const std::uint32_t layer = nrc::kNnHiddenLayerCount - 2u;
-    const std::size_t layerOffset = nrc::layer_weight_offset(layer);
-    std::fill(gradients.begin() + static_cast<std::ptrdiff_t>(layerOffset),
-              gradients.begin() + static_cast<std::ptrdiff_t>(layerOffset + nrc::hidden_layer_weight_count()),
-              0.0f);
-
-    KhrCoopmatPartials<nrc::kNnHiddenWidth * nrc::kNnHiddenWidth> hiddenPartials{};
-    const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
-    const std::size_t finalHiddenLayerOffset =
-        nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 1u);
-    for (std::uint32_t i = 0; i < kTrainCount; ++i) {
-        const std::uint32_t workgroup = khr_oracle_workgroup(i);
-        const std::uint32_t subgroup = khr_oracle_subgroup(i, subgroupSize);
-        nrc::EncodedInput encoded{};
-        nrc::encode_input(unpack_test_input(trainRecords[i].packedInput), encoded);
-        const HiddenLayers hiddenLayers = forward_hidden_layers_fp16(gpuVisibleWeights, encoded);
-        const HiddenVector &finalHidden = hiddenLayers[nrc::kNnHiddenLayerCount - 1u];
-        const HiddenVector &activationHidden = hiddenLayers[layer];
-        const HiddenVector &sourceHidden = hiddenLayers[layer - 1u];
-        const nrc::ReferenceOutput prediction =
-            output_from_final_hidden_fp16(gpuVisibleWeights, finalHidden);
-        const nrc::ReferenceOutput target{
-            trainRecords[i].biasR,
-            trainRecords[i].biasG,
-            trainRecords[i].biasB,
-        };
-        const nrc::ReferenceOutput dOutput =
-            relative_luminance_output_derivative(prediction, target);
-
-        HiddenVector dHidden4{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
-                dHidden4[col] +=
-                    gpuVisibleWeights[outputOffset + row * nrc::kNnHiddenWidth + col] *
-                    dOutput[row];
-            }
-        }
-
-        HiddenVector dHidden3{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-                const float dPreFinal = finalHidden[row] > 0.0f ? dHidden4[row] : 0.0f;
-                dHidden3[col] +=
-                    gpuVisibleWeights[finalHiddenLayerOffset + row * nrc::kNnHiddenWidth + col] *
-                    dPreFinal;
-            }
-        }
-
-        for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-            const float dPre = activationHidden[row] > 0.0f ? dHidden3[row] : 0.0f;
-            const float stagedDPre = fp16_round(dPre);
-            for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-                hiddenPartials[workgroup][subgroup][row * nrc::kNnHiddenWidth + col] +=
-                    stagedDPre * sourceHidden[col];
-            }
-        }
-    }
-
-    store_khr_coopmat_partials(gradients, layerOffset, hiddenPartials, subgroupCount);
-    return gradients;
+    return make_expected_khr_hidden_layer_coopmat_gradients(gpuVisibleWeights,
+                                                            trainRecords,
+                                                            nrc::kNnHiddenLayerCount - 2u,
+                                                            "hidden3-coopmat",
+                                                            subgroupSize);
 }
 
 std::vector<float> make_expected_khr_hidden2_coopmat_gradients(
     std::span<const float> gpuVisibleWeights,
     const std::vector<nrc::NrcTrainRecord> &trainRecords,
     std::uint32_t subgroupSize) {
-    std::vector<float> gradients =
-        make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
-
-    const std::uint32_t subgroupCount =
-        khr_oracle_subgroup_count(subgroupSize, "hidden2-coopmat");
-
-    const std::uint32_t layer = nrc::kNnHiddenLayerCount - 3u;
-    const std::size_t layerOffset = nrc::layer_weight_offset(layer);
-    std::fill(gradients.begin() + static_cast<std::ptrdiff_t>(layerOffset),
-              gradients.begin() + static_cast<std::ptrdiff_t>(layerOffset + nrc::hidden_layer_weight_count()),
-              0.0f);
-
-    KhrCoopmatPartials<nrc::kNnHiddenWidth * nrc::kNnHiddenWidth> hiddenPartials{};
-    const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
-    const std::size_t finalHiddenLayerOffset =
-        nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 1u);
-    const std::size_t hidden3LayerOffset = nrc::layer_weight_offset(layer + 1u);
-    for (std::uint32_t i = 0; i < kTrainCount; ++i) {
-        const std::uint32_t workgroup = khr_oracle_workgroup(i);
-        const std::uint32_t subgroup = khr_oracle_subgroup(i, subgroupSize);
-        nrc::EncodedInput encoded{};
-        nrc::encode_input(unpack_test_input(trainRecords[i].packedInput), encoded);
-        const HiddenLayers hiddenLayers = forward_hidden_layers_fp16(gpuVisibleWeights, encoded);
-        const HiddenVector &finalHidden = hiddenLayers[nrc::kNnHiddenLayerCount - 1u];
-        const HiddenVector &hidden3 = hiddenLayers[layer + 1u];
-        const HiddenVector &activationHidden = hiddenLayers[layer];
-        const HiddenVector &sourceHidden = hiddenLayers[layer - 1u];
-        const nrc::ReferenceOutput prediction =
-            output_from_final_hidden_fp16(gpuVisibleWeights, finalHidden);
-        const nrc::ReferenceOutput target{
-            trainRecords[i].biasR,
-            trainRecords[i].biasG,
-            trainRecords[i].biasB,
-        };
-        const nrc::ReferenceOutput dOutput =
-            relative_luminance_output_derivative(prediction, target);
-
-        HiddenVector dHidden4{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
-                dHidden4[col] +=
-                    gpuVisibleWeights[outputOffset + row * nrc::kNnHiddenWidth + col] *
-                    dOutput[row];
-            }
-        }
-
-        HiddenVector dHidden3{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-                const float dPreFinal = finalHidden[row] > 0.0f ? dHidden4[row] : 0.0f;
-                dHidden3[col] +=
-                    gpuVisibleWeights[finalHiddenLayerOffset + row * nrc::kNnHiddenWidth + col] *
-                    dPreFinal;
-            }
-        }
-
-        HiddenVector dHidden2{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-                const float dPreHidden3 = hidden3[row] > 0.0f ? dHidden3[row] : 0.0f;
-                dHidden2[col] +=
-                    gpuVisibleWeights[hidden3LayerOffset + row * nrc::kNnHiddenWidth + col] *
-                    dPreHidden3;
-            }
-        }
-
-        for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-            const float dPre = activationHidden[row] > 0.0f ? dHidden2[row] : 0.0f;
-            const float stagedDPre = fp16_round(dPre);
-            for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-                hiddenPartials[workgroup][subgroup][row * nrc::kNnHiddenWidth + col] +=
-                    stagedDPre * sourceHidden[col];
-            }
-        }
-    }
-
-    store_khr_coopmat_partials(gradients, layerOffset, hiddenPartials, subgroupCount);
-    return gradients;
+    return make_expected_khr_hidden_layer_coopmat_gradients(gpuVisibleWeights,
+                                                            trainRecords,
+                                                            nrc::kNnHiddenLayerCount - 3u,
+                                                            "hidden2-coopmat",
+                                                            subgroupSize);
 }
 
 std::vector<float> make_expected_khr_hidden1_coopmat_gradients(
     std::span<const float> gpuVisibleWeights,
     const std::vector<nrc::NrcTrainRecord> &trainRecords,
     std::uint32_t subgroupSize) {
-    std::vector<float> gradients =
-        make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
-
-    const std::uint32_t subgroupCount =
-        khr_oracle_subgroup_count(subgroupSize, "hidden1-coopmat");
-
-    const std::uint32_t layer = nrc::kNnHiddenLayerCount - 4u;
-    const std::size_t layerOffset = nrc::layer_weight_offset(layer);
-    std::fill(gradients.begin() + static_cast<std::ptrdiff_t>(layerOffset),
-              gradients.begin() + static_cast<std::ptrdiff_t>(layerOffset + nrc::hidden_layer_weight_count()),
-              0.0f);
-
-    KhrCoopmatPartials<nrc::kNnHiddenWidth * nrc::kNnHiddenWidth> hiddenPartials{};
-    const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
-    const std::size_t finalHiddenLayerOffset =
-        nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 1u);
-    const std::size_t hidden3LayerOffset =
-        nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 2u);
-    const std::size_t hidden2LayerOffset = nrc::layer_weight_offset(layer + 1u);
-    for (std::uint32_t i = 0; i < kTrainCount; ++i) {
-        const std::uint32_t workgroup = khr_oracle_workgroup(i);
-        const std::uint32_t subgroup = khr_oracle_subgroup(i, subgroupSize);
-        nrc::EncodedInput encoded{};
-        nrc::encode_input(unpack_test_input(trainRecords[i].packedInput), encoded);
-        const HiddenLayers hiddenLayers = forward_hidden_layers_fp16(gpuVisibleWeights, encoded);
-        const HiddenVector &finalHidden = hiddenLayers[nrc::kNnHiddenLayerCount - 1u];
-        const HiddenVector &hidden3 = hiddenLayers[nrc::kNnHiddenLayerCount - 2u];
-        const HiddenVector &hidden2 = hiddenLayers[layer + 1u];
-        const HiddenVector &activationHidden = hiddenLayers[layer];
-        const HiddenVector &sourceHidden = hiddenLayers[layer - 1u];
-        const nrc::ReferenceOutput prediction =
-            output_from_final_hidden_fp16(gpuVisibleWeights, finalHidden);
-        const nrc::ReferenceOutput target{
-            trainRecords[i].biasR,
-            trainRecords[i].biasG,
-            trainRecords[i].biasB,
-        };
-        const nrc::ReferenceOutput dOutput =
-            relative_luminance_output_derivative(prediction, target);
-
-        HiddenVector dHidden4{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
-                dHidden4[col] +=
-                    gpuVisibleWeights[outputOffset + row * nrc::kNnHiddenWidth + col] *
-                    dOutput[row];
-            }
-        }
-
-        HiddenVector dHidden3{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-                const float dPreFinal = finalHidden[row] > 0.0f ? dHidden4[row] : 0.0f;
-                dHidden3[col] +=
-                    gpuVisibleWeights[finalHiddenLayerOffset + row * nrc::kNnHiddenWidth + col] *
-                    dPreFinal;
-            }
-        }
-
-        HiddenVector dHidden2{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-                const float dPreHidden3 = hidden3[row] > 0.0f ? dHidden3[row] : 0.0f;
-                dHidden2[col] +=
-                    gpuVisibleWeights[hidden3LayerOffset + row * nrc::kNnHiddenWidth + col] *
-                    dPreHidden3;
-            }
-        }
-
-        HiddenVector dHidden1{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-                const float dPreHidden2 = hidden2[row] > 0.0f ? dHidden2[row] : 0.0f;
-                dHidden1[col] +=
-                    gpuVisibleWeights[hidden2LayerOffset + row * nrc::kNnHiddenWidth + col] *
-                    dPreHidden2;
-            }
-        }
-
-        for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-            const float dPre = activationHidden[row] > 0.0f ? dHidden1[row] : 0.0f;
-            const float stagedDPre = fp16_round(dPre);
-            for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-                hiddenPartials[workgroup][subgroup][row * nrc::kNnHiddenWidth + col] +=
-                    stagedDPre * sourceHidden[col];
-            }
-        }
-    }
-
-    store_khr_coopmat_partials(gradients, layerOffset, hiddenPartials, subgroupCount);
-    return gradients;
+    return make_expected_khr_hidden_layer_coopmat_gradients(gpuVisibleWeights,
+                                                            trainRecords,
+                                                            nrc::kNnHiddenLayerCount - 4u,
+                                                            "hidden1-coopmat",
+                                                            subgroupSize);
 }
 
 std::vector<float> make_expected_khr_hidden0_coopmat_gradients(
     std::span<const float> gpuVisibleWeights,
     const std::vector<nrc::NrcTrainRecord> &trainRecords,
     std::uint32_t subgroupSize) {
-    std::vector<float> gradients =
-        make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
-
-    const std::uint32_t subgroupCount =
-        khr_oracle_subgroup_count(subgroupSize, "hidden0-coopmat");
-
-    const std::uint32_t layer = 0u;
-    const std::size_t layerOffset = nrc::layer_weight_offset(layer);
-    std::fill(gradients.begin() + static_cast<std::ptrdiff_t>(layerOffset),
-              gradients.begin() + static_cast<std::ptrdiff_t>(layerOffset + nrc::hidden_layer_weight_count()),
-              0.0f);
-
-    KhrCoopmatPartials<nrc::kNnHiddenWidth * nrc::kNnHiddenWidth> hiddenPartials{};
-    const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
-    const std::size_t finalHiddenLayerOffset =
-        nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 1u);
-    const std::size_t hidden3LayerOffset =
-        nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 2u);
-    const std::size_t hidden2LayerOffset =
-        nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 3u);
-    const std::size_t hidden1LayerOffset =
-        nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 4u);
-    for (std::uint32_t i = 0; i < kTrainCount; ++i) {
-        const std::uint32_t workgroup = khr_oracle_workgroup(i);
-        const std::uint32_t subgroup = khr_oracle_subgroup(i, subgroupSize);
-        nrc::EncodedInput encoded{};
-        nrc::encode_input(unpack_test_input(trainRecords[i].packedInput), encoded);
-        const HiddenLayers hiddenLayers = forward_hidden_layers_fp16(gpuVisibleWeights, encoded);
-        const HiddenVector &finalHidden = hiddenLayers[nrc::kNnHiddenLayerCount - 1u];
-        const HiddenVector &hidden3 = hiddenLayers[nrc::kNnHiddenLayerCount - 2u];
-        const HiddenVector &hidden2 = hiddenLayers[nrc::kNnHiddenLayerCount - 3u];
-        const HiddenVector &hidden1 = hiddenLayers[nrc::kNnHiddenLayerCount - 4u];
-        const HiddenVector &activationHidden = hiddenLayers[layer];
-        const nrc::ReferenceOutput prediction =
-            output_from_final_hidden_fp16(gpuVisibleWeights, finalHidden);
-        const nrc::ReferenceOutput target{
-            trainRecords[i].biasR,
-            trainRecords[i].biasG,
-            trainRecords[i].biasB,
-        };
-        const nrc::ReferenceOutput dOutput =
-            relative_luminance_output_derivative(prediction, target);
-
-        HiddenVector dHidden4{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
-                dHidden4[col] +=
-                    gpuVisibleWeights[outputOffset + row * nrc::kNnHiddenWidth + col] *
-                    dOutput[row];
-            }
-        }
-
-        HiddenVector dHidden3{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-                const float dPreFinal = finalHidden[row] > 0.0f ? dHidden4[row] : 0.0f;
-                dHidden3[col] +=
-                    gpuVisibleWeights[finalHiddenLayerOffset + row * nrc::kNnHiddenWidth + col] *
-                    dPreFinal;
-            }
-        }
-
-        HiddenVector dHidden2{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-                const float dPreHidden3 = hidden3[row] > 0.0f ? dHidden3[row] : 0.0f;
-                dHidden2[col] +=
-                    gpuVisibleWeights[hidden3LayerOffset + row * nrc::kNnHiddenWidth + col] *
-                    dPreHidden3;
-            }
-        }
-
-        HiddenVector dHidden1{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-                const float dPreHidden2 = hidden2[row] > 0.0f ? dHidden2[row] : 0.0f;
-                dHidden1[col] +=
-                    gpuVisibleWeights[hidden2LayerOffset + row * nrc::kNnHiddenWidth + col] *
-                    dPreHidden2;
-            }
-        }
-
-        HiddenVector dHidden0{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-                const float dPreHidden1 = hidden1[row] > 0.0f ? dHidden1[row] : 0.0f;
-                dHidden0[col] +=
-                    gpuVisibleWeights[hidden1LayerOffset + row * nrc::kNnHiddenWidth + col] *
-                    dPreHidden1;
-            }
-        }
-
-        for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-            const float dPre = activationHidden[row] > 0.0f ? dHidden0[row] : 0.0f;
-            const float stagedDPre = fp16_round(dPre);
-            for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-                hiddenPartials[workgroup][subgroup][row * nrc::kNnHiddenWidth + col] +=
-                    stagedDPre * encoded[col];
-            }
-        }
-    }
-
-    store_khr_coopmat_partials(gradients, layerOffset, hiddenPartials, subgroupCount);
-    return gradients;
+    return make_expected_khr_hidden_layer_coopmat_gradients(gpuVisibleWeights,
+                                                            trainRecords,
+                                                            0u,
+                                                            "hidden0-coopmat",
+                                                            subgroupSize);
 }
 
 std::vector<float> make_expected_khr_all_coopmat_gradients(

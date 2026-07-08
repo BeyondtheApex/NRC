@@ -145,6 +145,7 @@ Experimental KHR all-`dW` cooperative-matrix reduction:
 - Individually defined region switches still take precedence, so integrations can keep using targeted A/B variants.
 - `nrc_vulkan_gradient_khr_coopmat_all_dw_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that combines the output and hidden-layer coopmat expectations into one full gradient buffer.
 - The all-`dW` oracle mirrors the same per-region fp16 staging and per-workgroup/per-subgroup fp16 partial storage as the single-region oracles.
+- The test-side coopmat oracles share one per-sample KHR backpropagation helper, so output, single-hidden-region, and all-`dW` modes reuse the same encoded input, fp16 activation, output-derivative, and hidden-derivative chain.
 - The default KHR gradient pass still uses subgroup arithmetic until runtime numerical validation succeeds on a driver that can create the KHR gradient pipeline.
 
 Current limitations:
