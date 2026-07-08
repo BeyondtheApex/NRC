@@ -86,6 +86,9 @@
 #define NRC_KHR_ACT_COOPMAT_MAJOR gl_CooperativeMatrixLayoutColumnMajor
 
 #ifdef NRC_NN_BACKPROPAGATION
+#define NRC_KHR_FP32_PER_UVEC4 4
+#define NRC_KHR_DPRE_UVEC4_PER_SAMPLE (NRC_NN_HIDDEN_WIDTH / NRC_KHR_FP32_PER_UVEC4)
+#define NRC_KHR_DPRE_UVEC4_COUNT (NRC_KHR_WORKGROUP_SIZE * NRC_KHR_DPRE_UVEC4_PER_SAMPLE)
 #define NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE NRC_KHR_ACT_UVEC4_COUNT
 #define NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE (NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE + NRC_KHR_ACT_UVEC4_COUNT)
 #define NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE (NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE + NRC_KHR_ACT_UVEC4_COUNT)
@@ -102,6 +105,12 @@
 #define NRC_KHR_SHARED_BUFFER_UVEC4_COUNT NRC_KHR_BACKPROP_SHARED_UVEC4_COUNT
 #else
 #define NRC_KHR_SHARED_BUFFER_UVEC4_COUNT NRC_KHR_ACT_UVEC4_COUNT
+#endif
+#if NRC_NN_HIDDEN_WIDTH % NRC_KHR_FP32_PER_UVEC4 != 0
+#error NRC KHR backprop dPre scratch requires hidden width divisible by 4.
+#endif
+#if NRC_KHR_DPRE_UVEC4_COUNT > (NRC_KHR_ACT_UVEC4_COUNT * 2)
+#error NRC KHR backprop dPre scratch must fit in the active tile plus retired final-hidden activation snapshot.
 #endif
 #else
 #define NRC_KHR_SHARED_BUFFER_UVEC4_COUNT NRC_KHR_ACT_UVEC4_COUNT
@@ -478,6 +487,65 @@ void NrcKhrAccumulateFinalHiddenDWeightsWorkgroup(uint layer,
                                                                 row);
             float dActivation = NrcKhrPropagateSharedOutputDActivation(sampleIndexInGroup, row);
             float dPreActivation = activation > 0.0 ? dActivation : 0.0;
+            float srcActivation = NrcKhrReadBackpropActivationFrom(sourceBaseOffset,
+                                                                   sampleIndexInGroup,
+                                                                   col);
+            value += dPreActivation * srcActivation;
+        }
+        NrcKhrGradientAtomicAdd(layerOffset + row * NRC_NN_HIDDEN_WIDTH + col, value);
+    }
+    barrier();
+}
+
+void NrcKhrStoreSharedDPreActivations(uint activationBaseOffset,
+                                      float dActivation[NRC_NN_HIDDEN_WIDTH]) {
+    uint sampleIndex = gl_LocalInvocationID.x;
+    uint sampleBase = sampleIndex * NRC_KHR_DPRE_UVEC4_PER_SAMPLE;
+    for (uint block = 0u; block < NRC_KHR_DPRE_UVEC4_PER_SAMPLE; ++block) {
+        uint feature = block * NRC_KHR_FP32_PER_UVEC4;
+        float activation0 = NrcKhrReadBackpropActivationFrom(activationBaseOffset,
+                                                             sampleIndex,
+                                                             feature + 0u);
+        float activation1 = NrcKhrReadBackpropActivationFrom(activationBaseOffset,
+                                                             sampleIndex,
+                                                             feature + 1u);
+        float activation2 = NrcKhrReadBackpropActivationFrom(activationBaseOffset,
+                                                             sampleIndex,
+                                                             feature + 2u);
+        float activation3 = NrcKhrReadBackpropActivationFrom(activationBaseOffset,
+                                                             sampleIndex,
+                                                             feature + 3u);
+        float dPre0 = activation0 > 0.0 ? dActivation[feature + 0u] : 0.0;
+        float dPre1 = activation1 > 0.0 ? dActivation[feature + 1u] : 0.0;
+        float dPre2 = activation2 > 0.0 ? dActivation[feature + 2u] : 0.0;
+        float dPre3 = activation3 > 0.0 ? dActivation[feature + 3u] : 0.0;
+        nrcKhrSharedBuffer[sampleBase + block] = uvec4(floatBitsToUint(dPre0),
+                                                       floatBitsToUint(dPre1),
+                                                       floatBitsToUint(dPre2),
+                                                       floatBitsToUint(dPre3));
+    }
+    barrier();
+}
+
+float NrcKhrReadSharedDPreActivation(uint sampleIndex, uint feature) {
+    uvec4 packed = nrcKhrSharedBuffer[sampleIndex * NRC_KHR_DPRE_UVEC4_PER_SAMPLE +
+                                      feature / NRC_KHR_FP32_PER_UVEC4];
+    return uintBitsToFloat(packed[feature & (NRC_KHR_FP32_PER_UVEC4 - 1u)]);
+}
+
+void NrcKhrAccumulateSharedHiddenDWeightsWorkgroup(uint layer,
+                                                   uint sourceBaseOffset) {
+    uint layerOffset = NrcKhrLayerWeightFloatOffset(layer);
+    for (uint weight = gl_LocalInvocationID.x;
+         weight < NRC_NN_HIDDEN_WIDTH * NRC_NN_HIDDEN_WIDTH;
+         weight += NRC_KHR_WORKGROUP_SIZE) {
+        uint row = weight / NRC_NN_HIDDEN_WIDTH;
+        uint col = weight - row * NRC_NN_HIDDEN_WIDTH;
+        float value = 0.0;
+        for (uint sampleIndexInGroup = 0u;
+             sampleIndexInGroup < NRC_KHR_WORKGROUP_SIZE;
+             ++sampleIndexInGroup) {
+            float dPreActivation = NrcKhrReadSharedDPreActivation(sampleIndexInGroup, row);
             float srcActivation = NrcKhrReadBackpropActivationFrom(sourceBaseOffset,
                                                                    sampleIndexInGroup,
                                                                    col);

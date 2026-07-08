@@ -3578,3 +3578,69 @@ Each invocation owns a strided subset of the 64x64 hidden-layer 4 weight region,
 ### Next Step
 
 Plan the next hidden-layer reduction step. Hidden-layer 3 and earlier cannot reuse only the cached 3-value output derivative; they need either a compact shared derivative snapshot, a recomputation strategy, or a subgroup/cooperative-matrix reduction design that preserves the saved activation snapshots and remains stable across SG16/SG32 and M8/M16 profiles.
+
+## 2026-07-09 - Milestone 54 KHR Hidden Layer 3 Workgroup Gradient Reduction
+
+### Implemented
+
+- Added fp32 shared `dZ` scratch constants to `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl`:
+  - `NRC_KHR_FP32_PER_UVEC4`
+  - `NRC_KHR_DPRE_UVEC4_PER_SAMPLE`
+  - `NRC_KHR_DPRE_UVEC4_COUNT`
+- Added compile-time checks that the 64-wide fp32 `dZ` scratch fits in the active tile plus the retired final-hidden activation snapshot.
+- Added reusable shared-`dZ` helpers:
+  - `NrcKhrStoreSharedDPreActivations`
+  - `NrcKhrReadSharedDPreActivation`
+  - `NrcKhrAccumulateSharedHiddenDWeightsWorkgroup`
+- Changed `shaders/nrc/passes/NrcGradientKhr.glsl` so hidden-layer 3 stores its ReLU-gated derivative into shared scratch and accumulates `dW3` with one fp32 atomic add per weight per workgroup.
+- Updated `tests/shader_compile/nrc_khr_backprop_smoke.comp` to exercise the shared-`dZ` helper path.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+After hidden-layer 4 derivative propagation computes each invocation's local `dHidden3`, the pass stores the ReLU-gated hidden-layer 3 derivative:
+
+```text
+dZ3[row] = A3[row] > 0 ? dA3[row] : 0
+```
+
+The scratch stores all 128 samples x 64 hidden features as fp32 values in the first 2048 `uvec4` entries of `nrcKhrSharedBuffer`. This intentionally overwrites the active tile and the hidden-layer 4 activation snapshot only after both are no longer needed. The still-needed snapshots for A3, A2, A1, and A0 start at later offsets and are preserved.
+
+The new workgroup helper then computes:
+
+```text
+dW3[row, col] = sum_samples(dZ3[row] * A2[col])
+```
+
+and emits one fp32 atomic add per covered hidden-layer 3 weight per workgroup. The local `dHidden3` array remains available for propagating to hidden-layer 2, so this changes only the `dW3` accumulation strategy.
+
+### Validation
+
+- Targeted KHR shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr|nrc_shader_khr_backprop" --output-on-failure -V`
+- Targeted KHR gradient test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime test succeeded with controlled skip:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr_test" --output-on-failure -V`
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `33/33 tests passed`
+
+### Current Limitations
+
+- Output-layer, hidden-layer 4, and hidden-layer 3 `dW` reductions are scalar workgroup loops, not cooperative-matrix or subgroup reductions.
+- Hidden-layer 2/1/0 `dW` helpers still use scalar per-sample accumulation.
+- The current correctness path still depends on fp32 storage-buffer atomic add.
+- Runtime numerical comparison for the KHR shader still did not execute on this machine because the local AMD KHR pipeline creation path reports a controlled structured-exception skip.
+- Shared `dZ` scratch reuse depends on the current 5-hidden-layer backprop ordering and the current 64-wide/128-sample workgroup shape. It is guarded for this shape, but the final production plan should still revisit scratch lifetime and matrix-profile-specific memory pressure.
+
+### Next Step
+
+Reuse the shared-`dZ` helper for hidden-layer 2 and hidden-layer 1 once their local derivatives have been computed. Hidden-layer 0 still needs a separate source path because its source activation is the invocation-local encoded input rather than a saved shared activation snapshot.
