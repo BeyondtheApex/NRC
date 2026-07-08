@@ -12,6 +12,13 @@ target_link_libraries(nrc_reference_nn_test PRIVATE nrc_core)
 
 add_test(NAME nrc_reference_nn_test COMMAND nrc_reference_nn_test)
 
+add_executable(nrc_reference_gradient_test
+    reference_gradient_test.cpp)
+
+target_link_libraries(nrc_reference_gradient_test PRIVATE nrc_core)
+
+add_test(NAME nrc_reference_gradient_test COMMAND nrc_reference_gradient_test)
+
 add_executable(nrc_weights_test
     weights_test.cpp)
 

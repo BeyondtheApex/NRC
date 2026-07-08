@@ -1355,3 +1355,66 @@ New validation coverage:
 ### Next Step
 
 Add a scalar gradient/backpropagation reference path that consumes `NrcTrainRecord` batches and produces the gradient buffer expected by the optimizer. Once that exists, add a Vulkan training dispatch test that runs prepare -> gradient -> optimize and compares updated weights against the CPU reference.
+
+## 2026-07-08 - Milestone 18 CPU Reference Backpropagation
+
+### Implemented
+
+- Extended CPU reference NN API:
+  - `include/nrc/nrc_reference_nn.hpp`
+  - `src/nrc_reference_nn.cpp`
+- Added reference gradient test:
+  - `tests/reference_gradient_test.cpp`
+- Updated CTest registration:
+  - `tests/CMakeLists.txt`
+- Updated documentation:
+  - `docs/reference_nn.md`
+
+### Behavior
+
+`nrc::reference_backward` now:
+
+- runs the same 64 -> 5x64 ReLU -> 3 forward topology as `reference_forward`;
+- stores hidden-layer pre-activations for ReLU masks;
+- computes output gradients for:
+  - plain L2 loss;
+  - VkNRC-style relative L2 luminance loss;
+- accumulates gradients into the same row-major weight layout used by all weight utilities;
+- optionally clears or accumulates into an existing gradient buffer.
+
+The relative luminance loss gradient follows VkNRC's shader expression:
+
+```text
+2 * lossScale * (prediction - target)
+/ (luminance(max(prediction, 0))^2 + 0.01)
+```
+
+As in VkNRC's backprop shader, the luminance denominator is used as the current prediction scale and is not itself differentiated.
+
+### Validation
+
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `20/20 tests passed`
+
+New validation coverage:
+
+- `nrc_reference_gradient_test` checks selected hidden and output weights against central finite differences.
+- The finite-difference loss holds the relative-luminance denominator fixed, matching VkNRC's shader backprop behavior.
+- The test checks accumulation mode and invalid weight-count validation.
+
+### Current Limitations
+
+- This is CPU reference backpropagation only. No GPU scalar gradient shader has been added yet.
+- The reference function consumes already encoded `ReferenceInput` values. A later batch helper should bridge `NrcTrainRecord` plus renderer unpacking into encoded input batches for CPU/GPU comparison.
+- No full training loop test exists yet.
+- KHR/NV cooperative-matrix gradient paths are still missing.
+
+### Next Step
+
+Add a scalar GLSL gradient pass that consumes `NrcTrainRecord` batches, uses renderer-provided unpacking, accumulates fp32 gradients, and can be validated against `nrc::reference_backward` through a Vulkan dispatch test.

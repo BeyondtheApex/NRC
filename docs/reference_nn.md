@@ -35,10 +35,29 @@ Total weight count:
 64 * 64 * 5 + 64 * 3 = 20672
 ```
 
-## Current Backends
+## Current Reference API
 
-- CPU reference: `nrc::reference_forward`, using float weights.
+- CPU forward reference: `nrc::reference_forward`, using float weights.
+- CPU backward reference: `nrc::reference_backward`, producing fp32 gradients in the same row-major weight layout.
 - GLSL scalar backend: `NrcScalarForward`, reading packed fp16 weights from `uvec4`.
 - Vulkan scalar dispatch test: uploads packed fp16 weights/inputs, dispatches `NrcScalarForward`, and compares the result against `nrc::reference_forward` using the same fp16-rounded data.
 
 The scalar shader backend is intended for correctness and debugging. It is not a production fallback for high-performance integrations.
+
+## Backward Reference
+
+`reference_backward` supports:
+
+- plain L2 output loss;
+- VkNRC-style relative L2 luminance output gradient.
+
+For the relative luminance path, it matches VkNRC's shader behavior:
+
+```text
+dLoss/dPrediction = 2 * lossScale * (prediction - target)
+                    / (luminance(max(prediction, 0))^2 + 0.01)
+```
+
+The denominator is treated as the current prediction scale used by VkNRC's backprop shader; it is not differentiated further.
+
+`tests/reference_gradient_test.cpp` validates selected weights against central finite differences with that denominator held fixed, and also checks gradient accumulation mode and invalid input validation.
