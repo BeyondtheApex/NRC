@@ -2358,3 +2358,63 @@ The helper intentionally remains low-level. It does not allocate command buffers
 ### Next Step
 
 Extend the barrier helpers to cover image layout transitions used by scalar inference and the sample, or continue refactoring queue/training/gradient tests onto `cmd_memory_barrier` for the common compute/host barrier cases.
+
+## 2026-07-09 - Milestone 32 Training Barrier Helper Adoption
+
+### Implemented
+
+- Refactored additional Vulkan validation tests onto `nrc::vulkan::cmd_memory_barrier`:
+  - `nrc_vulkan_queue_ops_test`
+  - `nrc_vulkan_gradient_scalar_test`
+  - `nrc_vulkan_training_step_test`
+- Queue ops now uses the reusable helper for:
+  - host writes to compute shader reads/writes;
+  - queue reset pass writes to queue push pass reads/writes;
+  - compute shader writes to host reads.
+- Scalar gradient now uses the reusable helper for:
+  - host writes to compute shader reads/writes;
+  - compute shader writes to host reads.
+- Full scalar training step now uses the reusable helper for:
+  - host writes to compute shader reads/writes;
+  - prepare pass writes to gradient pass reads/writes and indirect dispatch reads;
+  - gradient writes to optimizer reads/writes;
+  - optimizer writes to host reads.
+- Updated `docs/vulkan_dispatch_harness.md` to record the broader barrier helper coverage.
+
+### Behavior
+
+This milestone does not change the synchronization policy. It replaces local `VkMemoryBarrier` boilerplate and the training test's local `pipeline_barrier` wrapper with the shared runtime helper.
+
+The training step still records custom stage/access masks where needed, especially for the compute-to-indirect-dispatch dependency:
+
+```text
+VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+-> VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT
+
+VK_ACCESS_SHADER_WRITE_BIT
+-> VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT
+```
+
+### Validation
+
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_queue_ops_test nrc_vulkan_gradient_scalar_test nrc_vulkan_training_step_test`
+- Targeted verbose tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_queue_ops_test|nrc_vulkan_gradient_scalar_test|nrc_vulkan_training_step_test" --output-on-failure -V`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- The helper still only records `VkMemoryBarrier`.
+- Image layout transitions in scalar inference and the sample are still local boilerplate.
+- Descriptor update helpers have not yet been adopted by queue/gradient/training tests.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Either adopt storage-buffer descriptor helpers in queue/gradient/training tests, or add image layout transition helpers for scalar inference and the sample path tracer.

@@ -3,6 +3,7 @@
 #include "nrc/nrc_records.hpp"
 #include "nrc/nrc_reference_nn.hpp"
 #include "nrc/nrc_weights.hpp"
+#include "nrc/vulkan/nrc_vulkan_barriers.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -670,20 +671,11 @@ private:
                                  VkPipelineStageFlags dstStage,
                                  VkAccessFlags srcAccess,
                                  VkAccessFlags dstAccess) {
-        VkMemoryBarrier barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        barrier.srcAccessMask = srcAccess;
-        barrier.dstAccessMask = dstAccess;
-        vkCmdPipelineBarrier(commandBuffer,
-                             srcStage,
-                             dstStage,
-                             0,
-                             1,
-                             &barrier,
-                             0,
-                             nullptr,
-                             0,
-                             nullptr);
+        const nrc::vulkan::VulkanValidationStep validation =
+            nrc::vulkan::cmd_memory_barrier(
+                commandBuffer,
+                {srcStage, dstStage, srcAccess, dstAccess, 0});
+        check_vk(validation.vkResult, "memory barrier");
     }
 
     void bind_and_push(VkCommandBuffer commandBuffer,

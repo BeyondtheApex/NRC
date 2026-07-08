@@ -71,6 +71,11 @@ Inference-specific behavior:
 - It uploads images through staging buffers, dispatches compute in `VK_IMAGE_LAYOUT_GENERAL`, then copies the screen output image back for verification.
 - It also verifies shader writes to the host-visible train-record buffer.
 
+Training/queue-specific behavior:
+
+- Queue ops, scalar gradient, and scalar full-training-step tests now route their host/compute memory barriers through `nrc::vulkan::cmd_memory_barrier`.
+- The full-training-step test also uses the helper for its compute-to-indirect-dispatch dependency.
+
 ## Next Uses
 
 The same pattern should be reused for:
