@@ -4787,3 +4787,87 @@ The hidden-layer-2 oracle only changes hidden layer 2 `dW`. Other hidden layers 
 ### Next Step
 
 Extend the same tile-streaming helper to hidden layer 1 behind a new explicit experimental switch, or add multi-workgroup oracle coverage before broadening the coopmat path further.
+
+## 2026-07-09 - Milestone 72 Hidden-Layer-1 Coopmat dW Runtime Oracle
+
+### Implemented
+
+- Added `NRC_KHR_USE_COOPMAT_HIDDEN1_DW=1` to `shaders/nrc/passes/NrcGradientKhr.glsl`.
+- The new switch replaces only hidden layer 1 `dW` (`NRC_NN_HIDDEN_LAYER_COUNT - 4`) with `NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming`.
+- Kept the default hidden-layer-1 path on the existing subgroup-arithmetic helper.
+- Preserved downstream backpropagation by continuing to propagate `dHidden1` to hidden layer 0 from the local derivative array.
+- Extended `tests/shader_compile/nrc_khr_backprop_smoke.comp` so the backend smoke translation unit type-checks the hidden-layer-1 tile-streaming call shape.
+- Added shader compile tests for `NRC_KHR_USE_COOPMAT_HIDDEN1_DW=1`:
+  - SG32;
+  - SG16;
+  - M8/SG32.
+- Added a test-side CPU oracle for hidden-layer-1 coopmat `dW` in `tests/vulkan_gradient_khr_test.cpp`.
+- The oracle starts from current KHR groundwork gradients and replaces only hidden layer 1 `dW`:
+  - propagate `dOutput` to hidden layer 4 in fp32;
+  - propagate hidden layer 4 through its ReLU gate and weights to `dHidden3`;
+  - propagate hidden layer 3 through its ReLU gate and weights to `dHidden2`;
+  - propagate hidden layer 2 through its ReLU gate and weights to `dHidden1`;
+  - apply the hidden-layer-1 ReLU gate;
+  - fp16-round staged hidden-layer-1 `dPre`;
+  - accumulate against saved hidden-layer-0 source activations;
+  - fp16-round each subgroup partial before the final fp32 subgroup sum.
+- Added `--coopmat-hidden1` to `nrc_vulkan_gradient_khr_test`.
+- Added runtime SPIR-V generation for `NRC_KHR_USE_COOPMAT_HIDDEN1_DW=1`:
+  - SG32;
+  - SG16;
+  - M8/SG32.
+- Added `nrc_gradient_khr_coopmat_hidden1_dispatch_shaders`.
+- Added `nrc_vulkan_gradient_khr_coopmat_hidden1_test`.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/vulkan_dispatch_harness.md`
+
+### Behavior
+
+The KHR gradient runtime test now has six modes:
+
+```text
+default:                 KHR groundwork oracle
+--coopmat-output:        output-layer fp16 coopmat dW oracle
+--coopmat-final-hidden:  hidden layer 4 fp16 coopmat dW oracle
+--coopmat-hidden3:       hidden layer 3 fp16 coopmat dW oracle
+--coopmat-hidden2:       hidden layer 2 fp16 coopmat dW oracle
+--coopmat-hidden1:       hidden layer 1 fp16 coopmat dW oracle
+```
+
+The hidden-layer-1 oracle only changes hidden layer 1 `dW`. Other hidden layers and the output layer remain compared against the existing KHR groundwork oracle.
+
+### Validation
+
+- Targeted KHR gradient runtime test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr" --output-on-failure -V`
+- Targeted KHR gradient runtime result:
+  - `6/6 tests passed`
+- Current local KHR training skip result for all six runtime modes remains:
+  - `SKIP: no Vulkan device supports an implemented NRC KHR cooperative matrix training profile`
+- Targeted hidden-layer-1 shader compile and KHR backprop smoke tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr_coopmat_hidden1|nrc_shader_khr_backprop" --output-on-failure -V`
+- Targeted shader compile result:
+  - `6/6 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `53/53 tests passed`
+
+### Current Limitations
+
+- The hidden-layer-1 coopmat runtime validation path is wired, but the current local device does not satisfy the 98304-byte KHR training shared-memory profile gate. The numerical comparison therefore has not executed locally.
+- The default KHR gradient path still uses subgroup arithmetic for output, final-hidden, hidden-layer-3, hidden-layer-2, and hidden-layer-1 `dW`.
+- Hidden layer 0 still uses the subgroup `dW` path.
+- Hidden layer 0 is not a direct use of the current hidden tile-streaming helper because its source activations are the encoded input. The current subgroup path stages encoded input into the oldest source snapshot after using that snapshot as the hidden-layer-0 ReLU mask, so a coopmat version needs a separate source-staging plan that preserves the hidden-layer-0 activation mask.
+- KHR `dA` propagation still uses scalar arrays rather than cooperative matrices.
+- The test-side coopmat oracles still model one 128-wide workgroup. Multi-workgroup KHR gradient validation remains future work.
+
+### Next Step
+
+Design the hidden-layer-0 cooperative-matrix `dW` path with separate encoded-input source staging, or add multi-workgroup oracle coverage before broadening the coopmat path further.
