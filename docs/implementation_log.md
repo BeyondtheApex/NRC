@@ -5527,3 +5527,85 @@ The new hidden1 `dA` mode remains separate from the other `dA` modes. The next b
 ### Next Step
 
 Add a cumulative full-chain KHR cooperative-matrix `dA` mode that enables all four hidden-to-hidden derivative propagation steps together. Its CPU oracle should use the existing `CoopmatDActivationLayers` mask with all valid hidden derivative layers enabled, then the runtime mode can become the foundation for combining all `dW` and all `dA` cooperative-matrix paths.
+
+## 2026-07-09 - Milestone 81 KHR All-dA Coopmat Mode
+
+### Implemented
+
+- Added a cumulative KHR cooperative-matrix hidden derivative propagation mode behind `NRC_KHR_USE_COOPMAT_ALL_DA`.
+- Changed the four individual hidden-to-hidden `dA` switches to default to `NRC_KHR_USE_COOPMAT_ALL_DA`, while still allowing each individual switch to be overridden for targeted experiments:
+  - `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA`
+  - `NRC_KHR_USE_COOPMAT_HIDDEN3_DA`
+  - `NRC_KHR_USE_COOPMAT_HIDDEN2_DA`
+  - `NRC_KHR_USE_COOPMAT_HIDDEN1_DA`
+- Added `make_all_coopmat_dactivation_layers()` and an all-`dA` CPU oracle wrapper. The oracle enables all valid hidden derivative propagation layers and models the chained fp16 `dPre` staging plus fp16 hidden-derivative storage expected from the shader path.
+- Added the `--coopmat-all-da` runtime mode to `nrc_vulkan_gradient_khr_test`.
+- Added all-`dA` finite/non-zero sanity checks for the hidden layers affected by chained cooperative-matrix derivative propagation.
+- Added compile smoke coverage for the all-`dA` mode across the current KHR shader profiles:
+  - subgroup 32;
+  - subgroup 16;
+  - `m8` subgroup 32.
+- Added all-`dA` dispatch SPIR-V generation and a registered runtime CTest:
+  - `nrc_gradient_khr_coopmat_all_da_dispatch_shaders`
+  - `nrc_vulkan_gradient_khr_coopmat_all_da_test`
+- Updated current documentation:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/khr_shared_memory_layout.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+This milestone turns the independent `dA` experiments into a full hidden-to-hidden derivative propagation chain, while keeping the baseline KHR gradient path scalar unless the all-`dA` switch is explicitly enabled:
+
+```text
+default:                       KHR groundwork oracle
+--coopmat-output:              output-layer fp16 coopmat dW oracle
+--coopmat-final-hidden:        hidden layer 4 fp16 coopmat dW oracle
+--coopmat-final-hidden-da:     final-hidden -> hidden3 fp16 coopmat dA oracle
+--coopmat-hidden3-da:          hidden3 -> hidden2 fp16 coopmat dA oracle
+--coopmat-hidden2-da:          hidden2 -> hidden1 fp16 coopmat dA oracle
+--coopmat-hidden1-da:          hidden1 -> hidden0 fp16 coopmat dA oracle
+--coopmat-all-da:              all hidden-to-hidden dA regions use chained fp16 coopmat oracles
+--coopmat-hidden3:             hidden layer 3 fp16 coopmat dW oracle
+--coopmat-hidden2:             hidden layer 2 fp16 coopmat dW oracle
+--coopmat-hidden1:             hidden layer 1 fp16 coopmat dW oracle
+--coopmat-hidden0:             hidden layer 0 fp16 coopmat dW oracle
+--coopmat-all-dw:              output and all hidden dW regions use fp16 coopmat oracles
+```
+
+`NRC_KHR_USE_COOPMAT_ALL_DA=1` is intentionally narrower than a future all-coopmat training profile: it only changes hidden-to-hidden derivative propagation. All `dW` accumulation regions continue to follow their existing scalar or individually enabled cooperative-matrix paths.
+
+### Validation
+
+- Diff whitespace check succeeded before the documentation log update:
+  - `git diff --check`
+- Targeted KHR gradient runtime test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr" --output-on-failure -V`
+- Targeted KHR gradient runtime result:
+  - `13/13 tests passed`
+- Current local KHR training skip result for all thirteen runtime modes remains:
+  - `SKIP: no Vulkan device supports an implemented NRC KHR cooperative matrix training profile`
+- Targeted all-`dA` compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr_coopmat_all_da" --output-on-failure -V`
+- Targeted all-`dA` compile result:
+  - `3/3 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `81/81 tests passed`
+
+### Current Limitations
+
+- The default KHR gradient path still uses scalar hidden derivative propagation. `NRC_KHR_USE_COOPMAT_ALL_DA` is an opt-in experimental mode.
+- The all-`dA` mode has compile coverage and runtime-test wiring, but the local device still does not satisfy the 98304-byte KHR training shared-memory profile gate. That means the mode still has no local GPU numerical comparison on this machine.
+- There is not yet a combined all-coopmat training mode that enables both all `dW` regions and all hidden-to-hidden `dA` propagation in one profile.
+- The production/default KHR training profile decision is still pending real-device validation on hardware that satisfies the current shared-memory gate.
+
+### Next Step
+
+Add a combined all-coopmat KHR training mode that enables `NRC_KHR_USE_COOPMAT_ALL_DW=1` and `NRC_KHR_USE_COOPMAT_ALL_DA=1` together. Its CPU oracle should combine the all-`dW` fp16 partial semantics with the all-`dA` chained fp16 derivative staging semantics, then register a dedicated runtime mode such as `--coopmat-all` for end-to-end comparison.

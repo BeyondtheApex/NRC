@@ -356,6 +356,14 @@ CoopmatDActivationLayers make_single_coopmat_dactivation_layer(std::uint32_t lay
     return layers;
 }
 
+CoopmatDActivationLayers make_all_coopmat_dactivation_layers() {
+    CoopmatDActivationLayers layers{};
+    for (std::uint32_t layer = 1u; layer < nrc::kNnHiddenLayerCount; ++layer) {
+        layers[layer] = true;
+    }
+    return layers;
+}
+
 std::uint32_t highest_coopmat_dactivation_layer(const CoopmatDActivationLayers &layers) {
     for (std::uint32_t layer = nrc::kNnHiddenLayerCount - 1u;
          layer > 0u;
@@ -625,6 +633,15 @@ std::vector<float> make_expected_khr_hidden1_da_coopmat_gradients(
         gpuVisibleWeights,
         trainRecords,
         make_single_coopmat_dactivation_layer(nrc::kNnHiddenLayerCount - 4u));
+}
+
+std::vector<float> make_expected_khr_all_da_coopmat_gradients(
+    std::span<const float> gpuVisibleWeights,
+    const std::vector<nrc::NrcTrainRecord> &trainRecords) {
+    return make_expected_khr_dactivation_coopmat_gradients(
+        gpuVisibleWeights,
+        trainRecords,
+        make_all_coopmat_dactivation_layers());
 }
 
 std::vector<float> make_expected_khr_all_coopmat_gradients(
@@ -1284,12 +1301,14 @@ int main(int argc, char **argv) {
         argc == 5 && std::strcmp(argv[4], "--coopmat-hidden2-da") == 0;
     const bool useCoopmatHidden1DActivation =
         argc == 5 && std::strcmp(argv[4], "--coopmat-hidden1-da") == 0;
+    const bool useCoopmatAllDActivation =
+        argc == 5 && std::strcmp(argv[4], "--coopmat-all-da") == 0;
     if (argc != 4 && !useCoopmatOutput && !useCoopmatFinalHidden && !useCoopmatHidden3 &&
         !useCoopmatHidden2 && !useCoopmatHidden1 && !useCoopmatHidden0 &&
         !useCoopmatAllDWeights && !useCoopmatFinalHiddenDActivation &&
         !useCoopmatHidden3DActivation && !useCoopmatHidden2DActivation &&
-        !useCoopmatHidden1DActivation) {
-        std::cerr << "usage: nrc_vulkan_gradient_khr_test <sg32.spv> <sg16.spv> <m8_sg32.spv> [--coopmat-output|--coopmat-final-hidden|--coopmat-hidden3|--coopmat-hidden2|--coopmat-hidden1|--coopmat-hidden0|--coopmat-all-dw|--coopmat-final-hidden-da|--coopmat-hidden3-da|--coopmat-hidden2-da|--coopmat-hidden1-da]\n";
+        !useCoopmatHidden1DActivation && !useCoopmatAllDActivation) {
+        std::cerr << "usage: nrc_vulkan_gradient_khr_test <sg32.spv> <sg16.spv> <m8_sg32.spv> [--coopmat-output|--coopmat-final-hidden|--coopmat-hidden3|--coopmat-hidden2|--coopmat-hidden1|--coopmat-hidden0|--coopmat-all-dw|--coopmat-final-hidden-da|--coopmat-hidden3-da|--coopmat-hidden2-da|--coopmat-hidden1-da|--coopmat-all-da]\n";
         return EXIT_FAILURE;
     }
 
@@ -1351,6 +1370,9 @@ int main(int argc, char **argv) {
         } else if (useCoopmatHidden1DActivation) {
             expectedCoopmatDActivation =
                 make_expected_khr_hidden1_da_coopmat_gradients(gpuVisibleWeights, trainRecords);
+        } else if (useCoopmatAllDActivation) {
+            expectedCoopmatDActivation =
+                make_expected_khr_all_da_coopmat_gradients(gpuVisibleWeights, trainRecords);
         }
         if (!all_finite(expectedGradients)) {
             throw std::runtime_error("KHR expected gradients contain non-finite values");
@@ -1495,6 +1517,18 @@ int main(int argc, char **argv) {
                 throw std::runtime_error("KHR hidden1 dA coopmat oracle produced all-zero hidden0 gradients");
             }
         }
+        if (useCoopmatAllDActivation) {
+            if (!all_finite(expectedCoopmatDActivation)) {
+                throw std::runtime_error("KHR all-dA coopmat expected gradients contain non-finite values");
+            }
+            for (std::uint32_t layer = 0u; layer < nrc::kNnHiddenLayerCount - 1u; ++layer) {
+                const std::size_t layerOffset = nrc::layer_weight_offset(layer);
+                if (max_abs(std::span<const float>{expectedCoopmatDActivation.data() + layerOffset,
+                                                   nrc::hidden_layer_weight_count()}) == 0.0f) {
+                    throw std::runtime_error("KHR all-dA coopmat oracle produced all-zero affected hidden gradients");
+                }
+            }
+        }
 
         nrc::NrcQueueState queueState{};
         queueState.trainCounts[0] = kTrainCount;
@@ -1512,7 +1546,8 @@ int main(int argc, char **argv) {
             }
         }
         if (useCoopmatFinalHiddenDActivation || useCoopmatHidden3DActivation ||
-            useCoopmatHidden2DActivation || useCoopmatHidden1DActivation) {
+            useCoopmatHidden2DActivation || useCoopmatHidden1DActivation ||
+            useCoopmatAllDActivation) {
             expectedGradients = expectedCoopmatDActivation;
         }
         const std::vector<float> actualGradients = runner.run(trainRecords, queueState, packedWeights);

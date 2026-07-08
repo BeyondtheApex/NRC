@@ -141,6 +141,7 @@ NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1
 NRC_KHR_USE_COOPMAT_HIDDEN3_DA=1
 NRC_KHR_USE_COOPMAT_HIDDEN2_DA=1
 NRC_KHR_USE_COOPMAT_HIDDEN1_DA=1
+NRC_KHR_USE_COOPMAT_ALL_DA=1
 ```
 
 The helper uses existing shared-memory regions:
@@ -161,4 +162,4 @@ hidden1 -> hidden0:      NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE
 
 This is safe for the currently wired propagation points because the corresponding hidden-layer `dW` accumulation has already consumed that layer's activation snapshot before the source derivative is produced.
 
-This path does not increase the 6144-uvec4 / 98304-byte KHR training shared-memory requirement. Every individual hidden-to-hidden `dA` propagation step now has an explicit switch using this reuse pattern; a cumulative full-chain mode still needs separate validation because chained fp16 staging changes more than one downstream gradient region at once.
+This path does not increase the 6144-uvec4 / 98304-byte KHR training shared-memory requirement. Every individual hidden-to-hidden `dA` propagation step now has an explicit switch using this reuse pattern, and `NRC_KHR_USE_COOPMAT_ALL_DA=1` chains all four steps together. The all-`dA` mode has compile/runtime-test wiring and a CPU oracle for chained fp16 staging, but local GPU numerical execution still depends on a device satisfying the KHR training shared-memory gate.
