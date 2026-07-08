@@ -117,6 +117,13 @@ void main() {
                                      NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE,
                                      dHidden1,
                                      dHidden0);
+    NrcKhrStoreSharedEncodedInput(NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE,
+                                  encoded);
+    NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming(
+        0u,
+        NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE,
+        NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE,
+        dHidden0);
     NrcKhrStoreSharedDPreActivations(NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE,
                                      dHidden0);
     NrcKhrStoreSharedEncodedInput(NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE,
