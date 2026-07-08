@@ -51,9 +51,28 @@ CTest compiles:
 
 The smoke shader supplies a deterministic fake `NrcUnpackPackedInput` implementation. This validates GLSL syntax, descriptor declarations, queue destination logic, and scalar backend inclusion.
 
+CTest also dispatches the pass on Vulkan through:
+
+- `tests/vulkan_inference_scalar_test.cpp`
+
+The Vulkan test creates real storage images and buffers:
+
+- `rgba32f` bias/factor-R image.
+- `rg32f` factor-GB image.
+- packed fp16 weights.
+- eval records.
+- eval count.
+- flat train-record buffer.
+
+It uses deterministic weights that make the NN prediction constant, then verifies:
+
+- screen destinations update `bias.rgb` with `bias + factor * prediction`;
+- written screen alpha becomes `0.0`, matching the pass;
+- train destinations update only the referenced train-record bias values;
+- invalid eval destinations do not write.
+
 ## Current Limitations
 
-- No Vulkan dispatch test exists for this full inference pass yet.
 - The pass is scalar-only; a KHR inference pass should be added after KHR pipeline creation is stable on at least one driver.
 - The screen output contract follows VkNRC's bias/factor image model but has not yet been exercised in the reference path tracer.
 - Scene/material unpacking remains integration-owned and must be implemented by the sample path tracer and any downstream renderer.

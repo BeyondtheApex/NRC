@@ -668,3 +668,97 @@ This keeps the NRC library reusable while preserving VkNRC's packed input record
 ### Next Step
 
 Add a Vulkan dispatch test for `NrcInferenceScalar.glsl` with a fake scene unpack and small screen/train buffers. That test should verify that screen destinations and train destinations are both updated exactly as expected before moving on to the reference path tracer integration.
+
+## 2026-07-08 - Milestone 10 Scalar Inference Vulkan Dispatch Test
+
+### Implemented
+
+- Added Vulkan dispatch validation test for the scalar inference pass:
+  - `tests/vulkan_inference_scalar_test.cpp`
+- Added generated SPIR-V target:
+  - `nrc_inference_scalar_dispatch_shader`
+- Registered CTest test:
+  - `nrc_vulkan_inference_scalar_test`
+- Updated inference pass documentation:
+  - `docs/inference_pass.md`
+
+### Test Design
+
+The test uses the existing smoke shader wrapper:
+
+- `tests/shader_compile/nrc_inference_scalar_smoke.comp`
+
+That shader provides a deterministic fake implementation of:
+
+```glsl
+NrcUnpackPackedInput(PackedNrcInput packedInput)
+```
+
+The test configures the MLP with:
+
+- identity hidden layers;
+- output weights reading the final two encoded constant `1.0` lanes;
+- constant prediction:
+  - `vec3(0.25, 0.5, 0.75)`.
+
+This makes validation focus on inference-pass resource behavior instead of CPU-side duplication of the GLSL input encoder.
+
+### Runtime Coverage
+
+The test creates real Vulkan resources:
+
+- packed fp16 weight storage buffer;
+- `NrcEvalRecord` storage buffer;
+- eval-count storage buffer;
+- `rgba32f` storage image for `bias.rgb` and `factor.r`;
+- `rg32f` storage image for `factor.g` and `factor.b`;
+- flat `NrcTrainRecord` storage buffer sized for all NRC train batches;
+- upload/readback staging buffers for the storage images.
+
+It records barriers and copies for:
+
+- host-to-transfer image upload;
+- transfer-to-compute image layout transition;
+- host-to-compute storage-buffer visibility;
+- compute-to-transfer image readback;
+- compute-to-host train-buffer visibility.
+
+### Validated Behavior
+
+The test verifies:
+
+- screen destination `(1, 1)` is updated with `bias + factor * prediction`;
+- screen destination `(2, 0)` is updated independently;
+- screen alpha is written as `0.0`, matching `NrcInferenceApplyScreen`;
+- train destination `batch 0, [2, 4]` updates only train-record bias values;
+- train-record factors remain unchanged;
+- an invalid eval destination does not update any resource;
+- untouched screen pixels and nearby train records remain unchanged.
+
+### Validation
+
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Build generated:
+  - `G:/cpp/radiance/NRC/build/tests/nrc_inference_scalar_dispatch.spv`
+  - `G:/cpp/radiance/NRC/build/tests/Debug/nrc_vulkan_inference_scalar_test.exe`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `12/12 tests passed`
+- The new scalar inference Vulkan test passed as a real dispatch on the current machine, not as a skip.
+
+### Current Limitations
+
+- The inference dispatch test uses a fake scene unpack function; the reference path tracer still needs a real scene/material implementation.
+- The test uses host-visible buffers and staging for clarity, not a production runtime allocator.
+- Only the scalar inference pass is runtime-validated.
+- No KHR inference pass exists yet; KHR cooperative matrix pipeline creation is still driver-gated on the current AMD machine.
+- No indirect dispatch generation or eval-count reset/update pass exists yet.
+- No gradient/backpropagation or optimizer GPU pass has been implemented yet.
+
+### Next Step
+
+Add queue-management helpers/passes for eval count reset and eval-record reservation, then use those pieces in the reference path tracer sample. The scalar inference dispatch test should remain the correctness anchor while the sample grows toward real scene integration.
