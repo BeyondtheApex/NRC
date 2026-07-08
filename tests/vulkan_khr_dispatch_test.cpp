@@ -2,12 +2,9 @@
 #include "nrc/nrc_reference_nn.hpp"
 #include "nrc/nrc_weights.hpp"
 #include "nrc/vulkan/nrc_vulkan_capabilities.hpp"
+#include "nrc/vulkan/nrc_vulkan_pipeline.hpp"
 
 #include <vulkan/vulkan.h>
-
-#if defined(_MSC_VER) && defined(_WIN32)
-#include <excpt.h>
-#endif
 
 #include <algorithm>
 #include <array>
@@ -47,24 +44,6 @@ void check_vk(VkResult result, const char *operation) {
     if (result != VK_SUCCESS) {
         throw std::runtime_error(std::string(operation) + " failed with VkResult " + vk_result_string(result));
     }
-}
-
-VkResult create_compute_pipeline_guarded(VkDevice device,
-                                         const VkComputePipelineCreateInfo *pipelineInfo,
-                                         VkPipeline *pipeline,
-                                         bool &structuredException) {
-    structuredException = false;
-#if defined(_MSC_VER) && defined(_WIN32)
-    VkResult result = VK_ERROR_UNKNOWN;
-    __try {
-        result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, pipelineInfo, nullptr, pipeline);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        structuredException = true;
-    }
-    return result;
-#else
-    return vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, pipelineInfo, nullptr, pipeline);
-#endif
 }
 
 std::uint32_t pack_half2(float x, float y) {
@@ -531,32 +510,26 @@ private:
         VkShaderModule shaderModule = VK_NULL_HANDLE;
         check_vk(vkCreateShaderModule(device_, &shaderInfo, nullptr, &shaderModule), "vkCreateShaderModule");
 
-        VkPipelineShaderStageRequiredSubgroupSizeCreateInfo requiredSubgroupSize{};
-        requiredSubgroupSize.sType =
-            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO;
-        requiredSubgroupSize.requiredSubgroupSize = selectedProfile_->requiredSubgroupSize;
+        const nrc::ProfileShaderConfig *config = nrc::find_profile_shader_config(selectedProfile_->id);
+        if (config == nullptr) {
+            vkDestroyShaderModule(device_, shaderModule, nullptr);
+            throw std::runtime_error("selected KHR profile has no shader config");
+        }
 
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.pNext = &requiredSubgroupSize;
-        stageInfo.flags = VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = shaderModule;
-        stageInfo.pName = "main";
+        nrc::vulkan::VulkanComputePipelineCreateInfo pipelineCreateInfo{};
+        pipelineCreateInfo.device = device_;
+        pipelineCreateInfo.pipelineLayout = pipelineLayout_;
+        pipelineCreateInfo.shaderModule = shaderModule;
+        pipelineCreateInfo.shaderConfig = config;
 
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = pipelineLayout_;
-
-        bool structuredException = false;
-        const VkResult result =
-            create_compute_pipeline_guarded(device_, &pipelineInfo, &pipeline_, structuredException);
+        const nrc::vulkan::VulkanComputePipelineCreateResult pipelineResult =
+            nrc::vulkan::create_profile_compute_pipeline(pipelineCreateInfo);
         vkDestroyShaderModule(device_, shaderModule, nullptr);
-        if (structuredException) {
+        if (pipelineResult.validation.structuredException) {
             throw SkipTest("vkCreateComputePipelines raised a structured exception for the KHR cooperative matrix shader");
         }
-        check_vk(result, "vkCreateComputePipelines");
+        check_vk(pipelineResult.validation.vkResult, "vkCreateComputePipelines");
+        pipeline_ = pipelineResult.pipeline;
     }
 
     void create_command_pool() {

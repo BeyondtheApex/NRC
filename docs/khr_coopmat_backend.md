@@ -53,7 +53,7 @@ The test:
 - Queries real Vulkan device capabilities through `nrc::vulkan::query_device_capabilities`.
 - Selects an implemented KHR inference profile with `requireTraining = false`.
 - Creates the device with KHR cooperative matrix, shader float16, storage buffer 16-bit access, subgroup size control, and full compute subgroup features.
-- Creates the compute pipeline with `VkPipelineShaderStageRequiredSubgroupSizeCreateInfo` and `VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT`.
+- Creates the compute pipeline through `nrc::vulkan::create_profile_compute_pipeline`, which applies `VkPipelineShaderStageRequiredSubgroupSizeCreateInfo` and `VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT` from the selected `ProfileShaderConfig`.
 - Dispatches 149 samples and compares against an fp16-rounded CPU reference if pipeline creation and dispatch succeed.
 
 Current local result:
@@ -76,4 +76,4 @@ Profiles carry an `implemented` flag. The implemented KHR inference profiles are
 
 `choose_profile` still prefers the M16 profiles when the device reports both M16 and M8 support. M8 is selected when it is the first implemented matching profile for the reported matrix properties and subgroup size.
 
-After selecting a profile, integrations should call `nrc::find_profile_shader_config` and use the returned workgroup, subgroup, and cooperative-matrix dimensions to select or compile the matching shader variant. The Vulkan KHR dispatch test uses this path to choose between SG32, SG16, and M8/SG32 SPIR-V files.
+After selecting a profile, integrations should call `nrc::find_profile_shader_config` and use the returned workgroup, subgroup, and cooperative-matrix dimensions to select or compile the matching shader variant. The Vulkan KHR dispatch test uses this path to choose between SG32, SG16, and M8/SG32 SPIR-V files, then uses `nrc::vulkan::create_profile_compute_pipeline` for profile-specific pipeline creation.

@@ -45,6 +45,7 @@ enum class VulkanProfileValidationStatus : std::uint8_t {
 struct VulkanValidationStep {
     VulkanValidationStepStatus status = VulkanValidationStepStatus::NotRun;
     VkResult vkResult = VK_SUCCESS;
+    bool structuredException = false;
 };
 
 struct VulkanProfileValidationRequirements {

@@ -77,6 +77,30 @@ nrc::vulkan::VulkanProfileValidationReport report =
 
 `report.usable` is true only when the profile capabilities and shader config are valid and all required validation stages have passed. Failed stages always make the report unusable. `NotRun` and `Skipped` stages only block usability when the corresponding `require...` flag is set.
 
+## Profile Compute Pipeline Helper
+
+`nrc::vulkan::create_profile_compute_pipeline` creates a compute pipeline from a caller-owned device, shader module, pipeline layout, and `ProfileShaderConfig`.
+
+Header:
+
+```cpp
+#include "nrc/vulkan/nrc_vulkan_pipeline.hpp"
+```
+
+For KHR cooperative matrix profiles, the helper applies the shader-stage requirements carried by the profile config:
+
+- `VkPipelineShaderStageRequiredSubgroupSizeCreateInfo` when subgroup size control is required;
+- `VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT` when full subgroups are required.
+
+The result contains:
+
+- created `VkPipeline`;
+- `VulkanValidationStepStatus`;
+- `VkResult`;
+- `structuredException`, set when MSVC/Windows catches a structured exception from `vkCreateComputePipelines`.
+
+The helper does not own the returned pipeline. Callers must destroy it with `vkDestroyPipeline`.
+
 ## Current Limit
 
-This module reports capabilities and aggregates profile validation state. It does not create devices, enable features, compile shaders, create pipelines, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own pipeline code, then feed the result back into `VulkanProfileValidationRequirements`.
+This module reports capabilities, aggregates profile validation state, and provides a small profile-aware compute pipeline creation helper. It does not create devices, enable features, compile shaders, create shader modules, create pipeline layouts, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own renderer code, then feed pipeline/numerical outcomes back into `VulkanProfileValidationRequirements`.

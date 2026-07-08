@@ -2077,3 +2077,70 @@ The final status is selected in this order:
 ### Next Step
 
 Promote reusable pieces from the KHR dispatch harness into `runtime/vulkan`: a guarded compute pipeline creation helper that consumes `ProfileShaderConfig`, records `VkResult`/structured-exception outcomes into `VulkanValidationStep`, and remains independent from the sample/test descriptor layout.
+
+## 2026-07-09 - Milestone 28 Vulkan Profile Compute Pipeline Helper
+
+### Implemented
+
+- Added reusable Vulkan pipeline helper API:
+  - `include/nrc/vulkan/nrc_vulkan_pipeline.hpp`
+  - `runtime/vulkan/nrc_vulkan_pipeline.cpp`
+  - `nrc::vulkan::VulkanComputePipelineCreateInfo`
+  - `nrc::vulkan::VulkanComputePipelineCreateResult`
+  - `nrc::vulkan::create_profile_compute_pipeline`
+- Added `structuredException` to `nrc::vulkan::VulkanValidationStep`.
+- The helper consumes a caller-owned:
+  - `VkDevice`;
+  - `VkShaderModule`;
+  - `VkPipelineLayout`;
+  - `nrc::ProfileShaderConfig`.
+- For KHR cooperative matrix profiles, the helper applies:
+  - `VkPipelineShaderStageRequiredSubgroupSizeCreateInfo`;
+  - `VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT`.
+- The helper returns:
+  - created `VkPipeline`;
+  - `VulkanValidationStepStatus`;
+  - `VkResult`;
+  - whether MSVC/Windows caught a structured exception from `vkCreateComputePipelines`.
+- Refactored `nrc_vulkan_khr_dispatch_test` to use the helper instead of its local guarded pipeline creation code.
+- Extended `nrc_vulkan_capabilities_test` to verify invalid pipeline creation requests fail safely and preserve structured-exception flags through profile validation reports.
+- Updated documentation:
+  - `docs/vulkan_capability_query.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/vulkan_dispatch_harness.md`
+  - `README.md`
+
+### Behavior
+
+The helper is profile-aware but still renderer-neutral. It does not create a device, shader module, descriptor layout, pipeline layout, descriptor sets, command buffers, or resources. This keeps the integration contract suitable for projects such as MCVR, where the host renderer should keep ownership of its Vulkan object model.
+
+For scalar/reference profiles, the helper creates a normal compute pipeline without subgroup-size pNext state. For KHR profiles, it derives subgroup/full-subgroup requirements from `ProfileShaderConfig`, keeping C++ profile selection and Vulkan pipeline creation synchronized.
+
+Structured exceptions are treated as `VulkanValidationStepStatus::Skipped` with `structuredException = true` and `vkResult = VK_ERROR_UNKNOWN`, so callers can turn known driver crashes into controlled skips or disable a profile without crashing the host process.
+
+### Validation
+
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_capabilities_test nrc_vulkan_khr_dispatch_test`
+- Targeted tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_capabilities_test|nrc_vulkan_khr_dispatch_test" --output-on-failure`
+- Verbose KHR dispatch test still reports a controlled local skip:
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR cooperative matrix shader`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- The helper does not load SPIR-V or create shader modules.
+- The helper does not own or destroy the returned pipeline.
+- The helper does not yet feed its result directly into a higher-level Vulkan numerical validation routine; the KHR dispatch test still owns dispatch and CPU/GPU comparison.
+- The local AMD KHR dispatch path still cannot numerically validate because pipeline creation raises a structured exception and is reported as a controlled skip.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Promote reusable shader module loading and validation-step plumbing from the dispatch tests into `runtime/vulkan`, then wire KHR dispatch pipeline creation results into `VulkanProfileValidationReport` in the test path.

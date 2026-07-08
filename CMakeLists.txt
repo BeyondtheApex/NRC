@@ -43,7 +43,8 @@ if(NRC_BUILD_VULKAN_RUNTIME)
     if(Vulkan_FOUND)
         add_library(nrc_vulkan STATIC)
         target_sources(nrc_vulkan PRIVATE
-            runtime/vulkan/nrc_vulkan_capabilities.cpp)
+            runtime/vulkan/nrc_vulkan_capabilities.cpp
+            runtime/vulkan/nrc_vulkan_pipeline.cpp)
         target_link_libraries(nrc_vulkan PUBLIC
             nrc_core
             Vulkan::Vulkan)

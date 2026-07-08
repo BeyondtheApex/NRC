@@ -56,9 +56,9 @@ KHR-specific behavior:
 - The KHR dispatch shader uses `local_size_x = NRC_KHR_WORKGROUP_SIZE`, currently 128.
 - The test dispatches 149 samples to verify padded final workgroups.
 - The test selects SG32, SG16, or M8/SG32 SPIR-V through `nrc::find_profile_shader_config` after choosing an implemented profile from queried capabilities.
-- The pipeline requires the selected subgroup size and full compute subgroups.
+- The KHR pipeline is created through `nrc::vulkan::create_profile_compute_pipeline`, which applies the selected subgroup size and full compute subgroup requirements from `ProfileShaderConfig`.
 - On MSVC/Windows, the test catches structured exceptions from `vkCreateComputePipelines` and reports a controlled `SKIP:`. This is needed because the current local AMD driver advertises the profile but raises an exception while compiling the VkNRC-style KHR cooperative matrix shader.
-- Reusable runtime diagnostics now live in `nrc::vulkan::evaluate_vulkan_profile_validation`. The dispatch harness still owns actual shader module creation, pipeline creation, dispatch, and numerical comparison.
+- Reusable runtime diagnostics now live in `nrc::vulkan::evaluate_vulkan_profile_validation`, and profile-aware compute pipeline creation lives in `nrc::vulkan::create_profile_compute_pipeline`. The dispatch harness still owns shader module creation, descriptor layout, dispatch, and numerical comparison.
 
 Inference-specific behavior:
 
@@ -74,4 +74,4 @@ The same pattern should be reused for:
 - Reference path tracer integration using the validated scalar inference pass.
 - Regression tests for future backend layout changes.
 
-The final runtime helper should not copy this test harness wholesale. It should continue promoting only reusable pieces: profile validation reporting, shader module loading, descriptor contract creation, resource barriers, and profile-specific pipeline creation.
+The final runtime helper should not copy this test harness wholesale. It should continue promoting only reusable pieces: shader module loading, descriptor contract creation, resource barriers, and dispatch/numerical validation scaffolding.

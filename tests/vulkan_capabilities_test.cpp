@@ -1,4 +1,5 @@
 #include "nrc/vulkan/nrc_vulkan_capabilities.hpp"
+#include "nrc/vulkan/nrc_vulkan_pipeline.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -57,6 +58,18 @@ int main() {
     property.scope = VK_SCOPE_WORKGROUP_KHR;
     auto noSubgroup = nrc::vulkan::translate_cooperative_matrix_property(property, VK_SHADER_STAGE_COMPUTE_BIT);
     ok &= require(!noSubgroup.has_value(), "reject non-subgroup cooperative matrix property");
+
+    const nrc::vulkan::VulkanComputePipelineCreateResult invalidPipeline =
+        nrc::vulkan::create_profile_compute_pipeline({});
+    ok &= require(invalidPipeline.pipeline == VK_NULL_HANDLE,
+                  "invalid profile pipeline request returns null pipeline");
+    ok &= require(invalidPipeline.validation.status ==
+                      nrc::vulkan::VulkanValidationStepStatus::Failed,
+                  "invalid profile pipeline request fails safely");
+    ok &= require(invalidPipeline.validation.vkResult == VK_ERROR_INITIALIZATION_FAILED,
+                  "invalid profile pipeline request records initialization failure");
+    ok &= require(!invalidPipeline.validation.structuredException,
+                  "invalid profile pipeline request does not record structured exception");
 
     nrc::vulkan::VulkanDeviceCapabilities validCapabilities{};
     validCapabilities.shaderFloat16 = true;
@@ -137,6 +150,7 @@ int main() {
                       "Vulkan validation reports skipped required pipeline creation");
 
         requirePipeline.pipelineCreation.status = nrc::vulkan::VulkanValidationStepStatus::Failed;
+        requirePipeline.pipelineCreation.structuredException = false;
         requirePipeline.pipelineCreation.vkResult = VK_ERROR_INITIALIZATION_FAILED;
         const nrc::vulkan::VulkanProfileValidationReport failedPipeline =
             nrc::vulkan::evaluate_vulkan_profile_validation(
@@ -151,6 +165,18 @@ int main() {
                       "Vulkan validation reports failed pipeline creation");
         ok &= require(failedPipeline.pipelineCreation.vkResult == VK_ERROR_INITIALIZATION_FAILED,
                       "Vulkan validation preserves pipeline VkResult");
+
+        requirePipeline.pipelineCreation.status = nrc::vulkan::VulkanValidationStepStatus::Skipped;
+        requirePipeline.pipelineCreation.structuredException = true;
+        requirePipeline.pipelineCreation.vkResult = VK_ERROR_UNKNOWN;
+        const nrc::vulkan::VulkanProfileValidationReport skippedExceptionPipeline =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                validCapabilities,
+                {},
+                *khrProfile,
+                requirePipeline);
+        ok &= require(skippedExceptionPipeline.pipelineCreation.structuredException,
+                      "Vulkan validation preserves structured exception flag");
 
         nrc::vulkan::VulkanProfileValidationRequirements requireNumerical{};
         requireNumerical.requireNumericalValidation = true;
