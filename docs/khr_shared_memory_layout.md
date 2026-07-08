@@ -130,7 +130,7 @@ All of these fit within the 1024-uvec4 active tile and end before the first acti
 
 The tradeoff is that the shader will need to stream/reduce tiles rather than keep full-layer partials resident in shared memory. This is the intended next implementation shape unless runtime profiling proves a larger profile-gated shared-memory layout is worthwhile.
 
-`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` is the first shader helper using this plan. It is compile-validated for every hidden-layer `dW` region and for the all-`dW` combined mode through explicit KHR gradient switches, with matching runtime validation entries and test-side CPU oracles; it is not yet the default gradient path.
+`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` is the first shader helper using this plan. It is compile-validated for every hidden-layer `dW` region, for the all-`dW` combined mode, and for the all-coopmat mode through explicit KHR gradient switches, with matching runtime validation entries and test-side CPU oracles; it is not yet the default gradient path.
 
 ## Hidden dA Cooperative-Matrix Scratch
 
@@ -162,4 +162,4 @@ hidden1 -> hidden0:      NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE
 
 This is safe for the currently wired propagation points because the corresponding hidden-layer `dW` accumulation has already consumed that layer's activation snapshot before the source derivative is produced.
 
-This path does not increase the 6144-uvec4 / 98304-byte KHR training shared-memory requirement. Every individual hidden-to-hidden `dA` propagation step now has an explicit switch using this reuse pattern, and `NRC_KHR_USE_COOPMAT_ALL_DA=1` chains all four steps together. The all-`dA` mode has compile/runtime-test wiring and a CPU oracle for chained fp16 staging, but local GPU numerical execution still depends on a device satisfying the KHR training shared-memory gate.
+This path does not increase the 6144-uvec4 / 98304-byte KHR training shared-memory requirement. Every individual hidden-to-hidden `dA` propagation step now has an explicit switch using this reuse pattern, and `NRC_KHR_USE_COOPMAT_ALL_DA=1` chains all four steps together. Combining `NRC_KHR_USE_COOPMAT_ALL_DW=1` with `NRC_KHR_USE_COOPMAT_ALL_DA=1` also stays within the same layout because the `dW` helpers and `dA` helper reuse the active tile at different points in the backpropagation sequence. The all-`dA` and all-coopmat modes have compile/runtime-test wiring and CPU oracles for chained fp16 staging, but local GPU numerical execution still depends on a device satisfying the KHR training shared-memory gate.

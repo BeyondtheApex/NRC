@@ -168,10 +168,17 @@ Experimental KHR all-`dW` cooperative-matrix reduction:
 - The test-side coopmat oracles share one per-sample KHR backpropagation helper, so output, single-hidden-region, and all-`dW` modes reuse the same encoded input, fp16 activation, output-derivative, and hidden-derivative chain.
 - The default KHR gradient pass still uses subgroup arithmetic until runtime numerical validation succeeds on a driver that can create the KHR gradient pipeline.
 
+Experimental KHR all-coopmat training variant:
+
+- `NRC_KHR_USE_COOPMAT_ALL_DW=1` plus `NRC_KHR_USE_COOPMAT_ALL_DA=1` switches every implemented `dW` accumulation region and all hidden-to-hidden `dA` propagation steps to cooperative-matrix helpers in one shader variant.
+- `nrc_vulkan_gradient_khr_coopmat_all_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that combines all-`dW` fp16 per-subgroup partial reduction with all-`dA` chained fp16 derivative staging.
+- The combined oracle is subgroup-size aware for the `dW` partial reductions, while the all-`dA` chain remains sample-local and independent of subgroup size.
+- This is the first end-to-end KHR coopmat training profile test shape, but it remains opt-in until a device that satisfies the current shared-memory gate can execute the dispatch for numerical comparison.
+
 Current limitations:
 
 - the default hidden/output `dW` regions use subgroup arithmetic and one fp32 atomic add per covered weight per workgroup;
-- the optional output-layer, hidden-layer, and all-`dW` cooperative-matrix helpers are not the default path;
-- the optional output-layer, hidden-layer, and all-`dW` cooperative-matrix runtime tests are present but currently report the same controlled KHR training profile-selection skip as the default KHR gradient test on the local AMD driver;
-- the default KHR backpropagation of `dA` still uses scalar arrays, and only the optional final-hidden to hidden-layer-3 `dA` path currently has a cooperative-matrix variant;
+- the optional output-layer, hidden-layer, all-`dW`, all-`dA`, and all-coopmat cooperative-matrix helpers are not the default path;
+- the optional cooperative-matrix runtime tests are present but currently report the same controlled KHR training profile-selection skip as the default KHR gradient test on the local AMD driver;
+- the default KHR backpropagation of `dA` still uses scalar arrays; cooperative-matrix `dA` propagation is available only through explicit experiment switches;
 - KHR runtime gradient comparison is present but remains driver-gated on the current local AMD pipeline creation path.

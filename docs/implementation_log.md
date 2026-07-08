@@ -5609,3 +5609,83 @@ default:                       KHR groundwork oracle
 ### Next Step
 
 Add a combined all-coopmat KHR training mode that enables `NRC_KHR_USE_COOPMAT_ALL_DW=1` and `NRC_KHR_USE_COOPMAT_ALL_DA=1` together. Its CPU oracle should combine the all-`dW` fp16 partial semantics with the all-`dA` chained fp16 derivative staging semantics, then register a dedicated runtime mode such as `--coopmat-all` for end-to-end comparison.
+
+## 2026-07-09 - Milestone 82 KHR Combined All-Coopmat Training Mode
+
+### Implemented
+
+- Added a combined KHR all-coopmat runtime mode, exposed through `--coopmat-all` in `nrc_vulkan_gradient_khr_test`.
+- Added a combined shader profile by compiling `NRC_KHR_USE_COOPMAT_ALL_DW=1` and `NRC_KHR_USE_COOPMAT_ALL_DA=1` together.
+- Generalized the hidden-layer cooperative-matrix `dW` oracle so it can accept an optional `CoopmatDActivationLayers` mask.
+- Added `make_expected_khr_all_dw_all_da_coopmat_gradients()`, which combines:
+  - all-`dW` fp16 cooperative-matrix per-workgroup/per-subgroup partial storage and reduction semantics;
+  - all-`dA` chained fp16 `dPre` staging and fp16 hidden-derivative storage semantics.
+- Kept the existing all-`dW` oracle behavior unchanged by leaving the optional `dA` mask empty for `--coopmat-all-dw`.
+- Added all-coopmat finite/non-zero sanity checks for both subgroup-sized expected-gradient buffers across the output layer and every hidden layer.
+- Added compile smoke coverage for the combined mode across the current KHR shader profiles:
+  - subgroup 32;
+  - subgroup 16;
+  - `m8` subgroup 32.
+- Added all-coopmat dispatch SPIR-V generation and a registered runtime CTest:
+  - `nrc_gradient_khr_coopmat_all_dispatch_shaders`
+  - `nrc_vulkan_gradient_khr_coopmat_all_test`
+- Updated current documentation:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/khr_shared_memory_layout.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+This milestone adds the first single runtime test mode that exercises every currently implemented KHR cooperative-matrix training helper together:
+
+```text
+default:                       KHR groundwork oracle
+--coopmat-output:              output-layer fp16 coopmat dW oracle
+--coopmat-final-hidden:        hidden layer 4 fp16 coopmat dW oracle
+--coopmat-final-hidden-da:     final-hidden -> hidden3 fp16 coopmat dA oracle
+--coopmat-hidden3-da:          hidden3 -> hidden2 fp16 coopmat dA oracle
+--coopmat-hidden2-da:          hidden2 -> hidden1 fp16 coopmat dA oracle
+--coopmat-hidden1-da:          hidden1 -> hidden0 fp16 coopmat dA oracle
+--coopmat-all-da:              all hidden-to-hidden dA regions use chained fp16 coopmat oracles
+--coopmat-hidden3:             hidden layer 3 fp16 coopmat dW oracle
+--coopmat-hidden2:             hidden layer 2 fp16 coopmat dW oracle
+--coopmat-hidden1:             hidden layer 1 fp16 coopmat dW oracle
+--coopmat-hidden0:             hidden layer 0 fp16 coopmat dW oracle
+--coopmat-all-dw:              output and all hidden dW regions use fp16 coopmat oracles
+--coopmat-all:                 all dW regions plus all hidden-to-hidden dA regions use coopmat oracles
+```
+
+The combined mode does not add new shader storage. It relies on the existing all-`dW` tile-streaming helpers and the existing all-`dA` active-tile reuse pattern. The shared-memory requirement remains 6144 `uvec4` values, or 98304 bytes.
+
+### Validation
+
+- Targeted KHR gradient runtime test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted all-coopmat compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr_coopmat_all_(sg32|sg16|m8_sg32)_compile" --output-on-failure -V`
+- Targeted all-coopmat compile result:
+  - `3/3 tests passed`
+- Targeted KHR gradient runtime tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr" --output-on-failure -V`
+- Targeted KHR gradient runtime result:
+  - `14/14 tests passed`
+- Current local KHR training skip result for all fourteen runtime modes remains:
+  - `SKIP: no Vulkan device supports an implemented NRC KHR cooperative matrix training profile`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `85/85 tests passed`
+
+### Current Limitations
+
+- The default KHR gradient path still uses subgroup-arithmetic `dW` reduction and scalar hidden derivative propagation. The all-coopmat mode is an opt-in experimental profile.
+- The all-coopmat mode has compile coverage and runtime-test wiring, but the local device still does not satisfy the 98304-byte KHR training shared-memory profile gate. That means the combined mode still has no local GPU numerical comparison on this machine.
+- The combined oracle is ready for SG16 and SG32 selected profiles, but real performance and numerical drift still need to be measured on hardware that can create and dispatch the KHR training pipeline.
+- Production/default KHR training profile selection is still pending real-device validation.
+
+### Next Step
+
+Start moving from experimental test profiles toward an integration-facing KHR training profile contract. The next useful step is to document and implement profile-selection policy for when cooperative-matrix training should be enabled by default, including explicit device capability requirements, shared-memory limits, subgroup size selection, matrix shape selection, and a clean fallback to the scalar/subgroup KHR path when a device cannot satisfy the all-coopmat profile.

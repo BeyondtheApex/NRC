@@ -38,6 +38,7 @@ Implemented:
   - compile-validated experimental hidden-layer-2 cooperative-matrix `dA` propagation behind `NRC_KHR_USE_COOPMAT_HIDDEN2_DA`;
   - compile-validated experimental hidden-layer-1 cooperative-matrix `dA` propagation behind `NRC_KHR_USE_COOPMAT_HIDDEN1_DA`;
   - compile-validated experimental all-`dA` cooperative-matrix mode behind `NRC_KHR_USE_COOPMAT_ALL_DA`;
+  - compile-validated experimental all-coopmat training mode behind `NRC_KHR_USE_COOPMAT_ALL_DW=1` plus `NRC_KHR_USE_COOPMAT_ALL_DA=1`;
   - generic scalar hidden-layer derivative propagation helper;
   - enlarged shared-buffer allocation for future cooperative-matrix reductions.
 - `shaders/nrc/passes/NrcGradientKhr.glsl`, a train-record pass skeleton that dispatches KHR forward and accumulates every hidden/output `dW` region.
@@ -46,7 +47,6 @@ Implemented:
 Not implemented yet:
 
 - Default-path cooperative-matrix `dW` reduction beyond the current subgroup reductions.
-- Combined all-`dW` plus all-`dA` cooperative-matrix training variant.
 - Production-default KHR training cooperative-matrix reduction path.
 - Runtime numerical validation on a driver that can create the KHR cooperative matrix pipelines successfully.
 
@@ -96,6 +96,8 @@ The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN0
 
 The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_ALL_DW=1` for SG32, SG16, and M8/SG32. These tests prove that output-layer and all hidden-layer cooperative-matrix `dW` helpers type-check together in one full train-record pass variant. The default runtime path still uses the subgroup helpers.
 
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_ALL_DW=1` and `NRC_KHR_USE_COOPMAT_ALL_DA=1` for SG32, SG16, and M8/SG32. These tests prove that every implemented cooperative-matrix `dW` helper and every hidden-to-hidden cooperative-matrix `dA` helper type-check together in one full train-record pass variant. The default runtime path still uses the subgroup `dW` helpers and scalar-array `dA` propagation.
+
 `tests/khr_gradient_reference_test.cpp` validates the reusable host-side KHR fp16 oracle. It proves the CPU oracle covers every hidden/output gradient region before that oracle is used by the Vulkan KHR runtime test.
 
 `tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-output` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_output_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1`. That mode compares output-layer gradients against a test-side oracle that mirrors fp16 output derivative staging and per-subgroup fp16 output partial storage, while hidden-layer gradients still use `nrc::reference_backward_khr_fp16`.
@@ -122,6 +124,8 @@ The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_ALL_DW=
 
 `tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-all-dw` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_all_dw_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_ALL_DW=1`. That mode compares output and every hidden-layer gradient region against a combined test-side oracle built from the output and hidden coopmat expectations.
 
+`tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-all` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_all_test` with SPIR-V variants compiled using both `NRC_KHR_USE_COOPMAT_ALL_DW=1` and `NRC_KHR_USE_COOPMAT_ALL_DA=1`. That mode compares output and every hidden-layer gradient region against a combined test-side oracle that models all `dW` fp16 per-workgroup/per-subgroup partial storage plus chained all-`dA` fp16 derivative staging.
+
 The KHR gradient runtime batch contains 197 train records. That spans two 128-wide workgroups with a partial final workgroup, so the optional coopmat oracles validate per-workgroup/per-subgroup partial accumulation before fp32 gradient accumulation.
 
 The test-side coopmat oracles share one `KhrBackpropSample` helper that computes encoded input, fp16 forward activations, output derivative, and every hidden-layer derivative once per sample. The output, single-hidden-region, all-`dW`, and optional `dA` modes therefore use the same hidden derivative chain, with a small mask selecting which hidden-layer derivative propagations use fp16 coopmat staging semantics.
@@ -134,9 +138,9 @@ Training profile selection now requires device `maxComputeSharedMemorySize` to m
 
 The same layout model now records a hidden-layer cooperative-matrix `dW` tile-streaming plan. It avoids the SG16 full-layer partial overwrite hazard by using only the active tile for row-block dPre staging and one tile of partials per subgroup.
 
-`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` implements the first shader helper using that plan. It currently has compile validation and runtime validation entries for final-hidden `dW`, hidden-layer-3 `dW`, hidden-layer-2 `dW`, hidden-layer-1 `dW`, hidden-layer-0 `dW`, and the all-`dW` combined mode; successful dispatch still depends on hardware/driver support for the selected training profile.
+`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` implements the first shader helper using that plan. It currently has compile validation and runtime validation entries for final-hidden `dW`, hidden-layer-3 `dW`, hidden-layer-2 `dW`, hidden-layer-1 `dW`, hidden-layer-0 `dW`, the all-`dW` combined mode, and the all-coopmat mode; successful dispatch still depends on hardware/driver support for the selected training profile.
 
-`NrcKhrPropagateHiddenDActivationCoopmat` implements the experimental cooperative-matrix `dA` helper. It stages hidden-layer `dPre` values as fp16 in the active tile, loads hidden-layer weights through a transposed cooperative-matrix view, writes the fp16 source derivative to the retired activation snapshot whose ReLU mask has already been consumed, and reads the derivative back into the per-invocation local array. It is currently wired behind `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1`, `NRC_KHR_USE_COOPMAT_HIDDEN3_DA=1`, `NRC_KHR_USE_COOPMAT_HIDDEN2_DA=1`, `NRC_KHR_USE_COOPMAT_HIDDEN1_DA=1`, and `NRC_KHR_USE_COOPMAT_ALL_DA=1`.
+`NrcKhrPropagateHiddenDActivationCoopmat` implements the experimental cooperative-matrix `dA` helper. It stages hidden-layer `dPre` values as fp16 in the active tile, loads hidden-layer weights through a transposed cooperative-matrix view, writes the fp16 source derivative to the retired activation snapshot whose ReLU mask has already been consumed, and reads the derivative back into the per-invocation local array. It is currently wired behind `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1`, `NRC_KHR_USE_COOPMAT_HIDDEN3_DA=1`, `NRC_KHR_USE_COOPMAT_HIDDEN2_DA=1`, `NRC_KHR_USE_COOPMAT_HIDDEN1_DA=1`, `NRC_KHR_USE_COOPMAT_ALL_DA=1`, and the all-coopmat mode.
 
 The hidden-layer-0 mode preserves the hidden-layer-0 activation snapshot at `NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE` for the ReLU mask and stages encoded input into `NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE`, which is no longer needed by that point in backpropagation. This avoids increasing the 98304-byte KHR training shared-memory requirement.
 
