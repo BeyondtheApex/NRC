@@ -54,6 +54,7 @@ void main() {
     float dOutput[NRC_NN_OUTPUT_WIDTH];
     NrcKhrOutputDerivative(prediction, vec3(0.2, 0.3, 0.4), dOutput);
     NrcKhrAccumulateOutputDWeightsSubgroup(dOutput);
+    NrcKhrAccumulateOutputDWeightsCoopmat(dOutput);
 
     float dHidden4[NRC_NN_HIDDEN_WIDTH];
     NrcKhrPropagateOutputDActivation(dOutput, dHidden4);

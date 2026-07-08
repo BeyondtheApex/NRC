@@ -25,6 +25,10 @@
 #define NRC_GRADIENT_WORKGROUP_SIZE 128
 #endif
 
+#ifndef NRC_KHR_USE_COOPMAT_OUTPUT_DW
+#define NRC_KHR_USE_COOPMAT_OUTPUT_DW 0
+#endif
+
 #ifndef NRC_NN_SET
 #define NRC_NN_SET NRC_GRADIENT_SET
 #endif
@@ -116,7 +120,11 @@ void NrcGradientKhrMain() {
     if (validTrainRecord) {
         NrcKhrOutputDerivative(prediction, target, dOutput);
     }
+#if NRC_KHR_USE_COOPMAT_OUTPUT_DW
+    NrcKhrAccumulateOutputDWeightsCoopmat(dOutput);
+#else
     NrcKhrAccumulateOutputDWeightsSubgroup(dOutput);
+#endif
 
     float dHidden4[NRC_NN_HIDDEN_WIDTH];
     NrcKhrPropagateOutputDActivation(dOutput, dHidden4);

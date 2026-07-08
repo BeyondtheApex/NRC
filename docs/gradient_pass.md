@@ -91,8 +91,16 @@ Current behavior:
 - hidden-layer 1 derivative is propagated to hidden-layer 0 activations;
 - hidden-layer 0 `dW` stages encoded input into a retired shared snapshot region, then reduces across each subgroup into the same fp32 row-major gradient layout as the scalar pass.
 
+Experimental KHR output-layer cooperative-matrix reduction:
+
+- `NrcKhrAccumulateOutputDWeightsCoopmat` stages each invocation's output derivative as fp16, multiplies final hidden activations by the staged derivative through KHR cooperative matrices, stores one fp16 partial dW tile per subgroup, then unpacks and reduces those subgroup partials into the existing fp32 gradient buffer with one atomic add per output weight per workgroup.
+- `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1` switches `NrcGradientKhr.glsl` to this helper for output-layer `dW`.
+- The default KHR gradient pass still uses the subgroup-arithmetic output helper until runtime numerical validation is available on a driver that can create the KHR gradient pipeline.
+
 Current limitations:
 
 - all hidden/output `dW` regions use subgroup arithmetic and one fp32 atomic add per covered weight per workgroup;
-- these reductions are not cooperative-matrix reductions;
+- the optional output-layer cooperative-matrix helper is compile-validated but not the default path;
+- hidden-layer `dW` reductions are not cooperative-matrix reductions;
+- KHR backpropagation of `dA` still uses scalar arrays rather than VkNRC-style cooperative matrices;
 - KHR runtime gradient comparison is present but remains driver-gated on the current local AMD pipeline creation path.

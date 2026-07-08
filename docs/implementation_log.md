@@ -3984,3 +3984,75 @@ The capability is treated as a subgroup operation property rather than a device 
 ### Next Step
 
 Start designing the cooperative-matrix reduction step or add a validation route on hardware/driver combinations that can create the KHR pipelines successfully. The capability contract now reflects the subgroup-gradient implementation, so the next algorithmic improvement can focus on reducing atomic pressure and replacing subgroup reductions with cooperative-matrix accumulation where it is actually beneficial.
+
+## 2026-07-09 - Milestone 61 Experimental KHR Output Cooperative-Matrix dW
+
+### Implemented
+
+- Added `NrcKhrAccumulateOutputDWeightsCoopmat` to `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl`.
+- Added output-derivative fp16 staging and output-dW subgroup partial layout constants for the current SG32, SG16, and M8/SG32 profile shapes.
+- Added `NRC_KHR_USE_COOPMAT_OUTPUT_DW` to `shaders/nrc/passes/NrcGradientKhr.glsl`.
+  - Default `0`: keep the existing subgroup-arithmetic output `dW` path.
+  - `1`: use the new output-layer cooperative-matrix helper.
+- Updated `tests/shader_compile/nrc_khr_backprop_smoke.comp` so the backprop smoke shader explicitly calls the new output cooperative-matrix helper.
+- Added compile-only gradient dispatch tests for the optional output cooperative-matrix path:
+  - `nrc_shader_gradient_khr_coopmat_output_sg32_compile`
+  - `nrc_shader_gradient_khr_coopmat_output_sg16_compile`
+  - `nrc_shader_gradient_khr_coopmat_output_m8_sg32_compile`
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+The helper mirrors the structure of VkNRC's NV output-layer `NNUpdateDW3` at a KHR-compatible level:
+
+```text
+stage dOutput as fp16 in the active shared tile
+for each subgroup-owned sample block:
+    load final hidden activations as an A cooperative matrix
+    load staged dOutput as a B cooperative matrix
+    accumulate a hidden-feature x output-row dW tile
+store one fp16 partial dW tile per subgroup
+one invocation per output weight:
+    unpack fp16 partials from all subgroups
+    reduce them in fp32
+    atomicAdd into the existing fp32 row-major gradient buffer
+```
+
+The active shared tile is reused only after the saved final-hidden activation snapshot has been written outside that active tile. The helper therefore does not destroy the activation data needed for output `dW`.
+
+This milestone deliberately keeps the default gradient pass on the previous subgroup-arithmetic path. The new helper stages derivatives and partial dW tiles as fp16, matching the broad shape of VkNRC's cooperative-matrix update path but differing from the current fp32 subgroup helper and `nrc::reference_backward_khr_fp16` oracle. It needs runtime numerical validation before becoming the default.
+
+### Validation
+
+- Targeted KHR shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr|nrc_shader_khr_backprop" --output-on-failure -V`
+- The targeted test run covered:
+  - existing KHR gradient SG32, SG16, and M8/SG32 compile tests;
+  - new `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1` SG32, SG16, and M8/SG32 compile tests;
+  - KHR backprop smoke SG32, SG16, and M8/SG32 compile tests.
+- Test result:
+  - `9/9 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `36/36 tests passed`
+- Targeted KHR runtime tests still pass as controlled skips on the local AMD driver:
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR cooperative matrix shader`
+
+### Current Limitations
+
+- The output cooperative-matrix `dW` helper is compile-validated only; it is not the default runtime path.
+- The helper uses fp16 derivative/partial staging before fp32 cross-subgroup reduction and fp32 storage-buffer atomic add.
+- Hidden-layer `dW` regions still use subgroup arithmetic by default.
+- KHR `dA` propagation is still scalar-array based rather than VkNRC's cooperative-matrix backpropagation.
+- Runtime numerical comparison for any KHR path still did not execute on this machine because the local AMD KHR pipeline creation path reports controlled structured-exception skips.
+
+### Next Step
+
+Either add a runtime A/B validation mode for `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1` on a driver that can create the KHR pipeline, or continue porting the VkNRC fully fused shape by moving hidden-layer `dA` propagation and hidden-layer `dW` updates toward cooperative matrices under explicit compile-time/profile gates.
