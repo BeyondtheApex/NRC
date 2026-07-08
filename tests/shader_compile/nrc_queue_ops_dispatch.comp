@@ -1,0 +1,51 @@
+#version 460
+
+#include "nrc/passes/NrcQueueOps.glsl"
+
+layout(local_size_x = NRC_QUEUE_RESET_WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform NrcQueueOpsDispatchConstants {
+    uint mode;
+    uint evalCapacity;
+    uint trainRequestCount;
+    uint invocationCount;
+} nrcQueueOpsDispatchConstants;
+
+PackedNrcInput NrcQueueOpsTestInput(uint id) {
+    PackedNrcInput inputValue;
+    inputValue.primitiveId = id;
+    inputValue.flipBitInstanceId = id + 1000u;
+    inputValue.barycentric2x16U = packUnorm2x16(vec2(0.25, 0.5));
+    inputValue.scatteredDir2x16U = packUnorm2x16(vec2(0.5, 0.75));
+    return inputValue;
+}
+
+void main() {
+    if (nrcQueueOpsDispatchConstants.mode == 0u) {
+        NrcQueueResetMain();
+        return;
+    }
+
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= nrcQueueOpsDispatchConstants.invocationCount) {
+        return;
+    }
+
+    PackedNrcInput inputValue = NrcQueueOpsTestInput(id);
+    uint evalIndex;
+    NrcPushEvalRecord(NrcMakeEvalScreen(inputValue, uvec2(7u, 3u)),
+                      nrcQueueOpsDispatchConstants.evalCapacity,
+                      evalIndex);
+
+    uint firstTrainIndex;
+    uint trainCount;
+    if (NrcReserveTrainRecords(0u,
+                               nrcQueueOpsDispatchConstants.trainRequestCount,
+                               firstTrainIndex,
+                               trainCount)) {
+        NrcTrainRecord record = NrcMakeTrainRecord(vec3(1.0, 2.0, 3.0),
+                                                   vec3(4.0, 5.0, 6.0),
+                                                   inputValue);
+        NrcStoreTrainRecords(0u, firstTrainIndex, trainCount, record);
+    }
+}

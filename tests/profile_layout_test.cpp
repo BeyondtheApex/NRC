@@ -28,6 +28,7 @@ int main() {
     ok &= require(nrc::TrainRecordLayout::size == 40u, "train record layout size");
     ok &= require(nrc::OptimizerStateLayout::size == 20u, "optimizer state layout size");
     ok &= require(nrc::OptimizerEntryLayout::size == 16u, "optimizer entry layout size");
+    ok &= require(nrc::QueueStateLayout::size == 20u, "queue state layout size");
 
     const nrc::ResourceLayout layout = nrc::compute_resource_layout({1280, 720});
     ok &= require(layout.weightCount == 20672u, "resource layout weight count");
@@ -37,6 +38,9 @@ int main() {
     ok &= require(layout.gradientsBytes == 82688u, "gradients are fp32");
     ok &= require(layout.evalRecordCount == 987136u, "eval records cover pixels plus train records");
     ok &= require(layout.evalRecordsBytes == 19742720u, "eval record bytes");
+    ok &= require(layout.evalCountBytes == 4u, "eval count bytes");
+    ok &= require(layout.queueStateBytes == 20u, "queue state bytes");
+    ok &= require(layout.trainBatchCountBytes == 16u, "all train batch count bytes");
     ok &= require(layout.trainBatchRecordBytes == 655360u, "single train batch bytes");
     ok &= require(layout.trainBatchRecordsTotalBytes == 2621440u, "all train batch bytes");
 

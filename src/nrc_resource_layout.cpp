@@ -23,10 +23,11 @@ ResourceLayout compute_resource_layout(Extent2D extent) {
     layout.evalRecordCount = pixelCount + trainCapacity;
     layout.evalRecordsBytes = layout.evalRecordCount * EvalRecordLayout::size;
     layout.evalCountBytes = sizeof(std::uint32_t);
+    layout.queueStateBytes = QueueStateLayout::size;
 
     layout.trainBatchCount = batchCount;
     layout.trainBatchSize = batchSize;
-    layout.trainBatchCountBytes = sizeof(std::uint32_t);
+    layout.trainBatchCountBytes = batchCount * sizeof(std::uint32_t);
     layout.trainBatchRecordBytes = batchSize * TrainRecordLayout::size;
     layout.trainBatchRecordsTotalBytes = batchCount * layout.trainBatchRecordBytes;
     return layout;

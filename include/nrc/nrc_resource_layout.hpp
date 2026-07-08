@@ -22,6 +22,7 @@ struct ResourceLayout {
     std::uint64_t evalRecordCount = 0;
     std::uint64_t evalRecordsBytes = 0;
     std::uint64_t evalCountBytes = 0;
+    std::uint64_t queueStateBytes = 0;
 
     std::uint64_t trainBatchCount = 0;
     std::uint64_t trainBatchSize = 0;
@@ -48,6 +49,10 @@ struct OptimizerStateLayout {
 
 struct OptimizerEntryLayout {
     static constexpr std::uint64_t size = sizeof(NrcOptimizerEntry);
+};
+
+struct QueueStateLayout {
+    static constexpr std::uint64_t size = sizeof(NrcQueueState);
 };
 
 ResourceLayout compute_resource_layout(Extent2D extent);

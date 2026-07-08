@@ -1,5 +1,8 @@
 #pragma once
 
+#include "nrc/nrc_constants.hpp"
+
+#include <array>
 #include <cstdint>
 
 namespace nrc {
@@ -41,10 +44,16 @@ struct NrcOptimizerEntry {
     float emaWeight = 0.0f;
 };
 
+struct NrcQueueState {
+    std::uint32_t evalCount = 0;
+    std::array<std::uint32_t, kTrainBatchCount> trainCounts = {};
+};
+
 static_assert(sizeof(PackedNrcInput) == 16);
 static_assert(sizeof(NrcEvalRecord) == 20);
 static_assert(sizeof(NrcTrainRecord) == 40);
 static_assert(sizeof(NrcOptimizerState) == 20);
 static_assert(sizeof(NrcOptimizerEntry) == 16);
+static_assert(sizeof(NrcQueueState) == 20);
 
 } // namespace nrc

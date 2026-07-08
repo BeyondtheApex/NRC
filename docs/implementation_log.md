@@ -762,3 +762,110 @@ The test verifies:
 ### Next Step
 
 Add queue-management helpers/passes for eval count reset and eval-record reservation, then use those pieces in the reference path tracer sample. The scalar inference dispatch test should remain the correctness anchor while the sample grows toward real scene integration.
+
+## 2026-07-08 - Milestone 11 Queue State and Reservation Ops
+
+### Implemented
+
+- Added host queue state ABI:
+  - `nrc::NrcQueueState`
+- Added queue state resource layout field:
+  - `ResourceLayout::queueStateBytes`
+- Updated train count layout semantics:
+  - `ResourceLayout::trainBatchCountBytes` now covers all train batch counters.
+- Added shader queue ops header:
+  - `shaders/nrc/passes/NrcQueueOps.glsl`
+- Added queue ops dispatch shader:
+  - `tests/shader_compile/nrc_queue_ops_dispatch.comp`
+- Added Vulkan queue ops runtime test:
+  - `tests/vulkan_queue_ops_test.cpp`
+- Registered CTest tests:
+  - `nrc_shader_queue_ops_compile`
+  - `nrc_vulkan_queue_ops_test`
+- Added documentation:
+  - `docs/queue_ops.md`
+- Updated:
+  - `docs/shader_abi.md`
+  - `docs/profile_and_layout.md`
+
+### ABI and Layout
+
+`NrcQueueState` is:
+
+```text
+uint evalCount
+uint trainCounts[4]
+```
+
+Size:
+
+- `sizeof(NrcQueueState) == 20`
+
+For the `1280x720` layout test:
+
+- `evalCountBytes == 4`
+- `trainBatchCountBytes == 16`
+- `queueStateBytes == 20`
+
+### VkNRC Compatibility and Deliberate Difference
+
+VkNRC's path tracer directly uses:
+
+```glsl
+atomicAdd(uEvalCount, 1u, ...)
+atomicAdd(uBatchTrainCounts[batch].count, bounce, ...)
+```
+
+That means counters can exceed buffer capacity unless the caller clamps later dispatches.
+
+This reusable library uses compare-and-swap reservation helpers instead:
+
+- `NrcReserveEvalRecord(capacity, out index)`
+- `NrcPushEvalRecord(record, capacity, out index)`
+- `NrcReserveTrainRecords(batch, requestedCount, out firstIndex, out reservedCount)`
+
+These helpers clamp counters at their configured capacities. Overflow work is dropped by returning `false` or a truncated `reservedCount`. This is safer for library-style integration because a later inference pass can trust the clamped eval count.
+
+### Runtime Validation
+
+The Vulkan queue ops test:
+
+- seeds queue counters with non-zero values;
+- dispatches `NrcQueueResetMain`;
+- dispatches 64 synthetic queue producers;
+- lets all producers compete for 17 eval-record slots;
+- lets all producers reserve 300 train records each in batch 0, which exceeds `NRC_TRAIN_BATCH_SIZE`;
+- verifies:
+  - eval count clamps to 17;
+  - train batch 0 count clamps to 16384;
+  - train batches 1-3 remain 0;
+  - all reserved eval records contain the expected screen destination and packed input payload;
+  - all reserved train records contain the expected bias/factor/input payload;
+  - batch 1 remains untouched.
+
+### Validation
+
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Build generated:
+  - `G:/cpp/radiance/NRC/build/tests/nrc_queue_ops_dispatch.spv`
+  - `G:/cpp/radiance/NRC/build/tests/Debug/nrc_vulkan_queue_ops_test.exe`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `14/14 tests passed`
+- The queue ops Vulkan test passed as a real dispatch on the current machine, not as a skip.
+
+### Current Limitations
+
+- Queue ops are validated with a synthetic producer shader, not yet the reference path tracer.
+- No indirect dispatch argument generation exists yet.
+- No frame/sample orchestration helper exists yet for queue reset, path tracing, inference, gradient, and optimizer order.
+- Overflow work is intentionally dropped by clamped reservation. Integrations that need diagnostics must compare requested work against returned counts or final queue counts.
+- No gradient/backpropagation or optimizer GPU pass has been implemented yet.
+
+### Next Step
+
+Start turning `sample/path_tracer` from a placeholder into a minimal Vulkan reference integration. The first useful sample milestone should use queue reset, synthetic/simple eval record production, scalar inference, and readback so the sample exercises the same integration seams a real renderer will use before full ray tracing and training are added.

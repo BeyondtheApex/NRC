@@ -50,6 +50,7 @@ NRCEvalRecord    20 bytes
 NRCTrainRecord   40 bytes
 OptimizerState   20 bytes
 OptimizerEntry   16 bytes
+NRCQueueState    20 bytes
 ```
 
 For a `1280x720` target:
@@ -57,6 +58,9 @@ For a `1280x720` target:
 ```text
 evalRecordCount              987136
 evalRecordsBytes             19742720
+evalCountBytes               4
+queueStateBytes              20
+trainBatchCountBytes         16
 weightsBytes                 41344
 useWeightsBytes              41344
 optimizerEntriesBytes        330752

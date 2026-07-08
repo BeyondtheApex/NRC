@@ -7,6 +7,7 @@ shaders/nrc/common/NrcConstants.glsl
 shaders/nrc/common/NrcTypes.glsl
 shaders/nrc/common/NrcEncoding.glsl
 shaders/nrc/common/NrcQueue.glsl
+shaders/nrc/passes/NrcQueueOps.glsl
 ```
 
 ## Records
@@ -43,6 +44,7 @@ Expected sizes under the matching C++ ABI:
 PackedNrcInput  16 bytes
 NrcEvalRecord   20 bytes
 NrcTrainRecord  40 bytes
+NrcQueueState   20 bytes
 ```
 
 ## Destination Encoding
@@ -64,4 +66,4 @@ Renderers remain responsible for constructing `NrcUnpackedInput` from their own 
 
 ## Compile Smoke Test
 
-`tests/shader_compile/nrc_common_smoke.comp` includes the common headers and compiles them with `glslc`. This catches GLSL syntax and portability issues before real passes depend on the headers.
+`tests/shader_compile/nrc_common_smoke.comp` includes the common headers and compiles them with `glslc`. `tests/shader_compile/nrc_queue_ops_dispatch.comp` compiles the queue reservation pass. These catch GLSL syntax and portability issues before real passes depend on the headers.
