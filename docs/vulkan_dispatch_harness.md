@@ -50,6 +50,7 @@ This keeps the test focused on shader/runtime correctness rather than expected f
 - The test dispatches 73 samples to verify non-multiple-of-workgroup guards.
 - The test uses host-visible coherent storage buffers to avoid adding staging/copy complexity at this stage.
 - If no Vulkan 1.1 compute device or compatible host-visible coherent memory type is available, the test prints `SKIP:` and returns success.
+- The scalar dispatch shader module and non-profile compute pipeline use `nrc::vulkan::create_shader_module` plus plain `nrc::vulkan::create_compute_pipeline`.
 - The scalar dispatch descriptor set layout/update path uses `nrc::vulkan::create_storage_buffer_descriptor_set_layout` and `nrc::vulkan::update_storage_buffer_descriptors`.
 - The scalar dispatch host-to-shader and shader-to-host memory barriers use `nrc::vulkan::cmd_memory_barrier`.
 
@@ -63,7 +64,7 @@ KHR-specific behavior:
 - The KHR shader module is created through `nrc::vulkan::create_shader_module` and fed into `nrc::vulkan::evaluate_vulkan_profile_validation`.
 - The KHR pipeline is created through `nrc::vulkan::create_profile_compute_pipeline`, which applies the selected subgroup size and full compute subgroup requirements from `ProfileShaderConfig`.
 - On MSVC/Windows, the test catches structured exceptions from `vkCreateComputePipelines` and reports a controlled `SKIP:`. This is needed because the current local AMD driver advertises the profile but raises an exception while compiling the VkNRC-style KHR cooperative matrix shader.
-- Reusable runtime diagnostics now live in `nrc::vulkan::evaluate_vulkan_profile_validation`, shader module creation lives in `nrc::vulkan::create_shader_module`, storage-buffer descriptor helpers live in `nrc::vulkan::create_storage_buffer_descriptor_set_layout` / `update_storage_buffer_descriptors`, memory barriers live in `nrc::vulkan::cmd_memory_barrier`, and profile-aware compute pipeline creation lives in `nrc::vulkan::create_profile_compute_pipeline`. The dispatch harness still owns shader file loading, descriptor pools/sets, dispatch, and numerical comparison.
+- Reusable runtime diagnostics now live in `nrc::vulkan::evaluate_vulkan_profile_validation`, shader module creation lives in `nrc::vulkan::create_shader_module`, storage-buffer descriptor helpers live in `nrc::vulkan::create_storage_buffer_descriptor_set_layout` / `update_storage_buffer_descriptors`, memory barriers live in `nrc::vulkan::cmd_memory_barrier`, plain compute pipeline creation lives in `nrc::vulkan::create_compute_pipeline`, and profile-aware compute pipeline creation lives in `nrc::vulkan::create_profile_compute_pipeline`. The dispatch harness still owns shader file loading, descriptor pools/sets, dispatch, and numerical comparison.
 
 Inference-specific behavior:
 
@@ -73,7 +74,7 @@ Inference-specific behavior:
 
 Training/queue-specific behavior:
 
-- Queue ops, scalar gradient, and scalar full-training-step tests now use `nrc::vulkan::create_shader_module` plus plain `nrc::vulkan::create_compute_pipeline` for their non-profile compute pipelines.
+- Queue ops, scalar dispatch, scalar gradient, and scalar full-training-step tests now use `nrc::vulkan::create_shader_module` plus plain `nrc::vulkan::create_compute_pipeline` for their non-profile compute pipelines.
 - Queue ops, scalar gradient, and scalar full-training-step tests now use `nrc::vulkan::create_storage_buffer_descriptor_set_layout` and `nrc::vulkan::update_storage_buffer_descriptors` for their storage-buffer descriptor set layout/update paths.
 - Queue ops, scalar gradient, and scalar full-training-step tests now route their host/compute memory barriers through `nrc::vulkan::cmd_memory_barrier`.
 - The full-training-step test also uses the helper for its compute-to-indirect-dispatch dependency.

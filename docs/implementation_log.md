@@ -2514,3 +2514,41 @@ Profile-aware KHR inference still uses `create_profile_compute_pipeline`, which 
 ### Next Step
 
 Adopt shader module/plain compute pipeline helpers in scalar dispatch, or start the image descriptor and image layout transition helper needed by scalar inference and the sample path tracer.
+
+## 2026-07-09 - Milestone 35 Scalar Dispatch Pipeline Helper Adoption
+
+### Implemented
+
+- Refactored `nrc_vulkan_scalar_dispatch_test` to create its shader module through `nrc::vulkan::create_shader_module`.
+- Refactored the same scalar dispatch test to create its non-profile compute pipeline through `nrc::vulkan::create_compute_pipeline`.
+- Preserved the existing shader file loading, pipeline layout, descriptor set layout/update, command buffer, dispatch, and CPU/GPU numerical comparison ownership in the test harness.
+- Added the same structured-exception guard used by the other plain compute dispatch tests, converting a driver-side `vkCreateComputePipelines` structured exception into a controlled `SkipTest`.
+- Updated `docs/vulkan_dispatch_harness.md` so the helper coverage now includes scalar dispatch.
+
+### Behavior
+
+This milestone does not change the scalar backend ABI, descriptor binding order, push constants, dispatch size, or expected numerical output. It only moves shader module and compute pipeline creation into reusable Vulkan helper calls so the scalar dispatch correctness anchor uses the same guarded path as queue, gradient, and training-step tests.
+
+### Validation
+
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_scalar_dispatch_test`
+- Targeted verbose test succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_scalar_dispatch_test" --output-on-failure -V`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- Scalar inference still uses local shader module and compute pipeline creation.
+- Scalar inference and the sample still use local storage-image descriptor and image layout transition boilerplate.
+- The sample path tracer still owns local shader module and compute pipeline creation for its compute passes.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Adopt shader module/plain compute pipeline helpers in scalar inference, then add image descriptor and image layout transition helpers that can be shared by scalar inference and the sample path tracer.
