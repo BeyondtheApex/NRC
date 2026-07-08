@@ -58,6 +58,8 @@ NrcQueueState {
 - non-finite gradients are ignored;
 - first-step EMA use weights match updated weights.
 
+`nrc_khr_gradient_reference_test` validates the reusable KHR fp16 gradient CPU oracle that the KHR runtime gradient test uses for full hidden/output gradient comparison.
+
 Shader compile tests validate the descriptor and GLSL ABI for:
 
 - train prepare;

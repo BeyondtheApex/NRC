@@ -3415,3 +3415,66 @@ The encoded input is kept in the invocation-local array instead of adding anothe
 ### Next Step
 
 Compare and document the full KHR-gradient groundwork against the scalar/reference gradient shape in more detail, then begin replacing scalar per-sample accumulation with cooperative-matrix/subgroup reduction while keeping the same full hidden/output coverage.
+
+## 2026-07-09 - Milestone 51 Reusable KHR Gradient CPU Oracle
+
+### Implemented
+
+- Added `include/nrc/nrc_khr_reference.hpp`.
+- Added `src/nrc_khr_reference.cpp` to `nrc_core`.
+- Added `nrc::reference_backward_khr_fp16`, a reusable host-side oracle for the current KHR gradient path. It mirrors the KHR groundwork behavior:
+  - consumes fp16-visible weights;
+  - rounds hidden-layer ReLU outputs through fp16;
+  - rounds output predictions through fp16;
+  - computes the relative-L2 luminance output derivative;
+  - accumulates every hidden/output `dW` region in the shared row-major fp32 layout;
+  - supports `accumulate=true`;
+  - validates weight and gradient buffer sizes.
+- Refactored `tests/vulkan_gradient_khr_test.cpp` to use `nrc::reference_backward_khr_fp16` instead of carrying an anonymous copy of the KHR CPU oracle inside the Vulkan runtime test.
+- Added `tests/khr_gradient_reference_test.cpp`.
+- Registered `nrc_khr_gradient_reference_test` in CTest. The new test validates:
+  - finite KHR fp16 prediction/gradients;
+  - non-zero KHR gradients for every hidden layer and the output layer;
+  - matching coverage shape against the scalar CPU reference path;
+  - accumulate behavior;
+  - invalid weight-count error handling.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+This milestone does not change the shader math. It moves the full hidden/output KHR fp16 gradient oracle into `nrc_core`, so the runtime test, future reduction tests, and integration-facing validation can use one authoritative host-side implementation.
+
+This gives the next KHR reduction work a better anchor: shader changes can continue to compare against the same full-layer fp16 oracle instead of reimplementing expected gradients in each test harness.
+
+### Validation
+
+- Reconfigured CMake after adding source and test targets:
+  - `cmake -S . -B build`
+- Targeted KHR reference test build succeeded after rerunning sequentially:
+  - `cmake --build build --config Debug --target nrc_khr_gradient_reference_test`
+- Targeted KHR reference test succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_khr_gradient_reference_test" --output-on-failure -V`
+- Targeted KHR gradient runtime test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime test succeeded with controlled skip:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr_test" --output-on-failure -V`
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `33/33 tests passed`
+
+### Current Limitations
+
+- The reusable KHR oracle validates the current fp16 scalar-groundwork behavior; it is not a cooperative-matrix reduction implementation.
+- Runtime numerical comparison for the KHR shader still did not execute on this machine because the local AMD KHR pipeline creation path reports a controlled structured-exception skip.
+- The current shader path still uses scalar per-sample accumulation and fp32 storage-buffer atomics.
+
+### Next Step
+
+Use `nrc::reference_backward_khr_fp16` as the invariant oracle while introducing cooperative-matrix/subgroup gradient reductions. Start with one weight region, likely the output layer, and prove that the reduced shader path preserves the full hidden/output gradient layout before extending the reduction strategy through all hidden layers.

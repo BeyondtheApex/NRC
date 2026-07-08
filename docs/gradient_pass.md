@@ -40,9 +40,11 @@ The luminance denominator is treated as the current prediction scale, matching V
 
 `tests/reference_gradient_test.cpp` validates the CPU reference backpropagation against finite differences.
 
+`tests/khr_gradient_reference_test.cpp` validates `nrc::reference_backward_khr_fp16`, the reusable CPU oracle for the current KHR fp16 gradient path. The test checks that every hidden/output gradient region is finite and non-zero for a positive test network, compares coverage shape against the scalar reference path, and validates accumulate/error behavior.
+
 `tests/vulkan_gradient_scalar_test.cpp` dispatches the scalar gradient pass on Vulkan when `VK_EXT_shader_atomic_float` and `shaderBufferFloat32AtomicAdd` are available. The test uploads packed fp16 weights, train records, and queue state, then compares the full fp32 gradient buffer against `nrc::reference_backward`.
 
-`tests/vulkan_gradient_khr_test.cpp` selects a KHR cooperative-matrix training profile when both cooperative matrices and fp32 storage-buffer atomic add are available. If pipeline creation succeeds, it dispatches `NrcGradientKhr.glsl` and compares all hidden-layer and output-layer gradient regions against an fp16-rounded CPU oracle. On the current local AMD driver, KHR gradient pipeline creation raises the same structured exception as KHR inference and the test reports a controlled `SKIP:`.
+`tests/vulkan_gradient_khr_test.cpp` selects a KHR cooperative-matrix training profile when both cooperative matrices and fp32 storage-buffer atomic add are available. If pipeline creation succeeds, it dispatches `NrcGradientKhr.glsl` and compares all hidden-layer and output-layer gradient regions against `nrc::reference_backward_khr_fp16`. On the current local AMD driver, KHR gradient pipeline creation raises the same structured exception as KHR inference and the test reports a controlled `SKIP:`.
 
 `tests/vulkan_training_step_test.cpp` runs the gradient pass between `NrcTrainPrepare` and `NrcOptimize`, using prepare's indirect dispatch command and comparing the final optimizer state and packed weights against the CPU reference path.
 

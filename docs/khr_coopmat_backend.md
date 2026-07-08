@@ -27,6 +27,7 @@ Implemented:
   - scalar hidden-layer 4/3/2/1/0 `dW` accumulation in the shared row-major weight layout;
   - enlarged shared-buffer allocation for future per-subgroup gradient reductions.
 - `shaders/nrc/passes/NrcGradientKhr.glsl`, a train-record pass skeleton that dispatches KHR forward and accumulates every hidden/output `dW` region.
+- `nrc::reference_backward_khr_fp16`, a host-side fp16-rounded CPU oracle for the current KHR gradient path.
 
 Not implemented yet:
 
@@ -56,6 +57,8 @@ NRC_KHR_SUBGROUP_SIZE=32, NRC_KHR_COOPMAT_M=8
 CTest also compiles the same three variants with `NRC_NN_BACKPROPAGATION` enabled through `tests/shader_compile/nrc_khr_backprop_smoke.comp`. The backprop smoke test exercises the gradient buffer declaration, output derivative, output-to-hidden derivative propagation, hidden-layer 4/3/2/1/0 `dW`, atomic add helper, encoded-input source reads, and forward path in one translation unit.
 
 `tests/shader_compile/nrc_gradient_khr_dispatch.comp` compile-validates the KHR train-record pass for the same three profile shader shapes. It proves the pass-level binding ABI, push constants, train-count handling, integration-provided unpack hook, and current full hidden/output `dW` helpers compile together.
+
+`tests/khr_gradient_reference_test.cpp` validates the reusable host-side KHR fp16 oracle. It proves the CPU oracle covers every hidden/output gradient region before that oracle is used by the Vulkan KHR runtime test.
 
 These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support, gradient correctness, or training performance.
 
@@ -96,7 +99,7 @@ The test:
 - creates a device with KHR cooperative matrix, fp32 storage-buffer atomic add, shader float16, storage buffer 16-bit access, subgroup size control, and full compute subgroup features;
 - creates the KHR gradient pipeline through `nrc::vulkan::create_profile_compute_pipeline`;
 - dispatches a small train-record batch through `NrcGradientKhr.glsl`;
-- compares every hidden/output gradient region against an fp16-rounded CPU oracle if pipeline creation and dispatch succeed.
+- compares every hidden/output gradient region against `nrc::reference_backward_khr_fp16` if pipeline creation and dispatch succeed.
 
 Current local result:
 

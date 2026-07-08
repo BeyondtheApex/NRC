@@ -19,6 +19,13 @@ target_link_libraries(nrc_reference_gradient_test PRIVATE nrc_core)
 
 add_test(NAME nrc_reference_gradient_test COMMAND nrc_reference_gradient_test)
 
+add_executable(nrc_khr_gradient_reference_test
+    khr_gradient_reference_test.cpp)
+
+target_link_libraries(nrc_khr_gradient_reference_test PRIVATE nrc_core)
+
+add_test(NAME nrc_khr_gradient_reference_test COMMAND nrc_khr_gradient_reference_test)
+
 add_executable(nrc_encoding_test
     encoding_test.cpp)
 

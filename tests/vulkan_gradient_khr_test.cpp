@@ -1,4 +1,5 @@
 #include "nrc/nrc_encoding.hpp"
+#include "nrc/nrc_khr_reference.hpp"
 #include "nrc/nrc_profile.hpp"
 #include "nrc/nrc_records.hpp"
 #include "nrc/nrc_reference_nn.hpp"
@@ -29,8 +30,6 @@
 namespace {
 
 constexpr std::uint32_t kTrainCount = 3;
-using HiddenVector = std::array<float, nrc::kNnHiddenWidth>;
-using HiddenLayers = std::array<HiddenVector, nrc::kNnHiddenLayerCount>;
 
 struct SkipTest : std::runtime_error {
     using std::runtime_error::runtime_error;
@@ -68,10 +67,6 @@ std::vector<std::uint32_t> read_spirv(const char *path) {
         throw std::runtime_error("failed to read SPIR-V file");
     }
     return words;
-}
-
-float fp16_round(float value) {
-    return nrc::half_bits_to_float(nrc::float_to_half_bits(value));
 }
 
 std::uint32_t pack_unorm2x16(float x, float y) {
@@ -150,109 +145,25 @@ std::vector<nrc::NrcTrainRecord> make_train_records() {
     return records;
 }
 
-HiddenLayers reference_forward_hidden_layers_fp16(std::span<const float> weights,
-                                                  const nrc::EncodedInput &input) {
-    HiddenLayers hiddenLayers{};
-    HiddenVector src{};
-    std::copy(input.begin(), input.end(), src.begin());
-
-    for (std::uint32_t layer = 0; layer < nrc::kNnHiddenLayerCount; ++layer) {
-        const std::size_t offset = nrc::layer_weight_offset(layer);
-        for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-            float value = 0.0f;
-            for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-                value += weights[offset + row * nrc::kNnHiddenWidth + col] * src[col];
-            }
-            hiddenLayers[layer][row] = fp16_round(std::max(value, 0.0f));
-        }
-        src = hiddenLayers[layer];
-    }
-    return hiddenLayers;
-}
-
 std::vector<float> make_expected_khr_groundwork_gradients(std::span<const float> gpuVisibleWeights,
                                                           const std::vector<nrc::NrcTrainRecord> &trainRecords) {
     std::vector<float> gradients(nrc::weight_count(), 0.0f);
-    constexpr std::uint32_t firstCoveredHiddenLayer = 0u;
-    const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
-
     for (std::uint32_t i = 0; i < kTrainCount; ++i) {
         nrc::EncodedInput encoded{};
         nrc::encode_input(unpack_test_input(trainRecords[i].packedInput), encoded);
-
-        HiddenVector inputActivation{};
-        std::copy(encoded.begin(), encoded.end(), inputActivation.begin());
-        const HiddenLayers hiddenLayers = reference_forward_hidden_layers_fp16(gpuVisibleWeights, encoded);
-        const HiddenVector &finalHidden = hiddenLayers[nrc::kNnHiddenLayerCount - 1u];
-
-        nrc::ReferenceOutput prediction{};
-        for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
-            float value = 0.0f;
-            for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-                value += gpuVisibleWeights[outputOffset + row * nrc::kNnHiddenWidth + col] * finalHidden[col];
-            }
-            prediction[row] = fp16_round(value);
-        }
 
         const nrc::ReferenceOutput target{
             trainRecords[i].biasR,
             trainRecords[i].biasG,
             trainRecords[i].biasB,
         };
-        const float luminance =
-            0.299f * std::max(prediction[0], 0.0f) +
-            0.587f * std::max(prediction[1], 0.0f) +
-            0.114f * std::max(prediction[2], 0.0f);
-        const float denominator = luminance * luminance + 0.01f;
-
-        std::array<float, nrc::kNnOutputWidth> dOutput{};
-        for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
-            dOutput[row] = 2.0f * nrc::kLossScale * (prediction[row] - target[row]) / denominator;
-        }
-
-        for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
-            for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-                gradients[outputOffset + row * nrc::kNnHiddenWidth + col] += dOutput[row] * finalHidden[col];
-            }
-        }
-
-        HiddenVector dActivation{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
-                dActivation[col] +=
-                    gpuVisibleWeights[outputOffset + row * nrc::kNnHiddenWidth + col] * dOutput[row];
-            }
-        }
-
-        for (std::int32_t signedLayer = static_cast<std::int32_t>(nrc::kNnHiddenLayerCount) - 1;
-             signedLayer >= static_cast<std::int32_t>(firstCoveredHiddenLayer);
-             --signedLayer) {
-            const auto layer = static_cast<std::uint32_t>(signedLayer);
-            const std::size_t layerOffset = nrc::layer_weight_offset(layer);
-            const HiddenVector &activation = hiddenLayers[layer];
-            const HiddenVector &sourceActivation = layer == 0u ? inputActivation : hiddenLayers[layer - 1u];
-
-            for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-                const float dPreActivation = activation[row] > 0.0f ? dActivation[row] : 0.0f;
-                for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-                    gradients[layerOffset + row * nrc::kNnHiddenWidth + col] +=
-                        dPreActivation * sourceActivation[col];
-                }
-            }
-
-            if (layer > firstCoveredHiddenLayer) {
-                HiddenVector dSourceActivation{};
-                for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-                    for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-                        const float dPreActivation = activation[row] > 0.0f ? dActivation[row] : 0.0f;
-                        dSourceActivation[col] +=
-                            gpuVisibleWeights[layerOffset + row * nrc::kNnHiddenWidth + col] *
-                            dPreActivation;
-                    }
-                }
-                dActivation = dSourceActivation;
-            }
-        }
+        nrc::reference_backward_khr_fp16(gpuVisibleWeights,
+                                         encoded,
+                                         target,
+                                         gradients,
+                                         nullptr,
+                                         nrc::kLossScale,
+                                         true);
     }
     return gradients;
 }
