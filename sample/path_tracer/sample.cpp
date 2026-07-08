@@ -4,6 +4,8 @@
 #include "nrc/nrc_records.hpp"
 #include "nrc/nrc_reference_nn.hpp"
 #include "nrc/nrc_weights.hpp"
+#include "nrc/vulkan/nrc_vulkan_pipeline.hpp"
+#include "nrc/vulkan/nrc_vulkan_shader.hpp"
 #include "sample_config.hpp"
 
 #include <vulkan/vulkan.h>
@@ -1176,31 +1178,26 @@ private:
     VkPipeline create_compute_pipeline(const char *spirvPath, VkPipelineLayout layout) {
         const std::vector<std::uint32_t> spirv = read_spirv(spirvPath);
 
-        VkShaderModuleCreateInfo shaderInfo{};
-        shaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        shaderInfo.codeSize = spirv.size() * sizeof(std::uint32_t);
-        shaderInfo.pCode = spirv.data();
+        nrc::vulkan::VulkanShaderModuleCreateInfo shaderCreateInfo{};
+        shaderCreateInfo.device = device_;
+        shaderCreateInfo.code = std::span<const std::uint32_t>(spirv.data(), spirv.size());
+        const nrc::vulkan::VulkanShaderModuleCreateResult shaderResult =
+            nrc::vulkan::create_shader_module(shaderCreateInfo);
+        check_vk(shaderResult.validation.vkResult, "vkCreateShaderModule");
 
-        VkShaderModule shaderModule = VK_NULL_HANDLE;
-        check_vk(vkCreateShaderModule(device_, &shaderInfo, nullptr, &shaderModule), "vkCreateShaderModule");
-
-        VkPipelineShaderStageCreateInfo stageInfo{};
-        stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        stageInfo.module = shaderModule;
-        stageInfo.pName = "main";
-
-        VkComputePipelineCreateInfo pipelineInfo{};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipelineInfo.stage = stageInfo;
-        pipelineInfo.layout = layout;
-
-        VkPipeline pipeline = VK_NULL_HANDLE;
-        const VkResult result =
-            vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
-        vkDestroyShaderModule(device_, shaderModule, nullptr);
-        check_vk(result, "vkCreateComputePipelines");
-        return pipeline;
+        nrc::vulkan::VulkanBasicComputePipelineCreateInfo pipelineCreateInfo{};
+        pipelineCreateInfo.device = device_;
+        pipelineCreateInfo.pipelineLayout = layout;
+        pipelineCreateInfo.shaderModule = shaderResult.shaderModule;
+        const nrc::vulkan::VulkanComputePipelineCreateResult pipelineResult =
+            nrc::vulkan::create_compute_pipeline(pipelineCreateInfo);
+        if (pipelineResult.validation.structuredException) {
+            vkDestroyShaderModule(device_, shaderResult.shaderModule, nullptr);
+            throw SkipTest("vkCreateComputePipelines raised a structured exception");
+        }
+        vkDestroyShaderModule(device_, shaderResult.shaderModule, nullptr);
+        check_vk(pipelineResult.validation.vkResult, "vkCreateComputePipelines");
+        return pipelineResult.pipeline;
     }
 
     std::uint32_t find_memory_type(std::uint32_t typeBits,

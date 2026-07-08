@@ -2695,3 +2695,52 @@ The new `cmd_pipeline_barrier` helper keeps the memory+image barrier cases combi
 ### Next Step
 
 Migrate the sample path tracer onto the reusable descriptor, shader module, compute pipeline, and barrier helpers, or add small buffer/image copy helpers before doing that migration.
+
+## 2026-07-09 - Milestone 39 Sample Pipeline Helper Adoption
+
+### Implemented
+
+- Refactored `sample/path_tracer/sample.cpp` so the sample's shared `create_compute_pipeline` helper now uses:
+  - `nrc::vulkan::create_shader_module`
+  - `nrc::vulkan::create_compute_pipeline`
+- This migrates all five sample compute passes onto the reusable shader/pipeline helper path:
+  - producer;
+  - scalar inference;
+  - train prepare;
+  - scalar gradient;
+  - optimize.
+- Added the same structured-exception guard used by the test dispatch paths, converting a driver-side `vkCreateComputePipelines` structured exception into a controlled `SkipTest`.
+- Updated `docs/sample_path_tracer.md` with current helper usage and remaining sample-local descriptor/barrier limitations.
+
+### Behavior
+
+This milestone does not change the sample command graph, descriptors, shader ABI, resource layout, generated eval/train records, scalar inference output, gradient accumulation, optimizer update, or PPM output contract. It only replaces local shader module and compute pipeline boilerplate with the reusable Vulkan helper layer.
+
+The sample still owns shader file loading, pipeline layouts, descriptor sets, command buffers, resources, and dispatch order. That keeps the helper boundary compatible with downstream engines such as MCVR, where renderer ownership should remain outside the NRC library.
+
+### Validation
+
+- Targeted sample build succeeded:
+  - `cmake --build build --config Debug --target nrc_reference_path_tracer`
+- Targeted verbose sample smoke test succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_sample_reference_path_tracer_smoke" --output-on-failure -V`
+- Sample smoke output included:
+  - `NRC reference path tracer minimal integration passed: 17 eval records, scalar inference resolve, and one scalar training update.`
+  - `Wrote sample image: G:/cpp/radiance/NRC/build/sample/path_tracer/nrc_reference_path_tracer.ppm`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- The sample path tracer still owns local descriptor layout/update boilerplate.
+- The sample path tracer still owns local memory/image barrier boilerplate.
+- Buffer/image copy helpers are still local to scalar inference and the sample.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Migrate the sample path tracer descriptor layout/update paths onto `create_descriptor_set_layout`, `update_storage_buffer_descriptors`, and `update_storage_image_descriptors`, then migrate its image barrier recording onto `cmd_pipeline_barrier`.
