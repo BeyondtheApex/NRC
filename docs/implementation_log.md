@@ -1418,3 +1418,59 @@ New validation coverage:
 ### Next Step
 
 Add a scalar GLSL gradient pass that consumes `NrcTrainRecord` batches, uses renderer-provided unpacking, accumulates fp32 gradients, and can be validated against `nrc::reference_backward` through a Vulkan dispatch test.
+
+## 2026-07-08 - Milestone 19 Scalar Gradient Shader Header
+
+### Implemented
+
+- Added scalar gradient shader-header pass:
+  - `shaders/nrc/passes/NrcGradientScalar.glsl`
+- Added shader compile wrapper:
+  - `tests/shader_compile/nrc_gradient_scalar_dispatch.comp`
+- Registered CTest compile coverage:
+  - `nrc_shader_gradient_scalar_compile`
+- Added documentation:
+  - `docs/gradient_pass.md`
+- Updated:
+  - `docs/shader_abi.md`
+
+### Behavior
+
+`NrcGradientScalar.glsl`:
+
+- consumes flat `NrcTrainRecord` storage;
+- reads the active train count from `NrcQueueState.trainCounts[batch]`;
+- uses renderer-provided `NrcUnpackPackedInput`;
+- encodes input through `NrcEncodeInput`;
+- runs scalar forward propagation while storing activations and ReLU pre-activations;
+- computes VkNRC-style relative L2 luminance output derivatives;
+- backpropagates through the output and five hidden ReLU layers;
+- atomically accumulates fp32 gradients in row-major weight layout.
+
+The pass uses the same packed fp16 weight buffer layout as scalar inference.
+
+### Validation
+
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `21/21 tests passed`
+
+New validation coverage:
+
+- `nrc_shader_gradient_scalar_compile` compiles the scalar gradient pass through a wrapper that provides a fake unpack function.
+- Existing `nrc_reference_gradient_test` remains the CPU numerical oracle for future GPU gradient validation.
+
+### Current Limitations
+
+- The scalar gradient shader is compile-validated only. It has not yet been dispatched and compared against the CPU reference.
+- Runtime dispatch requires `VK_EXT_shader_atomic_float` with fp32 storage-buffer atomic add support.
+- The pass is intentionally scalar and slow. It is for correctness/debugging, not production performance.
+- KHR cooperative-matrix backpropagation is still missing.
+- The sample still does not run prepare -> gradient -> optimize.
+
+### Next Step
+
+Add a Vulkan scalar gradient dispatch test with feature gating for `shaderBufferFloat32AtomicAdd`, compare selected gradients against `nrc::reference_backward`, then wire prepare -> gradient -> optimize into a full training dispatch test.

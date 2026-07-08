@@ -10,6 +10,7 @@ shaders/nrc/common/NrcQueue.glsl
 shaders/nrc/passes/NrcQueueOps.glsl
 shaders/nrc/passes/NrcTrainPrepare.glsl
 shaders/nrc/passes/NrcOptimize.glsl
+shaders/nrc/passes/NrcGradientScalar.glsl
 ```
 
 ## Records

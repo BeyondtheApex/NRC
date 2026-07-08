@@ -64,6 +64,6 @@ Shader compile tests validate the descriptor and GLSL ABI for:
 
 ## Current Limitations
 
-- No GPU gradient pass is implemented yet, so optimizer dispatch is compile-validated rather than numerically validated through a full Vulkan training step.
-- The optimizer currently accepts externally supplied gradients. The next training milestone should add scalar gradient/backpropagation so gradients are produced from `NrcTrainRecord` batches.
+- A scalar GPU gradient pass exists, but it is currently compile-validated only. Optimizer dispatch is not yet numerically validated through a full Vulkan training step.
+- The optimizer currently accepts externally supplied gradients in tests. A later training milestone should run prepare -> scalar gradient -> optimize from `NrcTrainRecord` batches.
 - KHR/NV cooperative-matrix gradient paths are not implemented yet.
