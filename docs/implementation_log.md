@@ -499,3 +499,107 @@ This is deliberately a test harness, not the final reusable Vulkan runtime abstr
 ### Next Step
 
 Use the dispatch harness pattern for KHR cooperative matrix numerical validation on devices that support an implemented profile. After that, implement the first inference pass that consumes `NrcEvalRecord` records and writes results through an integration-ready descriptor contract.
+
+## 2026-07-08 - Milestone 8 KHR Dispatch Pipeline Gate
+
+### Implemented
+
+- Added KHR dispatch shader:
+  - `tests/shader_compile/nrc_khr_dispatch.comp`
+- Added Vulkan KHR dispatch validation test:
+  - `tests/vulkan_khr_dispatch_test.cpp`
+- Registered generated SPIR-V files:
+  - `nrc_khr_dispatch_sg32.spv`
+  - `nrc_khr_dispatch_sg16.spv`
+- Registered build target:
+  - `nrc_khr_dispatch_shaders`
+- Registered CTest test:
+  - `nrc_vulkan_khr_dispatch_test`
+- Updated documentation:
+  - `docs/khr_coopmat_backend.md`
+  - `docs/vulkan_dispatch_harness.md`
+
+### Behavior
+
+- The dispatch shader binds:
+  - binding 0: packed fp16 weights.
+  - binding 1: packed fp16 encoded inputs.
+  - binding 2: output `vec4` values.
+- It uses `local_size_x = NRC_KHR_WORKGROUP_SIZE`, currently 128.
+- It pads the final workgroup by feeding zero inputs to invocations whose global sample index is outside `sampleCount`.
+- The C++ test queries real Vulkan device capabilities through `nrc::vulkan::query_device_capabilities`.
+- It selects an implemented KHR cooperative matrix inference profile with:
+  - `ProfileRequirements::requireTraining = false`
+  - `ProfileRequirements::allowReferenceBackend = false`
+- Device creation enables:
+  - `VK_KHR_cooperative_matrix`
+  - `VkPhysicalDeviceCooperativeMatrixFeaturesKHR::cooperativeMatrix`
+  - shader float16
+  - storage buffer 16-bit access
+  - subgroup size control
+  - full compute subgroups
+- Pipeline creation uses:
+  - `VkPipelineShaderStageRequiredSubgroupSizeCreateInfo`
+  - `VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT`
+- If pipeline creation and dispatch succeed, the test compares 149 GPU samples against a CPU reference that rounds hidden activations and output values through fp16 to better match cooperative matrix behavior.
+
+### Local Device Finding
+
+The current machine has:
+
+- Device: AMD Radeon RX 9070 XT.
+- Driver: AMD proprietary driver 26.6.4 (LLPC).
+- Vulkan API: 1.4.349.
+
+`vulkaninfoSDK.exe` reports:
+
+- `VK_KHR_cooperative_matrix`
+- cooperative matrix feature enabled by the driver
+- shader float16
+- storage buffer 16-bit access
+- subgroup size control
+- full compute subgroups
+
+The NRC capability/profile query selects:
+
+- `KHR_FP16_M16N16K16_SG32_WG128`
+
+However, `vkCreateComputePipelines` raises a Windows structured exception when compiling the VkNRC-style KHR cooperative matrix shader. The same failure occurs when using `G:/cpp/radiance/VkNRC/test/evaluate.comp` compiled with `SUBGROUP_SIZE=32`, so this is not specific to the new dispatch wrapper.
+
+The test now guards `vkCreateComputePipelines` on MSVC/Windows and converts this driver-side crash into:
+
+```text
+SKIP: vkCreateComputePipelines raised a structured exception for the KHR cooperative matrix shader
+```
+
+### Validation
+
+- `spirv-val` succeeded for the generated KHR SG32 dispatch SPIR-V:
+  - `spirv-val --target-env vulkan1.3 build/tests/nrc_khr_dispatch_sg32.spv`
+- VkNRC's original KHR experiment shader also compiled and validated:
+  - `glslc --target-env=vulkan1.3 -DSUBGROUP_SIZE=32 G:/cpp/radiance/VkNRC/test/evaluate.comp`
+  - `spirv-val --target-env vulkan1.3 build/tests/vknrc_evaluate_sg32.spv`
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `10/10 tests passed`
+- Important qualification:
+  - `nrc_vulkan_khr_dispatch_test` passed on this machine by controlled skip, not by numerical GPU comparison, because the AMD driver raised a structured exception during KHR pipeline creation.
+
+### Current Limitations
+
+- KHR numerical validation has not completed on the current AMD driver.
+- Capability/profile selection is not sufficient by itself to prove a KHR backend can be enabled in production. Pipeline creation must also be validated.
+- The KHR backend remains a forward inference scaffold until it is run successfully and compared against CPU/scalar reference output on at least one conforming driver.
+- The MSVC structured-exception guard is Windows-specific. Other platforms still need process-level isolation or another strategy if a driver crashes during pipeline creation.
+- No reusable runtime API has been promoted for pipeline validation or backend fallback policy yet.
+- No inference pass consumes `NrcEvalRecord` queues yet.
+- No gradient/backpropagation or optimizer GPU pass has been implemented yet.
+
+### Next Step
+
+Add a reusable backend validation/runtime contract that distinguishes capability support, pipeline creation success, and numerical validation status. Then continue toward the first queue-consuming inference pass, using scalar dispatch as the correctness anchor while the KHR backend remains driver-gated.

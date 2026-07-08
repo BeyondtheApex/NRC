@@ -1,0 +1,42 @@
+#version 460
+
+#define NRC_NN_SET 0
+#define NRC_NN_WEIGHTS_BINDING 0
+#include "nrc/backend/khr_coopmat/NrcNNKhr.glsl"
+
+layout(local_size_x = NRC_KHR_WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 1) readonly buffer NrcKhrDispatchInput {
+    uvec4 value[];
+} nrcKhrDispatchInput;
+
+layout(std430, set = 0, binding = 2) buffer NrcKhrDispatchOutput {
+    vec4 value[];
+} nrcKhrDispatchOutput;
+
+layout(push_constant) uniform NrcKhrDispatchConstants {
+    uint sampleCount;
+} nrcKhrDispatchConstants;
+
+void main() {
+    uint sampleIndex = gl_WorkGroupID.x * NRC_KHR_WORKGROUP_SIZE + gl_LocalInvocationID.x;
+
+    uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT];
+    if (sampleIndex < nrcKhrDispatchConstants.sampleCount) {
+        uint inputBase = sampleIndex * NRC_ENCODED_INPUT_UVEC4_COUNT;
+        for (uint i = 0u; i < NRC_ENCODED_INPUT_UVEC4_COUNT; ++i) {
+            encoded[i] = nrcKhrDispatchInput.value[inputBase + i];
+        }
+    } else {
+        for (uint i = 0u; i < NRC_ENCODED_INPUT_UVEC4_COUNT; ++i) {
+            encoded[i] = uvec4(0u);
+        }
+    }
+
+    vec3 outputValue;
+    NrcKhrForward(encoded, outputValue);
+
+    if (sampleIndex < nrcKhrDispatchConstants.sampleCount) {
+        nrcKhrDispatchOutput.value[sampleIndex] = vec4(outputValue, 1.0);
+    }
+}

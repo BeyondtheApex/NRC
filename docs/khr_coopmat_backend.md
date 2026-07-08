@@ -21,7 +21,7 @@ Not implemented yet:
 - Backpropagation.
 - Gradient accumulation.
 - Optimizer.
-- Runtime numerical validation.
+- Runtime numerical validation on a driver that can create the KHR cooperative matrix pipeline successfully.
 
 ## Weight Layout
 
@@ -41,6 +41,29 @@ NRC_KHR_SUBGROUP_SIZE=16
 ```
 
 These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support or numerical correctness.
+
+## Runtime Dispatch Test
+
+Milestone 8 adds `tests/vulkan_khr_dispatch_test.cpp` and `tests/shader_compile/nrc_khr_dispatch.comp`.
+
+The test:
+
+- Builds SG32 and SG16 SPIR-V variants.
+- Queries real Vulkan device capabilities through `nrc::vulkan::query_device_capabilities`.
+- Selects an implemented KHR inference profile with `requireTraining = false`.
+- Creates the device with KHR cooperative matrix, shader float16, storage buffer 16-bit access, subgroup size control, and full compute subgroup features.
+- Creates the compute pipeline with `VkPipelineShaderStageRequiredSubgroupSizeCreateInfo` and `VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT`.
+- Dispatches 149 samples and compares against an fp16-rounded CPU reference if pipeline creation and dispatch succeed.
+
+Current local result:
+
+- Device: AMD Radeon RX 9070 XT.
+- Driver: AMD proprietary driver 26.6.4 (LLPC).
+- Vulkan API: 1.4.349.
+- The device reports an implemented `KHR_FP16_M16N16K16_SG32_WG128` profile.
+- `vkCreateComputePipelines` raises a structured exception for the VkNRC-style KHR cooperative matrix shader. The test catches this on MSVC/Windows, prints `SKIP:`, and returns success so the rest of the suite remains usable.
+
+This means capability/profile selection is necessary but not sufficient for production enablement. A downstream integration should compile or otherwise validate the selected KHR pipeline before enabling it for rendering.
 
 ## Profile Selection
 

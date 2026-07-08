@@ -15,6 +15,8 @@ Initial profiles:
 
 The scalar profile is for correctness and CI. It is never selected unless explicitly allowed by the caller.
 
+Profile selection proves that a backend is a valid candidate for the reported capabilities. It does not prove that the driver can compile and run the backend shader. Integrations should also validate pipeline creation and, where possible, run the backend numerical validation before enabling a production KHR profile.
+
 ## Capability Input
 
 `nrc::DeviceCapabilitiesView` is renderer-neutral. Vulkan-specific code should query device features and cooperative matrix properties, then translate them into this view.
