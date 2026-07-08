@@ -18,6 +18,7 @@ inline constexpr std::uint32_t kTrainBatchCount = 4;
 
 inline constexpr std::uint32_t kDefaultWorkgroupSize = 128;
 inline constexpr float kDefaultTrainProbability = 0.03f;
+inline constexpr double kPi = 3.14159265358979323846;
 inline constexpr float kLossScale = 1.0f;
 inline constexpr float kAdamBeta1 = 0.9f;
 inline constexpr float kAdamBeta2 = 0.999f;

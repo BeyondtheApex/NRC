@@ -11,6 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(nrc_core STATIC)
 target_sources(nrc_core PRIVATE
+    src/nrc_encoding.cpp
     src/nrc_optimizer.cpp
     src/nrc_reference_nn.cpp
     src/nrc_weights.cpp

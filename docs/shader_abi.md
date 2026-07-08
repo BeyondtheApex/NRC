@@ -84,6 +84,8 @@ The low bit selects destination type.
 
 Renderers remain responsible for constructing `NrcUnpackedInput` from their own scene/hit/material representation.
 
+The host mirror in `include/nrc/nrc_encoding.hpp` produces the same half-rounded 64-lane representation for CPU reference tests and Vulkan dispatch validation.
+
 ## Compile Smoke Test
 
 `tests/shader_compile/nrc_common_smoke.comp` includes the common headers and compiles them with `glslc`. Queue, train-prepare, optimizer, scalar inference, and backend wrappers compile the shader-header passes. These catch GLSL syntax and portability issues before real integrations depend on the headers.

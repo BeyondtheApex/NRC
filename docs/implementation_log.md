@@ -1474,3 +1474,72 @@ New validation coverage:
 ### Next Step
 
 Add a Vulkan scalar gradient dispatch test with feature gating for `shaderBufferFloat32AtomicAdd`, compare selected gradients against `nrc::reference_backward`, then wire prepare -> gradient -> optimize into a full training dispatch test.
+
+## 2026-07-08 - Milestone 20 Scalar Gradient Runtime Validation
+
+### Implemented
+
+- Added host-side input encoding mirror:
+  - `include/nrc/nrc_encoding.hpp`
+  - `src/nrc_encoding.cpp`
+- Added encoding test:
+  - `tests/encoding_test.cpp`
+- Added Vulkan scalar gradient runtime test:
+  - `tests/vulkan_gradient_scalar_test.cpp`
+- Updated CMake registration:
+  - `nrc_encoding_test`
+  - `nrc_gradient_scalar_dispatch_shader`
+  - `nrc_vulkan_gradient_scalar_test`
+- Added `kPi` to `include/nrc/nrc_constants.hpp` for CPU spherical encoding.
+- Updated documentation:
+  - `docs/gradient_pass.md`
+  - `docs/training_optimizer.md`
+  - `docs/reference_nn.md`
+  - `docs/shader_abi.md`
+  - `docs/project_structure.md`
+
+### Behavior
+
+`nrc::encode_input` mirrors shader-side `NrcEncodeInput` for CPU reference and Vulkan dispatch tests. It accepts an `UnpackedNrcInput`, applies the same position frequency encoding, one-blob direction/normal/roughness encoding, diffuse/specular lane packing, and rounds each lane through the existing fp32<->fp16 conversion helpers so the CPU reference consumes the same effective inputs as the scalar GPU path.
+
+`nrc_vulkan_gradient_scalar_test` now:
+
+- builds a deterministic train batch with three records;
+- packs fp32 weights into the same fp16 `uvec4` layout used by shaders;
+- unpacks those packed weights back to fp32 for the CPU oracle;
+- mirrors the test shader's fake `NrcUnpackPackedInput` on the host;
+- encodes inputs through `nrc::encode_input`;
+- accumulates expected gradients with `nrc::reference_backward`;
+- dispatches `NrcGradientScalar.glsl` through Vulkan;
+- compares the full fp32 gradient buffer against the CPU result.
+
+The test requires `VK_EXT_shader_atomic_float` and `shaderBufferFloat32AtomicAdd`. If no Vulkan compute device exposes that feature, it reports a controlled skip instead of failing the suite.
+
+### Validation
+
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `23/23 tests passed`
+
+New validation coverage:
+
+- `nrc_encoding_test` checks selected spherical encoding and 64-lane encoded input behavior.
+- `nrc_shader_gradient_scalar_compile` continues to compile-check the shader-header integration boundary.
+- `nrc_vulkan_gradient_scalar_test` numerically validates the dispatched scalar gradient pass against the CPU backpropagation reference.
+
+### Current Limitations
+
+- This is still the scalar correctness path. It is useful for validation and debugging, not the final high-performance training backend.
+- The gradient pass depends on fp32 storage-buffer atomic add support.
+- Full prepare -> gradient -> optimize Vulkan training loop validation is still pending.
+- The sample path tracer still produces train records and runs scalar inference resolve, but does not yet update NRC weights.
+- KHR cooperative-matrix gradient/backpropagation is still missing.
+
+### Next Step
+
+Add a full Vulkan training-step test that runs prepare -> scalar gradient -> optimize from `NrcTrainRecord` batches and compares updated fp32/fp16 weights against the CPU optimizer reference. After that, wire the same loop into the sample path tracer as a reference integration path.

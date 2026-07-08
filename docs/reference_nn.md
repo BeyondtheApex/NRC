@@ -37,10 +37,12 @@ Total weight count:
 
 ## Current Reference API
 
+- CPU input encoding mirror: `nrc::encode_input`, using `UnpackedNrcInput` and producing the same 64 half-rounded float lanes as shader-side `NrcEncodeInput`.
 - CPU forward reference: `nrc::reference_forward`, using float weights.
 - CPU backward reference: `nrc::reference_backward`, producing fp32 gradients in the same row-major weight layout.
 - GLSL scalar backend: `NrcScalarForward`, reading packed fp16 weights from `uvec4`.
 - Vulkan scalar dispatch test: uploads packed fp16 weights/inputs, dispatches `NrcScalarForward`, and compares the result against `nrc::reference_forward` using the same fp16-rounded data.
+- Vulkan scalar gradient dispatch test: mirrors the shader unpack and encoding path on CPU, dispatches `NrcGradientScalar`, and compares the full gradient buffer against `nrc::reference_backward`.
 
 The scalar shader backend is intended for correctness and debugging. It is not a production fallback for high-performance integrations.
 
@@ -61,3 +63,5 @@ dLoss/dPrediction = 2 * lossScale * (prediction - target)
 The denominator is treated as the current prediction scale used by VkNRC's backprop shader; it is not differentiated further.
 
 `tests/reference_gradient_test.cpp` validates selected weights against central finite differences with that denominator held fixed, and also checks gradient accumulation mode and invalid input validation.
+
+`tests/encoding_test.cpp` validates selected host encoding lanes and spherical encoding behavior. The shader-side encoding path remains the source contract for integrations; the host mirror exists so runtime tests can compare GPU gradients against the CPU reference without duplicating ad hoc encoding logic in each test.

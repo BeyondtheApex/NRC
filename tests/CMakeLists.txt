@@ -19,6 +19,13 @@ target_link_libraries(nrc_reference_gradient_test PRIVATE nrc_core)
 
 add_test(NAME nrc_reference_gradient_test COMMAND nrc_reference_gradient_test)
 
+add_executable(nrc_encoding_test
+    encoding_test.cpp)
+
+target_link_libraries(nrc_encoding_test PRIVATE nrc_core)
+
+add_test(NAME nrc_encoding_test COMMAND nrc_encoding_test)
+
 add_executable(nrc_weights_test
     weights_test.cpp)
 
@@ -201,6 +208,33 @@ if(NRC_GLSLC)
         add_dependencies(nrc_vulkan_queue_ops_test nrc_queue_ops_dispatch_shader)
         add_test(NAME nrc_vulkan_queue_ops_test
             COMMAND nrc_vulkan_queue_ops_test "${NRC_QUEUE_OPS_DISPATCH_SPV}")
+
+        set(NRC_GRADIENT_SCALAR_DISPATCH_SPV "${CMAKE_CURRENT_BINARY_DIR}/nrc_gradient_scalar_dispatch.spv")
+        add_custom_command(
+            OUTPUT "${NRC_GRADIENT_SCALAR_DISPATCH_SPV}"
+            COMMAND "${NRC_GLSLC}"
+                "--target-env=vulkan1.2"
+                "-I${PROJECT_SOURCE_DIR}/shaders"
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_scalar_dispatch.comp"
+                "-o"
+                "${NRC_GRADIENT_SCALAR_DISPATCH_SPV}"
+            DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_scalar_dispatch.comp"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/passes/NrcGradientScalar.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/backend/scalar/NrcNNScalar.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcEncoding.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcTypes.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcConstants.glsl"
+            VERBATIM)
+        add_custom_target(nrc_gradient_scalar_dispatch_shader
+            DEPENDS "${NRC_GRADIENT_SCALAR_DISPATCH_SPV}")
+
+        add_executable(nrc_vulkan_gradient_scalar_test
+            vulkan_gradient_scalar_test.cpp)
+        target_link_libraries(nrc_vulkan_gradient_scalar_test PRIVATE nrc_vulkan)
+        add_dependencies(nrc_vulkan_gradient_scalar_test nrc_gradient_scalar_dispatch_shader)
+        add_test(NAME nrc_vulkan_gradient_scalar_test
+            COMMAND nrc_vulkan_gradient_scalar_test "${NRC_GRADIENT_SCALAR_DISPATCH_SPV}")
 
         set(NRC_KHR_DISPATCH_SG32_SPV "${CMAKE_CURRENT_BINARY_DIR}/nrc_khr_dispatch_sg32.spv")
         add_custom_command(

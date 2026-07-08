@@ -4,7 +4,7 @@ This repository separates reusable NRC code from the reference renderer.
 
 ```text
 include/nrc/
-  Public host-side ABI, profile descriptions, constants, and resource layouts.
+  Public host-side ABI, profile descriptions, constants, encoding mirror, and resource layouts.
 
 shaders/nrc/common/
   Shader-side ABI and algorithm helpers shared by integration shaders and library passes.
@@ -22,7 +22,7 @@ sample/path_tracer/
   Reference integration sample used to validate NRC behavior. It currently uses a tiny primary-ray Vulkan pipeline and will grow into a full path tracer.
 
 tests/
-  ABI, profile selection, shader compilation, queue behavior, NN reference tests, and GPU dispatch validation.
+  ABI, profile selection, shader compilation, encoding, queue behavior, NN reference tests, and GPU dispatch validation.
 
 docs/
   Implementation log, design notes, integration guide, training notes, and milestone results.
