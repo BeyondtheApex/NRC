@@ -2,7 +2,7 @@
 
 `sample/path_tracer` is the reference integration target for the reusable NRC library.
 
-Milestone 12 replaces the placeholder executable with a minimal Vulkan integration skeleton. It is not a full path tracer yet, but it exercises the same seams the full sample will use:
+The current sample is a minimal Vulkan integration skeleton. It is not a full path tracer yet, but it exercises the same seams the full sample will use:
 
 1. Queue reset.
 2. Eval-record production.
@@ -19,6 +19,8 @@ Milestone 12 replaces the placeholder executable with a minimal Vulkan integrati
   - `sample/path_tracer/shaders/sample_producer.comp`
 - Inference shader wrapper:
   - `sample/path_tracer/shaders/sample_inference_scalar.comp`
+- Shared sample scene shader:
+  - `sample/path_tracer/shaders/sample_scene.glsl`
 - Build config template:
   - `sample/path_tracer/sample_config.hpp.in`
 
@@ -29,6 +31,7 @@ The sample creates:
 - a queue state buffer;
 - an eval-record buffer;
 - a small train-record buffer;
+- a small scene buffer containing two triangles with per-vertex position, normal, roughness, diffuse, and specular data;
 - packed fp16 weights;
 - a `4x4` `rgba32f` bias/factor-R image;
 - a `4x4` `rg32f` factor-GB image;
@@ -44,7 +47,7 @@ It records one command buffer:
 
 The producer emits one screen eval record for every `4x4` pixel. It also reserves two train records in batch 0 and emits one train eval record targeting those records.
 
-The inference wrapper provides a deterministic fake scene unpack function and uses `NrcInferenceScalar.glsl`.
+`sample_scene.glsl` maps each pixel to a simple triangle hit, packs `primitiveId`, instance id, barycentrics, and scattered direction into `PackedNrcInput`, then unpacks the same payload into `NrcUnpackedInput` for `NrcInferenceScalar.glsl`.
 
 Weights are configured so the scalar MLP predicts:
 
@@ -58,6 +61,8 @@ The host verifies:
 - every pixel has exactly one eval record;
 - train batch 0 has two records and batches 1-3 remain zero;
 - the train eval record targets batch 0 records `[0, 1]`;
+- every screen and train eval payload matches the CPU reference `PackedNrcInput` generated from the sample scene hit rule;
+- both train records preserve the expected packed scene input payload;
 - every screen pixel was resolved as `bias + factor * prediction`;
 - both train record bias values were resolved as `bias + factor * prediction`;
 - output alpha is zero, matching the inference pass contract.
@@ -77,9 +82,8 @@ nrc_sample_reference_path_tracer_smoke
 
 ## Current Limitations
 
-- This is a synthetic integration skeleton, not a real path tracer.
+- This is a scene-backed integration skeleton, not a real path tracer.
 - No acceleration structure, ray query, material system, BRDF sampling, or scene loading exists yet.
-- The scene unpack function is deterministic fake data.
 - Training records are synthetic and not yet generated from real path-tracing samples.
 - KHR cooperative matrix inference is not used because KHR pipeline creation is driver-gated on the current AMD machine.
 - No gradient/backpropagation or optimizer pass is connected yet.
@@ -88,7 +92,6 @@ nrc_sample_reference_path_tracer_smoke
 
 The next sample milestones should add:
 
-- a small scene representation and real `PackedNrcInput` generation;
 - direct lighting or simple path tracing;
 - train-record production from actual sampled paths;
 - scalar gradient and optimizer once those passes exist;

@@ -1021,3 +1021,102 @@ The sample now verifies:
 ### Next Step
 
 Add a small scene/hit representation to the sample so `PackedNrcInput` comes from a real geometry/material model instead of synthetic pixel data. After that, add a simple path tracing loop and use the generated train records as inputs for scalar gradient/optimizer once those passes exist.
+
+## 2026-07-08 - Milestone 14 Scene-Backed Sample Input Generation
+
+### Implemented
+
+- Added shared sample scene shader header:
+  - `sample/path_tracer/shaders/sample_scene.glsl`
+- Updated sample producer shader:
+  - `sample/path_tracer/shaders/sample_producer.comp`
+- Updated sample inference wrapper:
+  - `sample/path_tracer/shaders/sample_inference_scalar.comp`
+- Updated sample host app:
+  - `sample/path_tracer/sample.cpp`
+- Updated sample CMake dependencies:
+  - `sample/path_tracer/CMakeLists.txt`
+- Updated documentation:
+  - `docs/sample_path_tracer.md`
+  - `docs/project_structure.md`
+
+### Runtime Behavior
+
+The sample now uploads a small scene buffer containing two triangles. Each vertex carries:
+
+- position;
+- normal plus roughness;
+- diffuse color;
+- specular color.
+
+`sample_scene.glsl` provides the sample integration boundary:
+
+- maps a `4x4` pixel to a triangle hit;
+- packs `primitiveId`, instance id, barycentrics, and scattered direction into `PackedNrcInput`;
+- unpacks the same payload through the scene buffer into `NrcUnpackedInput` for `NrcInferenceScalar.glsl`.
+
+The reusable NRC inference pass remains scene-agnostic. The sample still provides:
+
+```glsl
+NrcUnpackedInput NrcUnpackPackedInput(PackedNrcInput packedInput);
+```
+
+This preserves the intended integration shape for engines such as MCVR-custom: renderer-specific hit/material data stays outside `shaders/nrc`, while NRC passes consume the stable packed record ABI.
+
+### Descriptor Layout Changes
+
+The sample now binds the scene buffer as:
+
+- producer set binding 3;
+- inference set binding 6.
+
+The sample producer and inference pipelines have separate descriptor set layouts, so the shared scene shader keeps the binding configurable through:
+
+```glsl
+#define NRC_SAMPLE_SCENE_BINDING ...
+```
+
+### Validated Behavior
+
+The sample still verifies all Milestone 13 behavior:
+
+- `evalCount == 17`;
+- one screen eval record per pixel;
+- one train eval record targeting batch 0 records `[0, 1]`;
+- train batch 0 count is 2;
+- train batches 1-3 remain zero;
+- screen and train resolves still produce `bias + factor * prediction`.
+
+It now additionally verifies:
+
+- every screen eval record contains the expected scene-backed `PackedNrcInput`;
+- the train eval record contains the expected scene-backed payload;
+- both train records preserve the expected packed scene input payload after scalar inference mutates their bias fields.
+
+### Validation
+
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Manual sample run succeeded:
+  - `build/sample/path_tracer/Debug/nrc_reference_path_tracer.exe`
+- Manual sample output:
+  - `NRC reference path tracer minimal integration passed: 17 eval records, scalar inference screen/train resolve.`
+  - `This milestone uses a scene-backed hit/input path; full ray tracing is pending.`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `15/15 tests passed`
+
+### Current Limitations
+
+- This is still not a full path tracer.
+- There is no acceleration structure, ray query, direct lighting, BRDF sampling, scene loading, or visual output artifact yet.
+- Train records still use synthetic radiance/factor values, although their packed input now comes from the sample scene hit path.
+- KHR cooperative matrix inference is not used in the sample because KHR pipeline creation remains driver-gated on the current AMD machine.
+- No gradient/backpropagation or optimizer pass is connected yet.
+
+### Next Step
+
+Add a simple path tracing or direct-lighting stage so train-record bias/factor values come from actual sampled scene transport rather than constants. After that, use those records as the validation target for scalar gradient and optimizer passes.

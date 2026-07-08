@@ -28,6 +28,7 @@ constexpr std::uint32_t kPixelCount = kWidth * kHeight;
 constexpr std::uint32_t kTrainRecordCount = 2;
 constexpr std::uint32_t kEvalCapacity = kPixelCount + 1;
 constexpr std::uint32_t kWorkgroupSize = 64;
+constexpr std::uint32_t kSceneTriangleCount = 2;
 
 struct Vec2 {
     float x = 0.0f;
@@ -41,11 +42,28 @@ struct Vec4 {
     float w = 0.0f;
 };
 
+struct SampleSceneVertex {
+    Vec4 position;
+    Vec4 normalRoughness;
+    Vec4 diffuse;
+    Vec4 specular;
+};
+
+struct SampleSceneTriangle {
+    SampleSceneVertex v0;
+    SampleSceneVertex v1;
+    SampleSceneVertex v2;
+};
+
+static_assert(sizeof(SampleSceneVertex) == 64);
+static_assert(sizeof(SampleSceneTriangle) == 192);
+
 struct ProducerConstants {
     std::uint32_t mode = 0;
     std::uint32_t evalCapacity = 0;
     std::uint32_t pixelCount = 0;
     std::uint32_t width = 0;
+    std::uint32_t height = 0;
     std::uint32_t trainRecordCount = 0;
 };
 
@@ -125,6 +143,81 @@ std::vector<Vec2> make_factor_gb() {
     return pixels;
 }
 
+SampleSceneVertex make_scene_vertex(Vec4 position,
+                                    Vec4 normalRoughness,
+                                    Vec4 diffuse,
+                                    Vec4 specular) {
+    return {position, normalRoughness, diffuse, specular};
+}
+
+std::array<SampleSceneTriangle, kSceneTriangleCount> make_sample_scene() {
+    const Vec4 normalA{0.0f, 0.0f, 1.0f, 0.25f};
+    const Vec4 normalB{0.0f, 0.2f, 0.98f, 0.55f};
+    const Vec4 specularA{0.04f, 0.05f, 0.06f, 1.0f};
+    const Vec4 specularB{0.12f, 0.10f, 0.08f, 1.0f};
+
+    return {
+        SampleSceneTriangle{
+            make_scene_vertex({-1.0f, -1.0f, 0.0f, 1.0f}, normalA, {0.75f, 0.18f, 0.12f, 1.0f}, specularA),
+            make_scene_vertex({1.0f, -1.0f, 0.0f, 1.0f}, normalA, {0.18f, 0.70f, 0.24f, 1.0f}, specularA),
+            make_scene_vertex({-1.0f, 1.0f, 0.0f, 1.0f}, normalA, {0.18f, 0.30f, 0.82f, 1.0f}, specularA),
+        },
+        SampleSceneTriangle{
+            make_scene_vertex({1.0f, 1.0f, 0.15f, 1.0f}, normalB, {0.82f, 0.72f, 0.18f, 1.0f}, specularB),
+            make_scene_vertex({-1.0f, 1.0f, 0.05f, 1.0f}, normalB, {0.18f, 0.64f, 0.78f, 1.0f}, specularB),
+            make_scene_vertex({1.0f, -1.0f, 0.10f, 1.0f}, normalB, {0.70f, 0.28f, 0.78f, 1.0f}, specularB),
+        },
+    };
+}
+
+std::uint32_t pack_unorm2x16(float x, float y) {
+    const auto pack = [](float value) {
+        const float clamped = std::clamp(value, 0.0f, 1.0f);
+        return static_cast<std::uint32_t>(std::round(clamped * 65535.0f)) & 0xffffu;
+    };
+    return pack(x) | (pack(y) << 16u);
+}
+
+nrc::PackedNrcInput expected_packed_input(std::uint32_t x, std::uint32_t y) {
+    const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(kWidth);
+    const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(kHeight);
+    const bool firstTriangle = (u + v) <= 1.0f;
+    const std::uint32_t primitiveId = firstTriangle ? 0u : 1u;
+    const float baryX = firstTriangle ? u : 1.0f - u;
+    const float baryY = firstTriangle ? v : 1.0f - v;
+    const float scatteredX = 0.25f + 0.5f * u;
+    const float scatteredY = 0.75f - 0.5f * v;
+
+    nrc::PackedNrcInput packedInput{};
+    packedInput.primitiveId = primitiveId;
+    packedInput.flipBitInstanceId = primitiveId;
+    packedInput.barycentric2x16U = pack_unorm2x16(baryX, baryY);
+    packedInput.scatteredDir2x16U = pack_unorm2x16(scatteredX, scatteredY);
+    return packedInput;
+}
+
+bool same_packed_input(const nrc::PackedNrcInput &lhs, const nrc::PackedNrcInput &rhs) {
+    return lhs.primitiveId == rhs.primitiveId &&
+           lhs.flipBitInstanceId == rhs.flipBitInstanceId &&
+           lhs.barycentric2x16U == rhs.barycentric2x16U &&
+           lhs.scatteredDir2x16U == rhs.scatteredDir2x16U;
+}
+
+void report_packed_input_mismatch(const char *label,
+                                  const nrc::PackedNrcInput &expected,
+                                  const nrc::PackedNrcInput &actual) {
+    std::cerr << "FAIL: " << label
+              << " expected packed input (primitive=" << expected.primitiveId
+              << ", instance=" << expected.flipBitInstanceId
+              << ", bary=0x" << std::hex << expected.barycentric2x16U
+              << ", scatter=0x" << expected.scatteredDir2x16U
+              << ") got (primitive=" << std::dec << actual.primitiveId
+              << ", instance=" << actual.flipBitInstanceId
+              << ", bary=0x" << std::hex << actual.barycentric2x16U
+              << ", scatter=0x" << actual.scatteredDir2x16U
+              << std::dec << ")\n";
+}
+
 std::uint32_t decode_screen_x(std::uint32_t dst) {
     dst >>= 1u;
     return dst & 0x7fffu;
@@ -200,12 +293,15 @@ public:
         const std::vector<nrc::PackedFp16x8> packedWeights = nrc::pack_weights_fp16_uvec4(weights);
         const std::vector<Vec4> initialBiasFactorR = make_bias_factor_r();
         const std::vector<Vec2> initialFactorGb = make_factor_gb();
+        const std::array<SampleSceneTriangle, kSceneTriangleCount> sceneTriangles = make_sample_scene();
 
         Buffer queueState = create_host_buffer(sizeof(nrc::NrcQueueState), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         Buffer evalRecords = create_host_buffer(kEvalCapacity * sizeof(nrc::NrcEvalRecord),
                                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         Buffer trainRecords = create_host_buffer(kTrainRecordCount * sizeof(nrc::NrcTrainRecord),
                                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        Buffer sceneBuffer = create_host_buffer(static_cast<VkDeviceSize>(sceneTriangles.size() * sizeof(SampleSceneTriangle)),
+                                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         Buffer weightBuffer = create_host_buffer(static_cast<VkDeviceSize>(packedWeights.size() * sizeof(nrc::PackedFp16x8)),
                                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         Buffer biasUpload = create_host_buffer(static_cast<VkDeviceSize>(initialBiasFactorR.size() * sizeof(Vec4)),
@@ -223,6 +319,9 @@ public:
         upload(trainRecords,
                zeroTrainRecords.data(),
                static_cast<VkDeviceSize>(zeroTrainRecords.size() * sizeof(nrc::NrcTrainRecord)));
+        upload(sceneBuffer,
+               sceneTriangles.data(),
+               static_cast<VkDeviceSize>(sceneTriangles.size() * sizeof(SampleSceneTriangle)));
         upload(weightBuffer, packedWeights.data(), static_cast<VkDeviceSize>(packedWeights.size() * sizeof(nrc::PackedFp16x8)));
         upload(biasUpload, initialBiasFactorR.data(), static_cast<VkDeviceSize>(initialBiasFactorR.size() * sizeof(Vec4)));
         upload(factorUpload, initialFactorGb.data(), static_cast<VkDeviceSize>(initialFactorGb.size() * sizeof(Vec2)));
@@ -233,8 +332,8 @@ public:
         VkDescriptorPool descriptorPool = create_descriptor_pool();
         VkDescriptorSet producerSet = allocate_descriptor_set(descriptorPool, producerSetLayout_);
         VkDescriptorSet inferenceSet = allocate_descriptor_set(descriptorPool, inferenceSetLayout_);
-        update_producer_set(producerSet, queueState, evalRecords, trainRecords);
-        update_inference_set(inferenceSet, weightBuffer, evalRecords, queueState, biasImage, factorImage, trainRecords);
+        update_producer_set(producerSet, queueState, evalRecords, trainRecords, sceneBuffer);
+        update_inference_set(inferenceSet, weightBuffer, evalRecords, queueState, biasImage, factorImage, trainRecords, sceneBuffer);
 
         submit(queueState,
                evalRecords,
@@ -477,7 +576,7 @@ private:
     }
 
     void create_producer_pipeline(const char *producerSpirv) {
-        std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+        std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
         for (std::uint32_t i = 0; i < bindings.size(); ++i) {
             bindings[i].binding = i;
             bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -496,7 +595,7 @@ private:
     }
 
     void create_inference_pipeline(const char *inferenceSpirv) {
-        std::array<VkDescriptorSetLayoutBinding, 6> bindings{};
+        std::array<VkDescriptorSetLayoutBinding, 7> bindings{};
         for (std::uint32_t i = 0; i < bindings.size(); ++i) {
             bindings[i].binding = i;
             bindings[i].descriptorCount = 1;
@@ -683,7 +782,7 @@ private:
     VkDescriptorPool create_descriptor_pool() const {
         std::array<VkDescriptorPoolSize, 2> poolSizes{};
         poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        poolSizes[0].descriptorCount = 7;
+        poolSizes[0].descriptorCount = 9;
         poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         poolSizes[1].descriptorCount = 2;
 
@@ -713,13 +812,15 @@ private:
     void update_producer_set(VkDescriptorSet set,
                              const Buffer &queueState,
                              const Buffer &evalRecords,
-                             const Buffer &trainRecords) const {
-        std::array<VkDescriptorBufferInfo, 3> infos{};
+                             const Buffer &trainRecords,
+                             const Buffer &sceneBuffer) const {
+        std::array<VkDescriptorBufferInfo, 4> infos{};
         infos[0] = {queueState.buffer, 0, queueState.size};
         infos[1] = {evalRecords.buffer, 0, evalRecords.size};
         infos[2] = {trainRecords.buffer, 0, trainRecords.size};
+        infos[3] = {sceneBuffer.buffer, 0, sceneBuffer.size};
 
-        std::array<VkWriteDescriptorSet, 3> writes{};
+        std::array<VkWriteDescriptorSet, 4> writes{};
         for (std::uint32_t i = 0; i < writes.size(); ++i) {
             writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[i].dstSet = set;
@@ -737,12 +838,14 @@ private:
                               const Buffer &queueState,
                               const Image &biasImage,
                               const Image &factorImage,
-                              const Buffer &trainRecords) const {
-        std::array<VkDescriptorBufferInfo, 4> bufferInfos{};
+                              const Buffer &trainRecords,
+                              const Buffer &sceneBuffer) const {
+        std::array<VkDescriptorBufferInfo, 5> bufferInfos{};
         bufferInfos[0] = {weights.buffer, 0, weights.size};
         bufferInfos[1] = {evalRecords.buffer, 0, evalRecords.size};
         bufferInfos[2] = {queueState.buffer, 0, queueState.size};
         bufferInfos[3] = {trainRecords.buffer, 0, trainRecords.size};
+        bufferInfos[4] = {sceneBuffer.buffer, 0, sceneBuffer.size};
 
         std::array<VkDescriptorImageInfo, 2> imageInfos{};
         imageInfos[0].imageView = biasImage.view;
@@ -750,7 +853,7 @@ private:
         imageInfos[1].imageView = factorImage.view;
         imageInfos[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-        std::array<VkWriteDescriptorSet, 6> writes{};
+        std::array<VkWriteDescriptorSet, 7> writes{};
         for (auto &write : writes) {
             write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             write.dstSet = set;
@@ -774,6 +877,9 @@ private:
         writes[5].dstBinding = 5;
         writes[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[5].pBufferInfo = &bufferInfos[3];
+        writes[6].dstBinding = 6;
+        writes[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[6].pBufferInfo = &bufferInfos[4];
 
         vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
@@ -974,7 +1080,7 @@ private:
                                 &producerSet,
                                 0,
                                 nullptr);
-        dispatch_producer(commandBuffer, {0u, kEvalCapacity, kPixelCount, kWidth, kTrainRecordCount});
+        dispatch_producer(commandBuffer, {0u, kEvalCapacity, kPixelCount, kWidth, kHeight, kTrainRecordCount});
 
         VkMemoryBarrier resetToProducer{};
         resetToProducer.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -991,7 +1097,7 @@ private:
                              0,
                              nullptr);
 
-        dispatch_producer(commandBuffer, {1u, kEvalCapacity, kPixelCount, kWidth, kTrainRecordCount});
+        dispatch_producer(commandBuffer, {1u, kEvalCapacity, kPixelCount, kWidth, kHeight, kTrainRecordCount});
 
         VkMemoryBarrier producerToInference{};
         producerToInference.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -1114,6 +1220,13 @@ private:
                     std::cerr << "FAIL: duplicate eval record for pixel " << pixelIndex << '\n';
                     ok = false;
                 }
+                const nrc::PackedNrcInput expectedInput = expected_packed_input(x, y);
+                if (!same_packed_input(evalRecords[i].packedInput, expectedInput)) {
+                    report_packed_input_mismatch("screen eval record",
+                                                 expectedInput,
+                                                 evalRecords[i].packedInput);
+                    ok = false;
+                }
                 seen[pixelIndex] = true;
             } else {
                 const std::uint32_t batch = decode_train_batch(evalRecords[i].dst);
@@ -1122,6 +1235,13 @@ private:
                 if (batch != 0u || left != 0u || right != kTrainRecordCount - 1u || sawTrainEval) {
                     std::cerr << "FAIL: eval record " << i << " has invalid train dst "
                               << evalRecords[i].dst << '\n';
+                    ok = false;
+                }
+                const nrc::PackedNrcInput expectedInput = expected_packed_input(0u, 0u);
+                if (!same_packed_input(evalRecords[i].packedInput, expectedInput)) {
+                    report_packed_input_mismatch("train eval record",
+                                                 expectedInput,
+                                                 evalRecords[i].packedInput);
                     ok = false;
                 }
                 sawTrainEval = true;
@@ -1179,6 +1299,13 @@ private:
                           << trainRecords[i].factorB << ")\n";
                 ok = false;
             }
+            const nrc::PackedNrcInput expectedInput = expected_packed_input(0u, 0u);
+            if (!same_packed_input(trainRecords[i].packedInput, expectedInput)) {
+                report_packed_input_mismatch("train record",
+                                             expectedInput,
+                                             trainRecords[i].packedInput);
+                ok = false;
+            }
         }
 
         return ok;
@@ -1210,7 +1337,7 @@ int main() {
 
         std::cout << "NRC reference path tracer minimal integration passed: "
                   << kEvalCapacity << " eval records, scalar inference screen/train resolve." << std::endl;
-        std::cout << "This milestone is a synthetic integration skeleton; full ray tracing is pending." << std::endl;
+        std::cout << "This milestone uses a scene-backed hit/input path; full ray tracing is pending." << std::endl;
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
         std::cerr << "NRC reference path tracer sample failed: " << error.what() << std::endl;

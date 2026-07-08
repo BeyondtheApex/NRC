@@ -19,7 +19,7 @@ runtime/vulkan/
   Optional Vulkan helper implementation for applications that want a ready-made runtime wrapper.
 
 sample/path_tracer/
-  Reference integration sample used to validate NRC behavior. It starts as a synthetic Vulkan pipeline and will grow into a full path tracer.
+  Reference integration sample used to validate NRC behavior. It currently uses a tiny scene-backed Vulkan pipeline and will grow into a full path tracer.
 
 tests/
   ABI, profile selection, shader compilation, queue behavior, NN reference tests, and GPU dispatch validation.
