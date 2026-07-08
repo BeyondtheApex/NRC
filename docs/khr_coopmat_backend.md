@@ -29,6 +29,7 @@ Implemented:
   - compile-validated experimental output-layer cooperative-matrix `dW` accumulation behind `NRC_KHR_USE_COOPMAT_OUTPUT_DW`;
   - compile-validated experimental final-hidden cooperative-matrix `dW` tile-streaming helper behind `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW`;
   - compile-validated experimental hidden-layer-3 cooperative-matrix `dW` tile-streaming helper behind `NRC_KHR_USE_COOPMAT_HIDDEN3_DW`;
+  - compile-validated experimental hidden-layer-2 cooperative-matrix `dW` tile-streaming helper behind `NRC_KHR_USE_COOPMAT_HIDDEN2_DW`;
   - generic scalar hidden-layer derivative propagation helper;
   - enlarged shared-buffer allocation for future cooperative-matrix reductions.
 - `shaders/nrc/passes/NrcGradientKhr.glsl`, a train-record pass skeleton that dispatches KHR forward and accumulates every hidden/output `dW` region.
@@ -37,7 +38,7 @@ Implemented:
 Not implemented yet:
 
 - Default-path cooperative-matrix `dW` reduction beyond the current subgroup reductions.
-- Cooperative-matrix gradient accumulation/reduction for hidden regions before hidden layer 3.
+- Cooperative-matrix gradient accumulation/reduction for hidden regions before hidden layer 2.
 - Cooperative-matrix `dA` propagation matching VkNRC's fully fused NV path.
 - Production-default KHR training cooperative-matrix reduction path.
 - Runtime numerical validation on a driver that can create the KHR cooperative matrix pipelines successfully.
@@ -60,7 +61,7 @@ NRC_KHR_SUBGROUP_SIZE=16
 NRC_KHR_SUBGROUP_SIZE=32, NRC_KHR_COOPMAT_M=8
 ```
 
-CTest also compiles the same three variants with `NRC_NN_BACKPROPAGATION` enabled through `tests/shader_compile/nrc_khr_backprop_smoke.comp`. The backprop smoke test exercises the gradient buffer declaration, output derivative, output-layer subgroup `dW` reduction helper, output-to-hidden derivative propagation, final-hidden subgroup `dW` reduction helper, hidden tile-streaming coopmat `dW` calls for final-hidden and hidden layer 3, shared `dZ` scratch, hidden-layer 3/2/1 subgroup `dW` reduction helpers, hidden-layer 0 encoded-source staging and subgroup `dW` reduction helper, atomic add helper, and forward path in one translation unit.
+CTest also compiles the same three variants with `NRC_NN_BACKPROPAGATION` enabled through `tests/shader_compile/nrc_khr_backprop_smoke.comp`. The backprop smoke test exercises the gradient buffer declaration, output derivative, output-layer subgroup `dW` reduction helper, output-to-hidden derivative propagation, final-hidden subgroup `dW` reduction helper, hidden tile-streaming coopmat `dW` calls for final-hidden and hidden layers 3 and 2, shared `dZ` scratch, hidden-layer 3/2/1 subgroup `dW` reduction helpers, hidden-layer 0 encoded-source staging and subgroup `dW` reduction helper, atomic add helper, and forward path in one translation unit.
 
 `tests/shader_compile/nrc_gradient_khr_dispatch.comp` compile-validates the KHR train-record pass for the same three profile shader shapes. It proves the pass-level binding ABI, push constants, train-count handling, integration-provided unpack hook, current hidden/output subgroup `dW` reductions, and encoded-source staging compile together.
 
@@ -70,6 +71,8 @@ The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_FINAL_H
 
 The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN3_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-3 cooperative-matrix tile-streaming helper type-checks in the full train-record pass. The default runtime path still uses the subgroup hidden-layer-3 helper.
 
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN2_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-2 cooperative-matrix tile-streaming helper type-checks in the full train-record pass. The default runtime path still uses the subgroup hidden-layer-2 helper.
+
 `tests/khr_gradient_reference_test.cpp` validates the reusable host-side KHR fp16 oracle. It proves the CPU oracle covers every hidden/output gradient region before that oracle is used by the Vulkan KHR runtime test.
 
 `tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-output` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_output_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1`. That mode compares output-layer gradients against a test-side oracle that mirrors fp16 output derivative staging and per-subgroup fp16 output partial storage, while hidden-layer gradients still use `nrc::reference_backward_khr_fp16`.
@@ -77,6 +80,8 @@ The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN3
 `tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-final-hidden` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_final_hidden_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW=1`. That mode compares final-hidden gradients against a test-side oracle that mirrors fp16 dPre row-block staging and per-subgroup fp16 final-hidden partial storage, while the other hidden/output regions use the current KHR groundwork oracle.
 
 `tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-hidden3` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_hidden3_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_HIDDEN3_DW=1`. That mode compares hidden layer 3 gradients against a test-side oracle that mirrors hidden layer 4 backpropagation, fp16 hidden-layer-3 dPre row-block staging, and per-subgroup fp16 hidden-layer-3 partial storage, while the other hidden/output regions use the current KHR groundwork oracle.
+
+`tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-hidden2` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_hidden2_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_HIDDEN2_DW=1`. That mode compares hidden layer 2 gradients against a test-side oracle that mirrors hidden layer 4 and hidden layer 3 backpropagation, fp16 hidden-layer-2 dPre row-block staging, and per-subgroup fp16 hidden-layer-2 partial storage, while the other hidden/output regions use the current KHR groundwork oracle.
 
 The KHR gradient runtime batch contains 67 train records. That remains inside one 128-wide workgroup but crosses multiple SG32 and SG16 subgroup ranges, so the optional coopmat oracles validate cross-subgroup partial accumulation.
 
@@ -88,7 +93,7 @@ Training profile selection now requires device `maxComputeSharedMemorySize` to m
 
 The same layout model now records a hidden-layer cooperative-matrix `dW` tile-streaming plan. It avoids the SG16 full-layer partial overwrite hazard by using only the active tile for row-block dPre staging and one tile of partials per subgroup.
 
-`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` implements the first shader helper using that plan. It currently has compile validation and runtime validation entries for final-hidden `dW` and hidden-layer-3 `dW`; successful dispatch still depends on hardware/driver support for the selected training profile.
+`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` implements the first shader helper using that plan. It currently has compile validation and runtime validation entries for final-hidden `dW`, hidden-layer-3 `dW`, and hidden-layer-2 `dW`; successful dispatch still depends on hardware/driver support for the selected training profile.
 
 These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support, gradient correctness, or training performance.
 
@@ -133,7 +138,7 @@ The test:
 
 Current local result:
 
-- The default KHR gradient test, optional output-coopmat KHR gradient test, optional final-hidden-coopmat KHR gradient test, and optional hidden-layer-3-coopmat KHR gradient test all report:
+- The default KHR gradient test, optional output-coopmat KHR gradient test, optional final-hidden-coopmat KHR gradient test, optional hidden-layer-3-coopmat KHR gradient test, and optional hidden-layer-2-coopmat KHR gradient test all report:
   - `SKIP: no Vulkan device supports an implemented NRC KHR cooperative matrix training profile`
 - This skip happens at profile selection because the current training profile requires the 98304-byte KHR backprop shared-memory layout.
 - The KHR inference dispatch test still uses `requireTraining = false`, so it is not blocked by the training shared-memory gate and can still reach pipeline creation on devices that report the inference profile.
