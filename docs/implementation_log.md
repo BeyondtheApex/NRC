@@ -4959,3 +4959,90 @@ Every hidden layer now has a single-region experimental coopmat `dW` mode. Each 
 ### Next Step
 
 Add combined KHR coopmat `dW` variants so multiple regions can use the tile-streaming path in one shader, or add multi-workgroup oracle coverage before promoting these helpers toward the default path.
+
+## 2026-07-09 - Milestone 74 Combined All-dW Coopmat Gradient Mode
+
+### Implemented
+
+- Added `NRC_KHR_USE_COOPMAT_ALL_DW=1` to `shaders/nrc/passes/NrcGradientKhr.glsl`.
+- The new aggregate switch enables:
+  - output-layer coopmat `dW`;
+  - final-hidden coopmat `dW`;
+  - hidden-layer-3 coopmat `dW`;
+  - hidden-layer-2 coopmat `dW`;
+  - hidden-layer-1 coopmat `dW`;
+  - hidden-layer-0 coopmat `dW`.
+- Kept individually defined region switches authoritative, so targeted A/B variants can still override or use one region at a time.
+- Added a test-side CPU oracle for the all-`dW` mode in `tests/vulkan_gradient_khr_test.cpp`.
+- The combined oracle starts from the output-coopmat expectation and copies each hidden-layer gradient region from the matching hidden-layer coopmat oracle. This mirrors the shader contract that each `dW` helper writes a disjoint gradient-buffer region.
+- Added `--coopmat-all-dw` to `nrc_vulkan_gradient_khr_test`.
+- Added expected-gradient sanity checks for all-`dW`:
+  - all expected gradients must be finite;
+  - output-layer coopmat gradients must be non-zero;
+  - every hidden-layer coopmat gradient region must be non-zero for SG16 and SG32 oracle shapes.
+- Added shader compile tests for `NRC_KHR_USE_COOPMAT_ALL_DW=1`:
+  - SG32;
+  - SG16;
+  - M8/SG32.
+- Added runtime SPIR-V generation for `NRC_KHR_USE_COOPMAT_ALL_DW=1`:
+  - SG32;
+  - SG16;
+  - M8/SG32.
+- Added `nrc_gradient_khr_coopmat_all_dw_dispatch_shaders`.
+- Added `nrc_vulkan_gradient_khr_coopmat_all_dw_test`.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/vulkan_dispatch_harness.md`
+  - `docs/training_optimizer.md`
+  - `docs/khr_shared_memory_layout.md`
+
+### Behavior
+
+The KHR gradient runtime test now has eight modes:
+
+```text
+default:                 KHR groundwork oracle
+--coopmat-output:        output-layer fp16 coopmat dW oracle
+--coopmat-final-hidden:  hidden layer 4 fp16 coopmat dW oracle
+--coopmat-hidden3:       hidden layer 3 fp16 coopmat dW oracle
+--coopmat-hidden2:       hidden layer 2 fp16 coopmat dW oracle
+--coopmat-hidden1:       hidden layer 1 fp16 coopmat dW oracle
+--coopmat-hidden0:       hidden layer 0 fp16 coopmat dW oracle
+--coopmat-all-dw:        output and all hidden dW regions use fp16 coopmat oracles
+```
+
+`NRC_KHR_USE_COOPMAT_ALL_DW=1` is the first full shader variant where all currently implemented output/hidden `dW` regions use the coopmat paths together.
+
+### Validation
+
+- Targeted KHR gradient runtime test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr" --output-on-failure -V`
+- Targeted KHR gradient runtime result:
+  - `8/8 tests passed`
+- Current local KHR training skip result for all eight runtime modes remains:
+  - `SKIP: no Vulkan device supports an implemented NRC KHR cooperative matrix training profile`
+- Targeted all-`dW` shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr_coopmat_all_dw" --output-on-failure -V`
+- Targeted shader compile result:
+  - `3/3 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `61/61 tests passed`
+
+### Current Limitations
+
+- The all-`dW` coopmat runtime validation path is wired, but the current local device does not satisfy the 98304-byte KHR training shared-memory profile gate. The numerical comparison therefore has not executed locally.
+- The default KHR gradient path still uses subgroup arithmetic for output and every hidden-layer `dW`.
+- The all-`dW` oracle still models one 128-wide workgroup. Multi-workgroup KHR gradient validation remains future work.
+- KHR `dA` propagation still uses scalar arrays rather than cooperative matrices.
+- The all-`dW` mode still uses one fp32 atomic add per output/hidden weight per workgroup after reducing coopmat subgroup partials.
+
+### Next Step
+
+Add multi-workgroup KHR gradient oracle coverage, or start porting KHR `dA` propagation toward cooperative-matrix form so the training path moves closer to VkNRC's fully fused shape.

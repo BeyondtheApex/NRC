@@ -130,4 +130,4 @@ All of these fit within the 1024-uvec4 active tile and end before the first acti
 
 The tradeoff is that the shader will need to stream/reduce tiles rather than keep full-layer partials resident in shared memory. This is the intended next implementation shape unless runtime profiling proves a larger profile-gated shared-memory layout is worthwhile.
 
-`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` is the first shader helper using this plan. It is compile-validated for final-hidden `dW` through `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW=1` and has a matching runtime validation entry with a test-side CPU oracle; it is not yet the default gradient path.
+`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` is the first shader helper using this plan. It is compile-validated for every hidden-layer `dW` region and for the all-`dW` combined mode through explicit KHR gradient switches, with matching runtime validation entries and test-side CPU oracles; it is not yet the default gradient path.
