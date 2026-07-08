@@ -88,5 +88,5 @@ The CPU oracle uses `nrc::encode_input`, `nrc::reference_backward`, and `nrc::op
 
 - Full prepare -> scalar gradient -> optimize validation exists, but it is still the scalar correctness path rather than a production-performance training backend.
 - The sample path tracer runs one validated training update, not an iterative per-frame training loop.
-- KHR cooperative-matrix training currently has output-layer plus hidden-layer 4/3 gradient groundwork only; hidden layers 0-2, cooperative-matrix gradient reduction, and runtime numerical validation on a successful KHR pipeline creation path are still missing.
+- KHR cooperative-matrix training currently has output-layer plus hidden-layer 4/3/2 gradient groundwork only; hidden layers 0-1, cooperative-matrix gradient reduction, and runtime numerical validation on a successful KHR pipeline creation path are still missing.
 - NV cooperative-matrix shader paths are intentionally not implemented in this KHR-focused reusable library.

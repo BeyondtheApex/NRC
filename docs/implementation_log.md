@@ -3207,3 +3207,76 @@ where `dZ4` and `dZ3` are gated by the saved ReLU outputs for hidden layers 4 an
 ### Next Step
 
 Continue the same lockstep shader/oracle expansion through hidden layers 2, 1, and 0, then replace the scalar gradient accumulation helpers with subgroup/cooperative-matrix reduction once full-layer KHR gradient coverage exists.
+
+## 2026-07-09 - Milestone 48 KHR Hidden Layer 2 Gradient Groundwork
+
+### Implemented
+
+- Extended `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl` backpropagation storage from three saved activation snapshots to four saved snapshots:
+  - activations feeding hidden layer 2;
+  - activations feeding hidden layer 3;
+  - activations feeding hidden layer 4;
+  - activations feeding the output layer.
+- Added the hidden-layer 2 activation snapshot base and store/read helpers.
+- Removed the final-hidden/previous-hidden wrapper path from the KHR gradient pass usage and switched `shaders/nrc/passes/NrcGradientKhr.glsl` to call the generic hidden-layer propagation and `dW` accumulation helpers directly.
+- Updated `shaders/nrc/passes/NrcGradientKhr.glsl` so the current KHR gradient path:
+  1. runs hidden layers 0-1;
+  2. stores the activations feeding hidden layer 2;
+  3. runs hidden layer 2;
+  4. stores the activations feeding hidden layer 3;
+  5. runs hidden layer 3;
+  6. stores the activations feeding hidden layer 4;
+  7. runs hidden layer 4;
+  8. stores the activations feeding the output layer;
+  9. accumulates output-layer and hidden-layer 4/3/2 `dW`.
+- Updated `tests/shader_compile/nrc_khr_backprop_smoke.comp` to exercise the same direct generic helper sequence.
+- Refactored `tests/vulkan_gradient_khr_test.cpp` so the fp16-rounded KHR CPU oracle now stores every hidden-layer activation instead of only the currently covered suffix. The comparison currently covers:
+  - output-layer `dW`;
+  - hidden-layer 4 `dW`;
+  - hidden-layer 3 `dW`;
+  - hidden-layer 2 `dW`;
+  - zero gradients for hidden layers 0-1.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+This milestone extends the correctness-first KHR gradient suffix from layers 4/3 to layers 4/3/2. The shader pass now computes:
+
+```text
+dA2 = transpose(W3) * dZ3
+dW2 = dZ2 * transpose(A1)
+```
+
+while preserving the existing output-layer, hidden-layer 4, and hidden-layer 3 gradient behavior.
+
+The CPU oracle now mirrors this as a layer-indexed hidden activation table, which should make the remaining layer 1/0 expansion less brittle than continuing to add one-off triplet/quartet helpers.
+
+### Validation
+
+- Targeted KHR shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr|nrc_shader_khr_backprop" --output-on-failure -V`
+- Targeted KHR gradient test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `32/32 tests passed`
+- Targeted KHR gradient runtime test succeeded with controlled skip:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr_test" --output-on-failure -V`
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+
+### Current Limitations
+
+- Backpropagation through hidden layers 0-1 is still missing.
+- The KHR `dW` helpers are still scalar per sample invocation, not cooperative-matrix reductions.
+- Saved activation snapshots now cover four 128-sample activation tiles in shared memory. This remains a correctness-groundwork choice, not the final production-memory plan.
+- Runtime numerical comparison has not executed on this machine because the current local AMD KHR pipeline creation path still reports a controlled structured-exception skip.
+
+### Next Step
+
+Continue the same shader/oracle expansion through hidden layers 1 and 0. Once all hidden layers are covered, compare the full KHR gradient layout against the scalar reference shape and then start replacing scalar per-sample accumulation with cooperative-matrix/subgroup reduction.

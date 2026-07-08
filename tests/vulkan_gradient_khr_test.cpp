@@ -29,6 +29,8 @@
 namespace {
 
 constexpr std::uint32_t kTrainCount = 3;
+using HiddenVector = std::array<float, nrc::kNnHiddenWidth>;
+using HiddenLayers = std::array<HiddenVector, nrc::kNnHiddenLayerCount>;
 
 struct SkipTest : std::runtime_error {
     using std::runtime_error::runtime_error;
@@ -148,68 +150,38 @@ std::vector<nrc::NrcTrainRecord> make_train_records() {
     return records;
 }
 
-void reference_forward_hidden_triplet_fp16(std::span<const float> weights,
-                                           const nrc::EncodedInput &input,
-                                           std::array<float, nrc::kNnHiddenWidth> &previousSourceHidden,
-                                           std::array<float, nrc::kNnHiddenWidth> &sourceHidden,
-                                           std::array<float, nrc::kNnHiddenWidth> &finalHidden) {
-    std::array<float, nrc::kNnHiddenWidth> src{};
-    std::array<float, nrc::kNnHiddenWidth> dst{};
+HiddenLayers reference_forward_hidden_layers_fp16(std::span<const float> weights,
+                                                  const nrc::EncodedInput &input) {
+    HiddenLayers hiddenLayers{};
+    HiddenVector src{};
     std::copy(input.begin(), input.end(), src.begin());
 
-    for (std::uint32_t layer = 0; layer < nrc::kNnHiddenLayerCount - 2u; ++layer) {
+    for (std::uint32_t layer = 0; layer < nrc::kNnHiddenLayerCount; ++layer) {
         const std::size_t offset = nrc::layer_weight_offset(layer);
         for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
             float value = 0.0f;
             for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
                 value += weights[offset + row * nrc::kNnHiddenWidth + col] * src[col];
             }
-            dst[row] = fp16_round(std::max(value, 0.0f));
+            hiddenLayers[layer][row] = fp16_round(std::max(value, 0.0f));
         }
-        src = dst;
+        src = hiddenLayers[layer];
     }
-    previousSourceHidden = src;
-
-    const std::size_t previousLayerOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 2u);
-    for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-        float value = 0.0f;
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            value += weights[previousLayerOffset + row * nrc::kNnHiddenWidth + col] * src[col];
-        }
-        dst[row] = fp16_round(std::max(value, 0.0f));
-    }
-    src = dst;
-    sourceHidden = src;
-
-    const std::size_t finalLayerOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 1u);
-    for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-        float value = 0.0f;
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-            value += weights[finalLayerOffset + row * nrc::kNnHiddenWidth + col] * src[col];
-        }
-        finalHidden[row] = fp16_round(std::max(value, 0.0f));
-    }
+    return hiddenLayers;
 }
 
 std::vector<float> make_expected_khr_groundwork_gradients(std::span<const float> gpuVisibleWeights,
                                                           const std::vector<nrc::NrcTrainRecord> &trainRecords) {
     std::vector<float> gradients(nrc::weight_count(), 0.0f);
-    const std::size_t previousLayerOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 2u);
-    const std::size_t finalLayerOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 1u);
+    constexpr std::uint32_t firstCoveredHiddenLayer = nrc::kNnHiddenLayerCount - 3u;
     const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
 
     for (std::uint32_t i = 0; i < kTrainCount; ++i) {
         nrc::EncodedInput encoded{};
         nrc::encode_input(unpack_test_input(trainRecords[i].packedInput), encoded);
 
-        std::array<float, nrc::kNnHiddenWidth> previousSourceHidden{};
-        std::array<float, nrc::kNnHiddenWidth> sourceHidden{};
-        std::array<float, nrc::kNnHiddenWidth> finalHidden{};
-        reference_forward_hidden_triplet_fp16(gpuVisibleWeights,
-                                             encoded,
-                                             previousSourceHidden,
-                                             sourceHidden,
-                                             finalHidden);
+        const HiddenLayers hiddenLayers = reference_forward_hidden_layers_fp16(gpuVisibleWeights, encoded);
+        const HiddenVector &finalHidden = hiddenLayers[nrc::kNnHiddenLayerCount - 1u];
 
         nrc::ReferenceOutput prediction{};
         for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
@@ -242,7 +214,7 @@ std::vector<float> make_expected_khr_groundwork_gradients(std::span<const float>
             }
         }
 
-        std::array<float, nrc::kNnHiddenWidth> dActivation{};
+        HiddenVector dActivation{};
         for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
             for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
                 dActivation[col] +=
@@ -250,29 +222,33 @@ std::vector<float> make_expected_khr_groundwork_gradients(std::span<const float>
             }
         }
 
-        for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-            const float dPreActivation = finalHidden[row] > 0.0f ? dActivation[row] : 0.0f;
-            for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-                gradients[finalLayerOffset + row * nrc::kNnHiddenWidth + col] +=
-                    dPreActivation * sourceHidden[col];
-            }
-        }
+        for (std::int32_t signedLayer = static_cast<std::int32_t>(nrc::kNnHiddenLayerCount) - 1;
+             signedLayer >= static_cast<std::int32_t>(firstCoveredHiddenLayer);
+             --signedLayer) {
+            const auto layer = static_cast<std::uint32_t>(signedLayer);
+            const std::size_t layerOffset = nrc::layer_weight_offset(layer);
+            const HiddenVector &activation = hiddenLayers[layer];
+            const HiddenVector &sourceActivation = hiddenLayers[layer - 1u];
 
-        std::array<float, nrc::kNnHiddenWidth> dSourceActivation{};
-        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
             for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-                const float dPreActivation = finalHidden[row] > 0.0f ? dActivation[row] : 0.0f;
-                dSourceActivation[col] +=
-                    gpuVisibleWeights[finalLayerOffset + row * nrc::kNnHiddenWidth + col] *
-                    dPreActivation;
+                const float dPreActivation = activation[row] > 0.0f ? dActivation[row] : 0.0f;
+                for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
+                    gradients[layerOffset + row * nrc::kNnHiddenWidth + col] +=
+                        dPreActivation * sourceActivation[col];
+                }
             }
-        }
 
-        for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
-            const float dPreActivation = sourceHidden[row] > 0.0f ? dSourceActivation[row] : 0.0f;
-            for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-                gradients[previousLayerOffset + row * nrc::kNnHiddenWidth + col] +=
-                    dPreActivation * previousSourceHidden[col];
+            if (layer > firstCoveredHiddenLayer) {
+                HiddenVector dSourceActivation{};
+                for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
+                    for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
+                        const float dPreActivation = activation[row] > 0.0f ? dActivation[row] : 0.0f;
+                        dSourceActivation[col] +=
+                            gpuVisibleWeights[layerOffset + row * nrc::kNnHiddenWidth + col] *
+                            dPreActivation;
+                    }
+                }
+                dActivation = dSourceActivation;
             }
         }
     }
@@ -875,18 +851,14 @@ int main(int argc, char **argv) {
 
         bool ok = true;
         std::uint32_t mismatchCount = 0;
-        const std::size_t previousLayerOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 2u);
-        const std::size_t finalLayerOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 1u);
+        const std::size_t firstCoveredHiddenOffset =
+            nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 3u);
         const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
         for (std::uint32_t i = 0; i < nrc::weight_count(); ++i) {
-            const bool previousHiddenWeight =
-                i >= previousLayerOffset && i < previousLayerOffset + nrc::hidden_layer_weight_count();
-            const bool finalHiddenWeight =
-                i >= finalLayerOffset && i < finalLayerOffset + nrc::hidden_layer_weight_count();
+            const bool coveredHiddenWeight = i >= firstCoveredHiddenOffset && i < outputOffset;
             const bool outputWeight =
                 i >= outputOffset && i < outputOffset + nrc::output_layer_weight_count();
-            const float expected =
-                previousHiddenWeight || finalHiddenWeight || outputWeight ? expectedGradients[i] : 0.0f;
+            const float expected = coveredHiddenWeight || outputWeight ? expectedGradients[i] : 0.0f;
             if (!close_enough(actualGradients[i], expected)) {
                 if (mismatchCount < 16u) {
                     std::cerr << "FAIL: gradient " << i
@@ -902,13 +874,9 @@ int main(int argc, char **argv) {
         }
 
         float maxGroundworkMagnitude = 0.0f;
-        for (std::uint32_t i = 0; i < nrc::hidden_layer_weight_count(); ++i) {
+        for (std::size_t i = firstCoveredHiddenOffset; i < outputOffset; ++i) {
             maxGroundworkMagnitude =
-                std::max(maxGroundworkMagnitude, std::fabs(actualGradients[previousLayerOffset + i]));
-        }
-        for (std::uint32_t i = 0; i < nrc::hidden_layer_weight_count(); ++i) {
-            maxGroundworkMagnitude =
-                std::max(maxGroundworkMagnitude, std::fabs(actualGradients[finalLayerOffset + i]));
+                std::max(maxGroundworkMagnitude, std::fabs(actualGradients[i]));
         }
         for (std::uint32_t i = 0; i < nrc::output_layer_weight_count(); ++i) {
             maxGroundworkMagnitude =

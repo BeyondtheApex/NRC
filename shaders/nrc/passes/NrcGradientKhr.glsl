@@ -83,10 +83,14 @@ void NrcGradientKhrMain() {
     }
 
     NrcKhrLoadInput(encoded);
-    for (uint layer = 0u; layer < NRC_NN_HIDDEN_LAYER_COUNT - 2u; ++layer) {
+    for (uint layer = 0u; layer < NRC_NN_HIDDEN_LAYER_COUNT - 3u; ++layer) {
         NrcKhrLoadHiddenWeights(layer);
         NrcKhrForwardHiddenRelu();
     }
+    NrcKhrStoreBackpropEarlierSourceActivations();
+
+    NrcKhrLoadHiddenWeights(NRC_NN_HIDDEN_LAYER_COUNT - 3u);
+    NrcKhrForwardHiddenRelu();
     NrcKhrStoreBackpropPreviousSourceActivations();
 
     NrcKhrLoadHiddenWeights(NRC_NN_HIDDEN_LAYER_COUNT - 2u);
@@ -109,12 +113,33 @@ void NrcGradientKhrMain() {
         NrcKhrOutputDerivative(prediction, target, dOutput);
     }
     NrcKhrAccumulateOutputDWeights(dOutput);
-    float dActivation[NRC_NN_HIDDEN_WIDTH];
-    NrcKhrPropagateOutputDActivation(dOutput, dActivation);
-    NrcKhrAccumulateFinalHiddenDWeights(dActivation);
-    float dSourceActivation[NRC_NN_HIDDEN_WIDTH];
-    NrcKhrPropagateFinalHiddenDActivation(dActivation, dSourceActivation);
-    NrcKhrAccumulatePreviousHiddenDWeights(dSourceActivation);
+
+    float dHidden4[NRC_NN_HIDDEN_WIDTH];
+    NrcKhrPropagateOutputDActivation(dOutput, dHidden4);
+    NrcKhrAccumulateHiddenDWeights(NRC_NN_HIDDEN_LAYER_COUNT - 1u,
+                                   NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE,
+                                   NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE,
+                                   dHidden4);
+
+    float dHidden3[NRC_NN_HIDDEN_WIDTH];
+    NrcKhrPropagateHiddenDActivation(NRC_NN_HIDDEN_LAYER_COUNT - 1u,
+                                     NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE,
+                                     dHidden4,
+                                     dHidden3);
+    NrcKhrAccumulateHiddenDWeights(NRC_NN_HIDDEN_LAYER_COUNT - 2u,
+                                   NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE,
+                                   NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE,
+                                   dHidden3);
+
+    float dHidden2[NRC_NN_HIDDEN_WIDTH];
+    NrcKhrPropagateHiddenDActivation(NRC_NN_HIDDEN_LAYER_COUNT - 2u,
+                                     NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE,
+                                     dHidden3,
+                                     dHidden2);
+    NrcKhrAccumulateHiddenDWeights(NRC_NN_HIDDEN_LAYER_COUNT - 3u,
+                                   NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE,
+                                   NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE,
+                                   dHidden2);
 }
 
 #endif

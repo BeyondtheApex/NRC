@@ -89,7 +89,8 @@
 #define NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE NRC_KHR_ACT_UVEC4_COUNT
 #define NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE (NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE + NRC_KHR_ACT_UVEC4_COUNT)
 #define NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE (NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE + NRC_KHR_ACT_UVEC4_COUNT)
-#define NRC_KHR_BACKPROP_ACT_COPY_SHARED_UVEC4_COUNT (NRC_KHR_ACT_UVEC4_COUNT * 4)
+#define NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE (NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE + NRC_KHR_ACT_UVEC4_COUNT)
+#define NRC_KHR_BACKPROP_ACT_COPY_SHARED_UVEC4_COUNT (NRC_KHR_ACT_UVEC4_COUNT * 5)
 #define NRC_KHR_BACKPROP_REDUCTION_SHARED_UVEC4_COUNT (NRC_KHR_WEIGHT_64_UVEC4_COUNT * NRC_KHR_SUBGROUP_COUNT)
 #if NRC_KHR_BACKPROP_REDUCTION_SHARED_UVEC4_COUNT > NRC_KHR_BACKPROP_ACT_COPY_SHARED_UVEC4_COUNT
 #define NRC_KHR_BACKPROP_SHARED_UVEC4_COUNT NRC_KHR_BACKPROP_REDUCTION_SHARED_UVEC4_COUNT
@@ -292,6 +293,10 @@ void NrcKhrStoreBackpropPreviousSourceActivations() {
     NrcKhrStoreBackpropActivationsAt(NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE);
 }
 
+void NrcKhrStoreBackpropEarlierSourceActivations() {
+    NrcKhrStoreBackpropActivationsAt(NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE);
+}
+
 float NrcKhrReadBackpropActivationFrom(uint baseOffset, uint sampleIndex, uint feature) {
     uint base = baseOffset +
                 sampleIndex * NRC_ENCODED_INPUT_UVEC4_COUNT;
@@ -313,6 +318,12 @@ float NrcKhrReadBackpropSourceActivation(uint sampleIndex, uint feature) {
 
 float NrcKhrReadBackpropPreviousSourceActivation(uint sampleIndex, uint feature) {
     return NrcKhrReadBackpropActivationFrom(NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE,
+                                            sampleIndex,
+                                            feature);
+}
+
+float NrcKhrReadBackpropEarlierSourceActivation(uint sampleIndex, uint feature) {
+    return NrcKhrReadBackpropActivationFrom(NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE,
                                             sampleIndex,
                                             feature);
 }
@@ -390,28 +401,6 @@ void NrcKhrAccumulateHiddenDWeights(uint layer,
                                     dPreActivation * srcActivation);
         }
     }
-}
-
-void NrcKhrPropagateFinalHiddenDActivation(float dActivation[NRC_NN_HIDDEN_WIDTH],
-                                           out float dSourceActivation[NRC_NN_HIDDEN_WIDTH]) {
-    NrcKhrPropagateHiddenDActivation(NRC_NN_HIDDEN_LAYER_COUNT - 1u,
-                                     NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE,
-                                     dActivation,
-                                     dSourceActivation);
-}
-
-void NrcKhrAccumulateFinalHiddenDWeights(float dActivation[NRC_NN_HIDDEN_WIDTH]) {
-    NrcKhrAccumulateHiddenDWeights(NRC_NN_HIDDEN_LAYER_COUNT - 1u,
-                                   NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE,
-                                   NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE,
-                                   dActivation);
-}
-
-void NrcKhrAccumulatePreviousHiddenDWeights(float dActivation[NRC_NN_HIDDEN_WIDTH]) {
-    NrcKhrAccumulateHiddenDWeights(NRC_NN_HIDDEN_LAYER_COUNT - 2u,
-                                   NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE,
-                                   NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE,
-                                   dActivation);
 }
 #endif
 
