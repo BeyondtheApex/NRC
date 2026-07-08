@@ -15,6 +15,7 @@ struct VulkanDeviceCapabilities {
     bool shaderBufferFloat32AtomicAdd = false;
     bool subgroupSizeControl = false;
     bool computeFullSubgroups = false;
+    bool subgroupArithmetic = false;
     bool khrCooperativeMatrix = false;
     std::vector<std::uint32_t> supportedSubgroupSizes;
     std::vector<CooperativeMatrixCapability> cooperativeMatrices;

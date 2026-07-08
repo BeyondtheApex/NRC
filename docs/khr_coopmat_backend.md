@@ -98,7 +98,7 @@ The test:
 
 - queries real Vulkan device capabilities;
 - selects an implemented KHR training profile with `requireTraining = true`;
-- creates a device with KHR cooperative matrix, fp32 storage-buffer atomic add, shader float16, storage buffer 16-bit access, subgroup size control, and full compute subgroup features;
+- creates a device with KHR cooperative matrix, fp32 storage-buffer atomic add, shader float16, storage buffer 16-bit access, subgroup size control, and full compute subgroup features, and requires subgroup arithmetic support reported by subgroup properties;
 - creates the KHR gradient pipeline through `nrc::vulkan::create_profile_compute_pipeline`;
 - dispatches a small train-record batch through `NrcGradientKhr.glsl`;
 - compares every hidden/output gradient region against `nrc::reference_backward_khr_fp16` if pipeline creation and dispatch succeed.
@@ -119,3 +119,5 @@ Profiles carry an `implemented` flag. The implemented KHR inference profiles are
 `choose_profile` still prefers the M16 profiles when the device reports both M16 and M8 support. M8 is selected when it is the first implemented matching profile for the reported matrix properties and subgroup size.
 
 After selecting a profile, integrations should call `nrc::find_profile_shader_config` and use the returned workgroup, subgroup, and cooperative-matrix dimensions to select or compile the matching shader variant. The Vulkan KHR dispatch test uses this path to choose between SG32, SG16, and M8/SG32 SPIR-V files, then uses `nrc::vulkan::create_profile_compute_pipeline` for profile-specific pipeline creation.
+
+Training profile selection additionally requires subgroup arithmetic support because the current KHR gradient helpers use `subgroupAdd` for hidden/output `dW` reductions. Inference-only selection can pass `ProfileRequirements{.requireTraining = false}` and does not require subgroup arithmetic or fp32 buffer atomic add.

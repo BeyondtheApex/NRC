@@ -27,6 +27,7 @@ Profile selection proves that a backend is a valid candidate for the reported ca
 - `UnsupportedBackend`
 - `MissingRequiredFeature`
 - `MissingTrainingAtomicFloat`
+- `MissingSubgroupArithmetic`
 - `MissingSubgroupSize`
 - `MissingCooperativeMatrixShape`
 
@@ -44,6 +45,7 @@ These diagnostics are capability-level only. They do not prove that a Vulkan dev
 - required subgroup size;
 - cooperative matrix `M`, `N`, and `K`;
 - whether full subgroups and subgroup-size control are required.
+- whether the training shader path requires subgroup arithmetic.
 
 For KHR cooperative matrix profiles, integrations should use these fields to select or compile shader variants with:
 
@@ -68,6 +70,7 @@ Production KHR profiles require:
 - Storage buffer 16-bit access.
 - Subgroup size control.
 - Full compute subgroups.
+- Subgroup arithmetic when training is required.
 - Matching subgroup size.
 - Matching FP16 subgroup cooperative matrix shape.
 - Float32 buffer atomic add when training is required.

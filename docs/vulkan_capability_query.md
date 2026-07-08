@@ -28,7 +28,15 @@ The function pointer is optional, but passing it explicitly is recommended becau
 - `shaderBufferFloat32AtomicAdd`
 - `subgroupSizeControl`
 - `computeFullSubgroups`
+- `subgroupArithmetic`
 - `VK_KHR_cooperative_matrix`
+
+`subgroupArithmetic` is translated from
+`VkPhysicalDeviceSubgroupProperties::supportedOperations &
+VK_SUBGROUP_FEATURE_ARITHMETIC_BIT`. It is required by NRC training profiles
+because the current KHR gradient path uses subgroup reductions. KHR inference
+selection can still be requested with `ProfileRequirements::requireTraining =
+false`.
 
 ## Cooperative Matrix Translation
 

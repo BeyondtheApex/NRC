@@ -3927,3 +3927,60 @@ This helper covers hidden-layer 3/2/1 from saved source activation snapshots and
 ### Next Step
 
 Start designing the cooperative-matrix reduction step or introduce a validation path that can run the KHR gradient numerically on a driver that creates the pipeline successfully. The shader now has full hidden/output subgroup-gradient coverage, so the next meaningful algorithmic improvement is cooperative-matrix accumulation rather than another scalar/subgroup loop reshuffle.
+
+## 2026-07-09 - Milestone 60 KHR Subgroup Arithmetic Capability Gate
+
+### Implemented
+
+- Added renderer-neutral `subgroupArithmetic` capability reporting to `nrc::DeviceCapabilitiesView`.
+- Added `nrc::ProfileSupportStatus::MissingSubgroupArithmetic` for precise profile diagnostics.
+- Added `ProfileShaderConfig::requireSubgroupArithmeticForTraining` so integrations can see that KHR training shader variants depend on subgroup arithmetic.
+- Updated Vulkan capability translation to set `subgroupArithmetic` from `VkPhysicalDeviceSubgroupProperties::supportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT`.
+- Updated profile selection so default KHR training profiles reject devices without subgroup arithmetic, while inference-only selection with `requireTraining = false` remains allowed.
+- Updated:
+  - `docs/profile_and_layout.md`
+  - `docs/vulkan_capability_query.md`
+  - `docs/khr_coopmat_backend.md`
+
+### Behavior
+
+The KHR gradient shader now has a matching host-side capability contract for its `subgroupAdd` reductions. This keeps shader compilation, profile selection, and Vulkan device capability reporting in sync:
+
+```text
+training KHR profile:
+    requires fp32 buffer atomic add
+    requires subgroup arithmetic
+
+inference-only KHR profile:
+    does not require fp32 buffer atomic add
+    does not require subgroup arithmetic
+```
+
+The capability is treated as a subgroup operation property rather than a device feature. Device creation still enables the existing KHR cooperative matrix, float16, 16-bit storage, subgroup size control, and full subgroup features.
+
+### Validation
+
+- Targeted capability/profile build succeeded:
+  - `cmake --build build --config Debug --target nrc_profile_layout_test nrc_vulkan_capabilities_test`
+- Targeted capability/profile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_profile_layout_test|nrc_vulkan_capabilities_test" --output-on-failure -V`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `33/33 tests passed`
+- Targeted KHR runtime tests still pass as controlled skips on the local AMD driver:
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR cooperative matrix shader`
+
+### Current Limitations
+
+- All hidden/output `dW` regions still use subgroup arithmetic rather than cooperative-matrix reductions.
+- The current training correctness path still depends on fp32 storage-buffer atomic add.
+- Runtime numerical comparison for the KHR shaders still did not execute on this machine because the local AMD KHR pipeline creation path reports controlled structured-exception skips.
+- Capability/profile support still proves only that a device is a candidate. Integrations should keep strict shader module, pipeline, and numerical validation before enabling a production KHR NRC path.
+
+### Next Step
+
+Start designing the cooperative-matrix reduction step or add a validation route on hardware/driver combinations that can create the KHR pipelines successfully. The capability contract now reflects the subgroup-gradient implementation, so the next algorithmic improvement can focus on reducing atomic pressure and replacing subgroup reductions with cooperative-matrix accumulation where it is actually beneficial.

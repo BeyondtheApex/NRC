@@ -69,6 +69,7 @@ constexpr std::array<ProfileShaderConfig, 4> kProfileShaderConfigs = {{
         16,
         true,
         true,
+        true,
     },
     {
         ProfileId::KhrFp16M16N16K16Sg16Wg128,
@@ -79,6 +80,7 @@ constexpr std::array<ProfileShaderConfig, 4> kProfileShaderConfigs = {{
         16,
         16,
         16,
+        true,
         true,
         true,
     },
@@ -93,6 +95,7 @@ constexpr std::array<ProfileShaderConfig, 4> kProfileShaderConfigs = {{
         16,
         true,
         true,
+        true,
     },
     {
         ProfileId::ScalarReferenceWg64,
@@ -103,6 +106,7 @@ constexpr std::array<ProfileShaderConfig, 4> kProfileShaderConfigs = {{
         0,
         0,
         0,
+        false,
         false,
         false,
     },
@@ -212,6 +216,10 @@ ProfileSupportReport evaluate_profile_support(const DeviceCapabilitiesView &capa
 
     if (requirements.requireTraining && !capabilities.shaderBufferFloat32AtomicAdd) {
         return make_report(profile, ProfileSupportStatus::MissingTrainingAtomicFloat);
+    }
+
+    if (requirements.requireTraining && !capabilities.subgroupArithmetic) {
+        return make_report(profile, ProfileSupportStatus::MissingSubgroupArithmetic);
     }
 
     if (!has_subgroup_size(capabilities.supportedSubgroupSizes, profile.requiredSubgroupSize)) {

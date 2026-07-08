@@ -47,6 +47,7 @@ struct DeviceCapabilitiesView {
     bool shaderBufferFloat32AtomicAdd = false;
     bool subgroupSizeControl = false;
     bool computeFullSubgroups = false;
+    bool subgroupArithmetic = false;
     bool khrCooperativeMatrix = false;
     std::span<const std::uint32_t> supportedSubgroupSizes;
     std::span<const CooperativeMatrixCapability> cooperativeMatrices;
@@ -64,6 +65,7 @@ enum class ProfileSupportStatus : std::uint8_t {
     UnsupportedBackend,
     MissingRequiredFeature,
     MissingTrainingAtomicFloat,
+    MissingSubgroupArithmetic,
     MissingSubgroupSize,
     MissingCooperativeMatrixShape,
 };
@@ -92,6 +94,7 @@ struct ProfileShaderConfig {
     std::uint32_t cooperativeMatrixK = 0;
     bool requireFullSubgroups = false;
     bool requireSubgroupSizeControl = false;
+    bool requireSubgroupArithmeticForTraining = false;
 };
 
 struct ProfileSupportReport {

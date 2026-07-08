@@ -46,6 +46,7 @@ DeviceCapabilitiesView VulkanDeviceCapabilities::view() const {
         shaderBufferFloat32AtomicAdd,
         subgroupSizeControl,
         computeFullSubgroups,
+        subgroupArithmetic,
         khrCooperativeMatrix,
         supportedSubgroupSizes,
         cooperativeMatrices,
@@ -169,6 +170,8 @@ VulkanDeviceCapabilities query_device_capabilities(
         subgroupSizeControlProperties.minSubgroupSize,
         subgroupSizeControlProperties.maxSubgroupSize,
         subgroupProperties.subgroupSize);
+    out.subgroupArithmetic =
+        (subgroupProperties.supportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) != 0;
 
     if (out.khrCooperativeMatrix && getCooperativeMatrixProperties == nullptr) {
         getCooperativeMatrixProperties =

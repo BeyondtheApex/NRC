@@ -210,6 +210,7 @@ int main() {
     validCapabilities.shaderBufferFloat32AtomicAdd = true;
     validCapabilities.subgroupSizeControl = true;
     validCapabilities.computeFullSubgroups = true;
+    validCapabilities.subgroupArithmetic = true;
     validCapabilities.khrCooperativeMatrix = true;
     validCapabilities.supportedSubgroupSizes = {32};
     validCapabilities.cooperativeMatrices = {{
@@ -230,6 +231,9 @@ int main() {
         nrc::find_profile(nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128);
     ok &= require(khrProfile != nullptr, "find KHR profile for Vulkan validation");
     if (khrProfile != nullptr) {
+        ok &= require(validCapabilities.view().subgroupArithmetic,
+                      "Vulkan capabilities view carries subgroup arithmetic support");
+
         const nrc::vulkan::VulkanProfileValidationReport report =
             nrc::vulkan::evaluate_vulkan_profile_validation(validCapabilities, {}, *khrProfile);
         ok &= require(report.usable, "Vulkan validation report is usable for supported profile");
@@ -386,6 +390,23 @@ int main() {
         ok &= require(failedNumerical.status ==
                           nrc::vulkan::VulkanProfileValidationStatus::NumericalValidationFailed,
                       "Vulkan validation reports failed numerical validation");
+
+        nrc::vulkan::VulkanDeviceCapabilities missingSubgroupArithmeticCapabilities =
+            validCapabilities;
+        missingSubgroupArithmeticCapabilities.subgroupArithmetic = false;
+        const nrc::vulkan::VulkanProfileValidationReport missingSubgroupArithmetic =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                missingSubgroupArithmeticCapabilities,
+                {},
+                *khrProfile);
+        ok &= require(!missingSubgroupArithmetic.usable,
+                      "Vulkan validation rejects missing subgroup arithmetic");
+        ok &= require(missingSubgroupArithmetic.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::ProfileNotSupported,
+                      "Vulkan validation reports unsupported missing subgroup arithmetic profile");
+        ok &= require(missingSubgroupArithmetic.profileSupport.status ==
+                          nrc::ProfileSupportStatus::MissingSubgroupArithmetic,
+                      "Vulkan validation carries missing subgroup arithmetic status");
     }
 
     nrc::vulkan::VulkanDeviceCapabilities emptyCapabilities{};

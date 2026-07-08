@@ -66,6 +66,7 @@ int main() {
         true,
         true,
         true,
+        true,
         sg32,
         mat16,
     };
@@ -96,6 +97,7 @@ int main() {
         true,
         true,
         true,
+        true,
         sg16,
         mat16,
     };
@@ -107,6 +109,7 @@ int main() {
         true,
         true,
         false,
+        true,
         true,
         true,
         true,
@@ -134,8 +137,33 @@ int main() {
         ok &= require(inferenceOnlyReport.status == nrc::ProfileSupportStatus::Supported,
                       "support report records inference-only support");
 
+        const nrc::DeviceCapabilitiesView noSubgroupArithmetic{
+            true,
+            true,
+            true,
+            true,
+            true,
+            false,
+            true,
+            sg32,
+            mat16,
+        };
+        ok &= require(nrc::choose_profile(noSubgroupArithmetic) == nrc::ProfileId::None,
+                      "full training profile requires subgroup arithmetic");
+        ok &= require(nrc::choose_profile(noSubgroupArithmetic, {.requireTraining = false}) ==
+                          nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128,
+                      "inference-only profile can skip subgroup arithmetic");
+        const nrc::ProfileSupportReport subgroupArithmeticReport =
+            nrc::evaluate_profile_support(noSubgroupArithmetic, {}, *sg32Profile);
+        ok &= require(!subgroupArithmeticReport.supported,
+                      "support report rejects missing subgroup arithmetic");
+        ok &= require(subgroupArithmeticReport.status ==
+                          nrc::ProfileSupportStatus::MissingSubgroupArithmetic,
+                      "support report records missing subgroup arithmetic");
+
         const nrc::DeviceCapabilitiesView missingFeature{
             false,
+            true,
             true,
             true,
             true,
@@ -158,6 +186,7 @@ int main() {
             true,
             true,
             true,
+            true,
             sg64,
             mat16,
         };
@@ -169,6 +198,7 @@ int main() {
 
         const std::array<nrc::CooperativeMatrixCapability, 0> noMatrices{};
         const nrc::DeviceCapabilitiesView missingMatrix{
+            true,
             true,
             true,
             true,
@@ -199,6 +229,7 @@ int main() {
         },
     }};
     const nrc::DeviceCapabilitiesView capsM8Only{
+        true,
         true,
         true,
         true,
@@ -297,6 +328,8 @@ int main() {
             ok &= require(config->requireFullSubgroups, "KHR shader config requires full subgroups");
             ok &= require(config->requireSubgroupSizeControl,
                           "KHR shader config requires subgroup size control");
+            ok &= require(config->requireSubgroupArithmeticForTraining,
+                          "KHR shader config requires subgroup arithmetic for training");
             ok &= require(std::strcmp(config->shaderHeader,
                                       "nrc/backend/khr_coopmat/NrcNNKhr.glsl") == 0,
                           "KHR shader config header path");
@@ -310,6 +343,8 @@ int main() {
                           "scalar shader config does not require full subgroups");
             ok &= require(!config->requireSubgroupSizeControl,
                           "scalar shader config does not require subgroup size control");
+            ok &= require(!config->requireSubgroupArithmeticForTraining,
+                          "scalar shader config does not require subgroup arithmetic");
         }
     }
 
