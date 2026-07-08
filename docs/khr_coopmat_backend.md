@@ -72,6 +72,8 @@ The optional output-coopmat helper restores the fp32 shared output derivative ca
 
 `nrc::compute_khr_shader_shared_memory_layout` mirrors the backend's shared-memory constants on the host side. The current KHR backprop layout allocates 6144 `uvec4` values, or 98304 bytes, for the active tile, six activation-sized regions, and reduction scratch. `docs/khr_shared_memory_layout.md` records the per-profile scratch sizes and the hidden dW partial-storage constraint.
 
+Training profile selection now requires device `maxComputeSharedMemorySize` to meet that 98304-byte allocation. Inference-only selection can still be requested without the training shared-memory requirement.
+
 These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support, gradient correctness, or training performance.
 
 ## Runtime Dispatch Test

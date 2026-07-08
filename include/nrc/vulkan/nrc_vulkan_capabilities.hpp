@@ -19,6 +19,7 @@ struct VulkanDeviceCapabilities {
     bool khrCooperativeMatrix = false;
     std::vector<std::uint32_t> supportedSubgroupSizes;
     std::vector<CooperativeMatrixCapability> cooperativeMatrices;
+    std::uint32_t maxComputeSharedMemorySize = 0;
 
     DeviceCapabilitiesView view() const;
 };

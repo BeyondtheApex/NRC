@@ -51,6 +51,7 @@ struct DeviceCapabilitiesView {
     bool khrCooperativeMatrix = false;
     std::span<const std::uint32_t> supportedSubgroupSizes;
     std::span<const CooperativeMatrixCapability> cooperativeMatrices;
+    std::uint32_t maxComputeSharedMemorySize = 0;
 };
 
 struct ProfileRequirements {
@@ -68,6 +69,7 @@ enum class ProfileSupportStatus : std::uint8_t {
     MissingSubgroupArithmetic,
     MissingSubgroupSize,
     MissingCooperativeMatrixShape,
+    MissingSharedMemory,
 };
 
 struct Profile {

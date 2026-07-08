@@ -30,6 +30,7 @@ Profile selection proves that a backend is a valid candidate for the reported ca
 - `MissingSubgroupArithmetic`
 - `MissingSubgroupSize`
 - `MissingCooperativeMatrixShape`
+- `MissingSharedMemory`
 
 The report also carries the profile id, profile name, and final `supported` bool. This is intended for integration logs and user-facing diagnostics when a renderer queries matrix support across different vendors.
 
@@ -76,6 +77,9 @@ Production KHR profiles require:
 - Matching subgroup size.
 - Matching FP16 subgroup cooperative matrix shape.
 - Float32 buffer atomic add when training is required.
+- `maxComputeSharedMemorySize` large enough for the KHR backprop shared-memory layout when training is required.
+
+The current KHR training layout requires 98304 bytes of compute shared memory. This requirement is skipped when callers choose with `ProfileRequirements::requireTraining = false`, because the inference shader does not use the backprop shared allocation.
 
 ## VkNRC-Compatible Layout
 

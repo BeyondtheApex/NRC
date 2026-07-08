@@ -30,6 +30,7 @@ The function pointer is optional, but passing it explicitly is recommended becau
 - `computeFullSubgroups`
 - `subgroupArithmetic`
 - `VK_KHR_cooperative_matrix`
+- `maxComputeSharedMemorySize`
 
 `subgroupArithmetic` is translated from
 `VkPhysicalDeviceSubgroupProperties::supportedOperations &
@@ -37,6 +38,12 @@ VK_SUBGROUP_FEATURE_ARITHMETIC_BIT`. It is required by NRC training profiles
 because the current KHR gradient path uses subgroup reductions. KHR inference
 selection can still be requested with `ProfileRequirements::requireTraining =
 false`.
+
+`maxComputeSharedMemorySize` is read from
+`VkPhysicalDeviceProperties::limits.maxComputeSharedMemorySize`. Current KHR
+training profiles compare it against the host-side KHR shader shared-memory
+layout. The active backprop layout requires 98304 bytes, while inference-only
+selection does not require that training allocation.
 
 ## Cooperative Matrix Translation
 

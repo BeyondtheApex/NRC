@@ -22,6 +22,7 @@ bool require(bool condition, const char *message) {
 
 int main() {
     bool ok = true;
+    constexpr std::uint32_t kRequiredKhrTrainingSharedBytes = 98304u;
 
     ok &= require(nrc::vulkan::map_component_type(VK_COMPONENT_TYPE_FLOAT16_KHR) ==
                       nrc::ComponentType::Float16,
@@ -226,6 +227,7 @@ int main() {
             true,
         },
     }};
+    validCapabilities.maxComputeSharedMemorySize = kRequiredKhrTrainingSharedBytes;
 
     const nrc::Profile *khrProfile =
         nrc::find_profile(nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128);
@@ -233,6 +235,9 @@ int main() {
     if (khrProfile != nullptr) {
         ok &= require(validCapabilities.view().subgroupArithmetic,
                       "Vulkan capabilities view carries subgroup arithmetic support");
+        ok &= require(validCapabilities.view().maxComputeSharedMemorySize ==
+                          kRequiredKhrTrainingSharedBytes,
+                      "Vulkan capabilities view carries compute shared memory limit");
 
         const nrc::vulkan::VulkanProfileValidationReport report =
             nrc::vulkan::evaluate_vulkan_profile_validation(validCapabilities, {}, *khrProfile);
@@ -407,6 +412,24 @@ int main() {
         ok &= require(missingSubgroupArithmetic.profileSupport.status ==
                           nrc::ProfileSupportStatus::MissingSubgroupArithmetic,
                       "Vulkan validation carries missing subgroup arithmetic status");
+
+        nrc::vulkan::VulkanDeviceCapabilities missingSharedMemoryCapabilities =
+            validCapabilities;
+        missingSharedMemoryCapabilities.maxComputeSharedMemorySize =
+            kRequiredKhrTrainingSharedBytes - 1u;
+        const nrc::vulkan::VulkanProfileValidationReport missingSharedMemory =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                missingSharedMemoryCapabilities,
+                {},
+                *khrProfile);
+        ok &= require(!missingSharedMemory.usable,
+                      "Vulkan validation rejects insufficient shared memory");
+        ok &= require(missingSharedMemory.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::ProfileNotSupported,
+                      "Vulkan validation reports unsupported insufficient shared memory profile");
+        ok &= require(missingSharedMemory.profileSupport.status ==
+                          nrc::ProfileSupportStatus::MissingSharedMemory,
+                      "Vulkan validation carries missing shared memory status");
     }
 
     nrc::vulkan::VulkanDeviceCapabilities emptyCapabilities{};

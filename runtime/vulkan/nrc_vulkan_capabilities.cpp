@@ -50,6 +50,7 @@ DeviceCapabilitiesView VulkanDeviceCapabilities::view() const {
         khrCooperativeMatrix,
         supportedSubgroupSizes,
         cooperativeMatrices,
+        maxComputeSharedMemorySize,
     };
 }
 
@@ -165,6 +166,8 @@ VulkanDeviceCapabilities query_device_capabilities(
     properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     properties.pNext = &cooperativeMatrixDeviceProperties;
     vkGetPhysicalDeviceProperties2(physicalDevice, &properties);
+    out.maxComputeSharedMemorySize =
+        properties.properties.limits.maxComputeSharedMemorySize;
 
     out.supportedSubgroupSizes = enumerate_subgroup_sizes(
         subgroupSizeControlProperties.minSubgroupSize,

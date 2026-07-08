@@ -23,6 +23,7 @@ bool require(bool condition, const char *message) {
 
 int main() {
     bool ok = true;
+    constexpr std::uint32_t kRequiredKhrTrainingSharedBytes = 98304u;
 
     ok &= require(nrc::weight_count() == 20672u, "VkNRC-compatible weight count");
     ok &= require(nrc::PackedInputLayout::size == 16u, "packed input layout size");
@@ -70,6 +71,7 @@ int main() {
         true,
         sg32,
         mat16,
+        kRequiredKhrTrainingSharedBytes,
     };
     ok &= require(nrc::choose_profile(caps16) ==
                       nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128,
@@ -88,6 +90,23 @@ int main() {
                       "support report records profile id");
         ok &= require(std::strcmp(report.profileName, sg32Profile->name) == 0,
                       "support report records profile name");
+
+        nrc::DeviceCapabilitiesView insufficientSharedMemory = caps16;
+        insufficientSharedMemory.maxComputeSharedMemorySize =
+            kRequiredKhrTrainingSharedBytes - 1u;
+        ok &= require(nrc::choose_profile(insufficientSharedMemory) == nrc::ProfileId::None,
+                      "full training profile requires enough shared memory");
+        ok &= require(nrc::choose_profile(insufficientSharedMemory,
+                                          {.requireTraining = false}) ==
+                          nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128,
+                      "inference-only profile skips training shared memory requirement");
+        const nrc::ProfileSupportReport sharedMemoryReport =
+            nrc::evaluate_profile_support(insufficientSharedMemory, {}, *sg32Profile);
+        ok &= require(!sharedMemoryReport.supported,
+                      "support report rejects insufficient shared memory");
+        ok &= require(sharedMemoryReport.status ==
+                          nrc::ProfileSupportStatus::MissingSharedMemory,
+                      "support report records missing shared memory");
     }
 
     const std::array<std::uint32_t, 1> sg16 = {16};
@@ -101,6 +120,7 @@ int main() {
         true,
         sg16,
         mat16,
+        kRequiredKhrTrainingSharedBytes,
     };
     ok &= require(nrc::choose_profile(caps16Sg16) ==
                       nrc::ProfileId::KhrFp16M16N16K16Sg16Wg128,
@@ -239,6 +259,7 @@ int main() {
         true,
         sg32,
         mat8,
+        kRequiredKhrTrainingSharedBytes,
     };
     ok &= require(nrc::choose_profile(capsM8Only) ==
                       nrc::ProfileId::KhrFp16M8N16K16Sg32Wg128,

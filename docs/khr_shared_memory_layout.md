@@ -53,7 +53,7 @@ The current KHR backprop shader therefore allocates:
 6144 uvec4 = 98304 bytes
 ```
 
-This is only a shader layout fact. Vulkan integrations still need device-level validation because `maxComputeSharedMemorySize` is device-dependent.
+Vulkan capability query reports `maxComputeSharedMemorySize`, and KHR training profile support checks this value against the layout's `sharedBytes`. Inference-only profile selection skips this training-only backprop allocation.
 
 ## Scratch Regions
 

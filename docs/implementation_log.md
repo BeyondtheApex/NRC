@@ -4274,3 +4274,69 @@ This makes the hidden-layer cooperative-matrix dW lifetime issue test-visible in
 ### Next Step
 
 Promote shared-memory size into Vulkan capabilities/profile support so KHR training profiles can reject devices that cannot support the current 98304-byte backprop shader allocation. After that, use the layout model to design a hidden-layer cooperative-matrix dW path that is valid for SG32, SG16, and M8/SG32 rather than relying on a single offset-zero partial storage assumption.
+
+## 2026-07-09 - Milestone 65 KHR Training Shared-Memory Capability Gate
+
+### Implemented
+
+- Added `DeviceCapabilitiesView::maxComputeSharedMemorySize`.
+- Added `VulkanDeviceCapabilities::maxComputeSharedMemorySize`.
+- Updated `VulkanDeviceCapabilities::view()` to carry the shared-memory limit into renderer-neutral profile selection.
+- Updated `nrc::vulkan::query_device_capabilities` to read `VkPhysicalDeviceProperties::limits.maxComputeSharedMemorySize`.
+- Added `ProfileSupportStatus::MissingSharedMemory`.
+- Updated `nrc::evaluate_profile_support` so KHR training profile support compares `maxComputeSharedMemorySize` against `compute_khr_shader_shared_memory_layout(config).sharedBytes`.
+- Kept the shared-memory gate training-specific:
+  - default `ProfileRequirements::requireTraining = true` requires the current 98304-byte KHR backprop allocation;
+  - `ProfileRequirements::requireTraining = false` skips this training-only allocation so KHR inference profile selection is not rejected by backprop shared-memory limits.
+- Extended `tests/profile_layout_test.cpp` to validate:
+  - supported KHR profiles provide the 98304-byte shared-memory capability;
+  - insufficient shared memory rejects full training profile selection;
+  - inference-only profile selection still works with the same low shared-memory value;
+  - the support report records `MissingSharedMemory`.
+- Extended `tests/vulkan_capabilities_test.cpp` to validate:
+  - `VulkanDeviceCapabilities::view()` carries `maxComputeSharedMemorySize`;
+  - Vulkan profile validation propagates `MissingSharedMemory` as `ProfileNotSupported`.
+- Updated:
+  - `docs/profile_and_layout.md`
+  - `docs/vulkan_capability_query.md`
+  - `docs/khr_shared_memory_layout.md`
+  - `docs/khr_coopmat_backend.md`
+
+### Behavior
+
+The active KHR training profile contract now includes:
+
+```text
+maxComputeSharedMemorySize >= 98304 bytes
+```
+
+This value comes from the host-side KHR shader layout model rather than a duplicated literal in the profile logic. That keeps future shared-memory layout changes visible to capability selection and tests.
+
+The check runs after required feature, training atomic, subgroup arithmetic, subgroup size, and cooperative-matrix shape checks. This preserves more specific diagnostics for devices that are missing an earlier prerequisite.
+
+### Validation
+
+- Targeted profile/layout build succeeded:
+  - `cmake --build build --config Debug --target nrc_profile_layout_test`
+- Targeted Vulkan capabilities build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_capabilities_test`
+- Targeted tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_profile_layout_test|nrc_vulkan_capabilities_test" --output-on-failure -V`
+- Targeted test result:
+  - `2/2 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `37/37 tests passed`
+
+### Current Limitations
+
+- The capability gate only checks the current fixed KHR backprop shared-memory allocation. Future profile variants with smaller/larger shared layouts need to flow through the same host layout model.
+- Hidden-layer cooperative-matrix dW is still not implemented. The shared-memory gate prevents unsupported training profiles, but it does not solve the SG16 hidden dW partial-storage lifetime issue.
+- Runtime numerical validation for KHR cooperative-matrix pipelines is still driver-gated on the current local AMD path.
+
+### Next Step
+
+Use the shared-memory layout model to design the hidden-layer cooperative-matrix dW memory plan. The design should choose a stable lifetime/order strategy for SG32, SG16, and M8/SG32 before adding shader code, because the naive offset-zero hidden partial storage would overwrite activation snapshots for SG16.

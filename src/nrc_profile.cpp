@@ -1,5 +1,7 @@
 #include "nrc/nrc_profile.hpp"
 
+#include "nrc/nrc_khr_shader_layout.hpp"
+
 #include <array>
 
 namespace nrc {
@@ -138,6 +140,17 @@ bool has_matrix(const DeviceCapabilitiesView &capabilities, const Profile &profi
     return false;
 }
 
+std::uint32_t required_training_shared_memory_bytes(const Profile &profile) {
+    const ProfileShaderConfig *config = find_profile_shader_config(profile.id);
+    if (config == nullptr || config->backend != BackendKind::KhrCooperativeMatrix) {
+        return 0;
+    }
+
+    const KhrShaderSharedMemoryLayout layout =
+        compute_khr_shader_shared_memory_layout(*config);
+    return layout.valid ? layout.sharedBytes : 0;
+}
+
 bool has_required_feature_set(const DeviceCapabilitiesView &capabilities) {
     return capabilities.khrCooperativeMatrix &&
            capabilities.shaderFloat16 &&
@@ -228,6 +241,15 @@ ProfileSupportReport evaluate_profile_support(const DeviceCapabilitiesView &capa
 
     if (!has_matrix(capabilities, profile)) {
         return make_report(profile, ProfileSupportStatus::MissingCooperativeMatrixShape);
+    }
+
+    if (requirements.requireTraining) {
+        const std::uint32_t requiredSharedMemoryBytes =
+            required_training_shared_memory_bytes(profile);
+        if (requiredSharedMemoryBytes > 0 &&
+            capabilities.maxComputeSharedMemorySize < requiredSharedMemoryBytes) {
+            return make_report(profile, ProfileSupportStatus::MissingSharedMemory);
+        }
     }
 
     return make_report(profile, ProfileSupportStatus::Supported);
