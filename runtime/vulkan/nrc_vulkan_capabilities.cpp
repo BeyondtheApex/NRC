@@ -25,6 +25,18 @@ bool has_extension(VkPhysicalDevice physicalDevice, const char *name) {
     });
 }
 
+bool is_failed(VulkanValidationStepStatus status) {
+    return status == VulkanValidationStepStatus::Failed;
+}
+
+bool is_skipped(VulkanValidationStepStatus status) {
+    return status == VulkanValidationStepStatus::Skipped;
+}
+
+bool is_not_run(VulkanValidationStepStatus status) {
+    return status == VulkanValidationStepStatus::NotRun;
+}
+
 } // namespace
 
 DeviceCapabilitiesView VulkanDeviceCapabilities::view() const {
@@ -186,6 +198,68 @@ VulkanDeviceCapabilities query_device_capabilities(
     }
 
     return out;
+}
+
+VulkanProfileValidationReport evaluate_vulkan_profile_validation(
+    const VulkanDeviceCapabilities &capabilities,
+    const ProfileRequirements &profileRequirements,
+    const Profile &profile,
+    const VulkanProfileValidationRequirements &validationRequirements) {
+    VulkanProfileValidationReport report{};
+    report.profileSupport =
+        evaluate_profile_support(capabilities.view(), profileRequirements, profile);
+    report.pipelineCreation = validationRequirements.pipelineCreation;
+    report.numericalValidation = validationRequirements.numericalValidation;
+
+    if (!report.profileSupport.supported) {
+        report.status = VulkanProfileValidationStatus::ProfileNotSupported;
+        return report;
+    }
+
+    report.shaderConfig = find_profile_shader_config(profile.id);
+    if (report.shaderConfig == nullptr) {
+        report.status = VulkanProfileValidationStatus::MissingShaderConfig;
+        return report;
+    }
+
+    if (report.shaderConfig->backend != profile.backend) {
+        report.status = VulkanProfileValidationStatus::ShaderConfigMismatch;
+        return report;
+    }
+
+    if (is_failed(report.pipelineCreation.status)) {
+        report.status = VulkanProfileValidationStatus::PipelineCreationFailed;
+        return report;
+    }
+    if (validationRequirements.requirePipelineCreation) {
+        if (is_not_run(report.pipelineCreation.status)) {
+            report.status = VulkanProfileValidationStatus::PipelineCreationNotRun;
+            return report;
+        }
+        if (is_skipped(report.pipelineCreation.status)) {
+            report.status = VulkanProfileValidationStatus::PipelineCreationSkipped;
+            return report;
+        }
+    }
+
+    if (is_failed(report.numericalValidation.status)) {
+        report.status = VulkanProfileValidationStatus::NumericalValidationFailed;
+        return report;
+    }
+    if (validationRequirements.requireNumericalValidation) {
+        if (is_not_run(report.numericalValidation.status)) {
+            report.status = VulkanProfileValidationStatus::NumericalValidationNotRun;
+            return report;
+        }
+        if (is_skipped(report.numericalValidation.status)) {
+            report.status = VulkanProfileValidationStatus::NumericalValidationSkipped;
+            return report;
+        }
+    }
+
+    report.status = VulkanProfileValidationStatus::Supported;
+    report.usable = true;
+    return report;
 }
 
 } // namespace nrc::vulkan

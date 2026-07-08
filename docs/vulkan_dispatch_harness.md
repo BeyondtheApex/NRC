@@ -58,6 +58,7 @@ KHR-specific behavior:
 - The test selects SG32, SG16, or M8/SG32 SPIR-V through `nrc::find_profile_shader_config` after choosing an implemented profile from queried capabilities.
 - The pipeline requires the selected subgroup size and full compute subgroups.
 - On MSVC/Windows, the test catches structured exceptions from `vkCreateComputePipelines` and reports a controlled `SKIP:`. This is needed because the current local AMD driver advertises the profile but raises an exception while compiling the VkNRC-style KHR cooperative matrix shader.
+- Reusable runtime diagnostics now live in `nrc::vulkan::evaluate_vulkan_profile_validation`. The dispatch harness still owns actual shader module creation, pipeline creation, dispatch, and numerical comparison.
 
 Inference-specific behavior:
 
@@ -73,4 +74,4 @@ The same pattern should be reused for:
 - Reference path tracer integration using the validated scalar inference pass.
 - Regression tests for future backend layout changes.
 
-The final runtime helper should not copy this test harness wholesale. It should promote only the reusable parts: shader module loading, descriptor contract creation, resource barriers, and profile-specific pipeline creation.
+The final runtime helper should not copy this test harness wholesale. It should continue promoting only reusable pieces: profile validation reporting, shader module loading, descriptor contract creation, resource barriers, and profile-specific pipeline creation.

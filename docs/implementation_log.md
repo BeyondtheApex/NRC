@@ -2008,3 +2008,72 @@ The check order is intentionally conservative:
 ### Next Step
 
 Add a Vulkan runtime validation report that combines profile support diagnostics, shader config selection, pipeline creation status, and optional numerical validation into one integration-facing result.
+
+## 2026-07-09 - Milestone 27 Vulkan Profile Validation Report
+
+### Implemented
+
+- Added Vulkan-facing validation report API in `nrc_vulkan`:
+  - `nrc::vulkan::VulkanValidationStepStatus`
+  - `nrc::vulkan::VulkanProfileValidationStatus`
+  - `nrc::vulkan::VulkanValidationStep`
+  - `nrc::vulkan::VulkanProfileValidationRequirements`
+  - `nrc::vulkan::VulkanProfileValidationReport`
+  - `nrc::vulkan::evaluate_vulkan_profile_validation`
+- The report combines:
+  - capability-level `nrc::ProfileSupportReport`;
+  - selected profile shader config;
+  - caller-supplied pipeline creation status;
+  - caller-supplied numerical validation status;
+  - final `usable` decision.
+- Extended `nrc_vulkan_capabilities_test` to cover:
+  - supported KHR profile with shader config;
+  - unsupported capability report forwarding;
+  - missing shader config;
+  - shader config/backend mismatch;
+  - required pipeline creation not run, skipped, passed, and failed;
+  - required numerical validation not run and failed.
+- Updated documentation:
+  - `docs/vulkan_capability_query.md`
+  - `docs/vulkan_dispatch_harness.md`
+  - `README.md`
+
+### Behavior
+
+The new report is deliberately integration-facing rather than a pipeline builder. Applications such as MCVR can create devices, shader modules, and pipelines using their own renderer infrastructure, then feed the outcome back through `VulkanProfileValidationRequirements`.
+
+The final status is selected in this order:
+
+1. profile capability support must pass;
+2. shader config must exist;
+3. shader config backend must match the selected profile;
+4. failed pipeline creation always rejects the profile;
+5. required pipeline creation rejects `NotRun` and `Skipped`;
+6. failed numerical validation always rejects the profile;
+7. required numerical validation rejects `NotRun` and `Skipped`.
+
+`report.usable` is true only when all required checks are satisfied.
+
+### Validation
+
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_capabilities_test`
+- Targeted test succeeded:
+  - `ctest --test-dir build -C Debug -R nrc_vulkan_capabilities_test --output-on-failure`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- The Vulkan validation report does not create Vulkan objects by itself.
+- The report stores a coarse numerical validation status, but not numerical error metrics, sample counts, or per-profile tolerance details.
+- The KHR dispatch test still owns the concrete shader module, pipeline layout, descriptor, dispatch, and CPU/GPU comparison harness.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Promote reusable pieces from the KHR dispatch harness into `runtime/vulkan`: a guarded compute pipeline creation helper that consumes `ProfileShaderConfig`, records `VkResult`/structured-exception outcomes into `VulkanValidationStep`, and remains independent from the sample/test descriptor layout.

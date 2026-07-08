@@ -43,6 +43,40 @@ M=8  N=16 K=16 scope=subgroup
 
 Unsupported component types are mapped to `ComponentType::Unknown` and therefore will not match production profiles.
 
+## Profile Validation Report
+
+`nrc::vulkan::evaluate_vulkan_profile_validation` combines the renderer-neutral profile support report with the Vulkan shader configuration and optional validation stages:
+
+- capability/profile support from `nrc::evaluate_profile_support`;
+- shader config lookup through `nrc::find_profile_shader_config`;
+- pipeline creation status supplied by the caller;
+- numerical validation status supplied by the caller.
+
+Basic capability/config check:
+
+```cpp
+const nrc::Profile *profile = nrc::find_profile(nrc::choose_profile(caps.view()));
+if (profile != nullptr) {
+    nrc::vulkan::VulkanProfileValidationReport report =
+        nrc::vulkan::evaluate_vulkan_profile_validation(caps, {}, *profile);
+}
+```
+
+Strict integration check after a renderer has tried to create and validate its pipeline:
+
+```cpp
+nrc::vulkan::VulkanProfileValidationRequirements validation{};
+validation.requirePipelineCreation = true;
+validation.requireNumericalValidation = true;
+validation.pipelineCreation.status = nrc::vulkan::VulkanValidationStepStatus::Passed;
+validation.numericalValidation.status = nrc::vulkan::VulkanValidationStepStatus::Passed;
+
+nrc::vulkan::VulkanProfileValidationReport report =
+    nrc::vulkan::evaluate_vulkan_profile_validation(caps, {}, *profile, validation);
+```
+
+`report.usable` is true only when the profile capabilities and shader config are valid and all required validation stages have passed. Failed stages always make the report unusable. `NotRun` and `Skipped` stages only block usability when the corresponding `require...` flag is set.
+
 ## Current Limit
 
-This module only reports capabilities. It does not create devices, enable features, compile shaders, or dispatch NRC workloads.
+This module reports capabilities and aggregates profile validation state. It does not create devices, enable features, compile shaders, create pipelines, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own pipeline code, then feed the result back into `VulkanProfileValidationRequirements`.

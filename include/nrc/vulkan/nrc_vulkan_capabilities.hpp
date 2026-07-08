@@ -2,6 +2,7 @@
 
 #include "nrc/nrc_profile.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <vector>
 #include <vulkan/vulkan.h>
@@ -21,6 +22,47 @@ struct VulkanDeviceCapabilities {
     DeviceCapabilitiesView view() const;
 };
 
+enum class VulkanValidationStepStatus : std::uint8_t {
+    NotRun,
+    Passed,
+    Failed,
+    Skipped,
+};
+
+enum class VulkanProfileValidationStatus : std::uint8_t {
+    Supported,
+    ProfileNotSupported,
+    MissingShaderConfig,
+    ShaderConfigMismatch,
+    PipelineCreationNotRun,
+    PipelineCreationSkipped,
+    PipelineCreationFailed,
+    NumericalValidationNotRun,
+    NumericalValidationSkipped,
+    NumericalValidationFailed,
+};
+
+struct VulkanValidationStep {
+    VulkanValidationStepStatus status = VulkanValidationStepStatus::NotRun;
+    VkResult vkResult = VK_SUCCESS;
+};
+
+struct VulkanProfileValidationRequirements {
+    bool requirePipelineCreation = false;
+    bool requireNumericalValidation = false;
+    VulkanValidationStep pipelineCreation;
+    VulkanValidationStep numericalValidation;
+};
+
+struct VulkanProfileValidationReport {
+    ProfileSupportReport profileSupport;
+    const ProfileShaderConfig *shaderConfig = nullptr;
+    VulkanValidationStep pipelineCreation;
+    VulkanValidationStep numericalValidation;
+    VulkanProfileValidationStatus status = VulkanProfileValidationStatus::ProfileNotSupported;
+    bool usable = false;
+};
+
 ComponentType map_component_type(VkComponentTypeKHR type);
 std::vector<std::uint32_t> enumerate_subgroup_sizes(std::uint32_t minSize,
                                                     std::uint32_t maxSize,
@@ -32,5 +74,11 @@ translate_cooperative_matrix_property(const VkCooperativeMatrixPropertiesKHR &pr
 VulkanDeviceCapabilities query_device_capabilities(
     VkPhysicalDevice physicalDevice,
     PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR getCooperativeMatrixProperties = nullptr);
+
+VulkanProfileValidationReport evaluate_vulkan_profile_validation(
+    const VulkanDeviceCapabilities &capabilities,
+    const ProfileRequirements &profileRequirements,
+    const Profile &profile,
+    const VulkanProfileValidationRequirements &validationRequirements = {});
 
 } // namespace nrc::vulkan

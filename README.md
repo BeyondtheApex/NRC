@@ -13,5 +13,6 @@ The first implementation will follow the existing VkNRC implementation and the N
 Current status:
 
 - Repository bootstrap is complete.
-- Public constants, profile/capability selection, and VkNRC-compatible resource layout calculations are implemented.
-- A first profile/layout test is available through CTest.
+- Public constants, profile/capability selection, support diagnostics, shader config mapping, and VkNRC-compatible resource layout calculations are implemented.
+- Optional Vulkan capability query and profile validation report helpers are implemented.
+- CPU reference forward/backpropagation, scalar Vulkan inference/training passes, KHR cooperative-matrix inference profiles, CTest coverage, and a small reference path tracing sample are in progress.

@@ -58,5 +58,182 @@ int main() {
     auto noSubgroup = nrc::vulkan::translate_cooperative_matrix_property(property, VK_SHADER_STAGE_COMPUTE_BIT);
     ok &= require(!noSubgroup.has_value(), "reject non-subgroup cooperative matrix property");
 
+    nrc::vulkan::VulkanDeviceCapabilities validCapabilities{};
+    validCapabilities.shaderFloat16 = true;
+    validCapabilities.storageBuffer16BitAccess = true;
+    validCapabilities.shaderBufferFloat32AtomicAdd = true;
+    validCapabilities.subgroupSizeControl = true;
+    validCapabilities.computeFullSubgroups = true;
+    validCapabilities.khrCooperativeMatrix = true;
+    validCapabilities.supportedSubgroupSizes = {32};
+    validCapabilities.cooperativeMatrices = {{
+        {
+            16,
+            16,
+            16,
+            nrc::ComponentType::Float16,
+            nrc::ComponentType::Float16,
+            nrc::ComponentType::Float16,
+            nrc::ComponentType::Float16,
+            nrc::MatrixScope::Subgroup,
+            true,
+        },
+    }};
+
+    const nrc::Profile *khrProfile =
+        nrc::find_profile(nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128);
+    ok &= require(khrProfile != nullptr, "find KHR profile for Vulkan validation");
+    if (khrProfile != nullptr) {
+        const nrc::vulkan::VulkanProfileValidationReport report =
+            nrc::vulkan::evaluate_vulkan_profile_validation(validCapabilities, {}, *khrProfile);
+        ok &= require(report.usable, "Vulkan validation report is usable for supported profile");
+        ok &= require(report.status == nrc::vulkan::VulkanProfileValidationStatus::Supported,
+                      "Vulkan validation report records supported status");
+        ok &= require(report.profileSupport.status == nrc::ProfileSupportStatus::Supported,
+                      "Vulkan validation report carries capability support");
+        ok &= require(report.shaderConfig != nullptr &&
+                          report.shaderConfig->id == khrProfile->id,
+                      "Vulkan validation report carries shader config");
+        ok &= require(report.pipelineCreation.status ==
+                          nrc::vulkan::VulkanValidationStepStatus::NotRun,
+                      "Vulkan validation defaults pipeline creation to not run");
+        ok &= require(report.numericalValidation.status ==
+                          nrc::vulkan::VulkanValidationStepStatus::NotRun,
+                      "Vulkan validation defaults numerical validation to not run");
+
+        nrc::vulkan::VulkanProfileValidationRequirements requirePipeline{};
+        requirePipeline.requirePipelineCreation = true;
+        const nrc::vulkan::VulkanProfileValidationReport missingPipeline =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                validCapabilities,
+                {},
+                *khrProfile,
+                requirePipeline);
+        ok &= require(!missingPipeline.usable,
+                      "required pipeline creation blocks usable report when not run");
+        ok &= require(missingPipeline.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::PipelineCreationNotRun,
+                      "Vulkan validation reports missing pipeline creation");
+
+        requirePipeline.pipelineCreation.status = nrc::vulkan::VulkanValidationStepStatus::Passed;
+        const nrc::vulkan::VulkanProfileValidationReport passedPipeline =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                validCapabilities,
+                {},
+                *khrProfile,
+                requirePipeline);
+        ok &= require(passedPipeline.usable,
+                      "passed required pipeline creation allows usable report");
+
+        requirePipeline.pipelineCreation.status = nrc::vulkan::VulkanValidationStepStatus::Skipped;
+        const nrc::vulkan::VulkanProfileValidationReport skippedPipeline =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                validCapabilities,
+                {},
+                *khrProfile,
+                requirePipeline);
+        ok &= require(skippedPipeline.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::PipelineCreationSkipped,
+                      "Vulkan validation reports skipped required pipeline creation");
+
+        requirePipeline.pipelineCreation.status = nrc::vulkan::VulkanValidationStepStatus::Failed;
+        requirePipeline.pipelineCreation.vkResult = VK_ERROR_INITIALIZATION_FAILED;
+        const nrc::vulkan::VulkanProfileValidationReport failedPipeline =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                validCapabilities,
+                {},
+                *khrProfile,
+                requirePipeline);
+        ok &= require(!failedPipeline.usable,
+                      "failed pipeline creation blocks usable report");
+        ok &= require(failedPipeline.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::PipelineCreationFailed,
+                      "Vulkan validation reports failed pipeline creation");
+        ok &= require(failedPipeline.pipelineCreation.vkResult == VK_ERROR_INITIALIZATION_FAILED,
+                      "Vulkan validation preserves pipeline VkResult");
+
+        nrc::vulkan::VulkanProfileValidationRequirements requireNumerical{};
+        requireNumerical.requireNumericalValidation = true;
+        requireNumerical.pipelineCreation.status = nrc::vulkan::VulkanValidationStepStatus::Passed;
+        const nrc::vulkan::VulkanProfileValidationReport missingNumerical =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                validCapabilities,
+                {},
+                *khrProfile,
+                requireNumerical);
+        ok &= require(missingNumerical.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::NumericalValidationNotRun,
+                      "Vulkan validation reports missing numerical validation");
+
+        requireNumerical.numericalValidation.status = nrc::vulkan::VulkanValidationStepStatus::Failed;
+        const nrc::vulkan::VulkanProfileValidationReport failedNumerical =
+            nrc::vulkan::evaluate_vulkan_profile_validation(
+                validCapabilities,
+                {},
+                *khrProfile,
+                requireNumerical);
+        ok &= require(failedNumerical.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::NumericalValidationFailed,
+                      "Vulkan validation reports failed numerical validation");
+    }
+
+    nrc::vulkan::VulkanDeviceCapabilities emptyCapabilities{};
+    if (khrProfile != nullptr) {
+        const nrc::vulkan::VulkanProfileValidationReport rejectedCapability =
+            nrc::vulkan::evaluate_vulkan_profile_validation(emptyCapabilities, {}, *khrProfile);
+        ok &= require(!rejectedCapability.usable,
+                      "Vulkan validation rejects unsupported capability profile");
+        ok &= require(rejectedCapability.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::ProfileNotSupported,
+                      "Vulkan validation reports capability rejection");
+        ok &= require(rejectedCapability.profileSupport.status ==
+                          nrc::ProfileSupportStatus::MissingRequiredFeature,
+                      "Vulkan validation carries detailed capability rejection");
+    }
+
+    const nrc::Profile missingConfigProfile{
+        nrc::ProfileId::None,
+        nrc::BackendKind::ScalarReference,
+        "SUPPORTED_PROFILE_WITHOUT_CONFIG",
+        0,
+        0,
+        0,
+        0,
+        64,
+        false,
+        true,
+    };
+    const nrc::vulkan::VulkanProfileValidationReport missingConfig =
+        nrc::vulkan::evaluate_vulkan_profile_validation(
+            emptyCapabilities,
+            {.allowReferenceBackend = true},
+            missingConfigProfile);
+    ok &= require(!missingConfig.usable, "Vulkan validation rejects missing shader config");
+    ok &= require(missingConfig.status ==
+                      nrc::vulkan::VulkanProfileValidationStatus::MissingShaderConfig,
+                  "Vulkan validation reports missing shader config");
+
+    const nrc::Profile mismatchedConfigProfile{
+        nrc::ProfileId::ScalarReferenceWg64,
+        nrc::BackendKind::KhrCooperativeMatrix,
+        "KHR_PROFILE_WITH_SCALAR_CONFIG_ID",
+        16,
+        16,
+        16,
+        32,
+        128,
+        true,
+        true,
+    };
+    const nrc::vulkan::VulkanProfileValidationReport mismatchedConfig =
+        nrc::vulkan::evaluate_vulkan_profile_validation(
+            validCapabilities,
+            {},
+            mismatchedConfigProfile);
+    ok &= require(!mismatchedConfig.usable, "Vulkan validation rejects shader config mismatch");
+    ok &= require(mismatchedConfig.status ==
+                      nrc::vulkan::VulkanProfileValidationStatus::ShaderConfigMismatch,
+                  "Vulkan validation reports shader config mismatch");
+
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
