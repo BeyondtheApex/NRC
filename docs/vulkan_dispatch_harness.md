@@ -43,7 +43,7 @@ The scalar test dispatches one invocation per sample and compares the GPU result
 
 The KHR test dispatches one 128-wide workgroup tile per sample block. It first validates the selected KHR profile at device and pipeline creation time, then compares against an fp16-rounded CPU reference if the driver successfully creates and runs the pipeline.
 
-The KHR gradient test selects a KHR training profile, which additionally requires fp32 storage-buffer atomic add, subgroup arithmetic, and enough compute shared memory for the current KHR backprop layout. If the driver successfully creates the profile pipeline, it dispatches the KHR train-record gradient pass and compares the gradient buffer against the selected CPU oracle. The optional output-coopmat and final-hidden-coopmat modes replace only the corresponding region in the expected gradient buffer.
+The KHR gradient test selects a KHR training profile, which additionally requires fp32 storage-buffer atomic add, subgroup arithmetic, and enough compute shared memory for the current KHR backprop layout. If the driver successfully creates the profile pipeline, it dispatches the KHR train-record gradient pass over a 67-record one-workgroup batch and compares the gradient buffer against the selected CPU oracle. The optional output-coopmat and final-hidden-coopmat modes replace only the corresponding region in the expected gradient buffer, with expected partials rounded per subgroup before cross-subgroup reduction.
 
 The scalar inference test dispatches `NrcInferenceScalar.glsl` against real storage images and a flat train-record buffer. It verifies queue destination decoding and `bias + factor * prediction` writes for both screen and train destinations.
 

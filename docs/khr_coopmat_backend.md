@@ -69,9 +69,11 @@ The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_FINAL_H
 
 `tests/khr_gradient_reference_test.cpp` validates the reusable host-side KHR fp16 oracle. It proves the CPU oracle covers every hidden/output gradient region before that oracle is used by the Vulkan KHR runtime test.
 
-`tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-output` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_output_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1`. That mode compares output-layer gradients against a test-side oracle that mirrors fp16 output derivative staging and fp16 output partial storage, while hidden-layer gradients still use `nrc::reference_backward_khr_fp16`.
+`tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-output` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_output_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1`. That mode compares output-layer gradients against a test-side oracle that mirrors fp16 output derivative staging and per-subgroup fp16 output partial storage, while hidden-layer gradients still use `nrc::reference_backward_khr_fp16`.
 
-`tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-final-hidden` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_final_hidden_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW=1`. That mode compares final-hidden gradients against a test-side oracle that mirrors fp16 dPre row-block staging and fp16 final-hidden partial storage, while the other hidden/output regions use the current KHR groundwork oracle.
+`tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-final-hidden` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_final_hidden_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW=1`. That mode compares final-hidden gradients against a test-side oracle that mirrors fp16 dPre row-block staging and per-subgroup fp16 final-hidden partial storage, while the other hidden/output regions use the current KHR groundwork oracle.
+
+The KHR gradient runtime batch contains 67 train records. That remains inside one 128-wide workgroup but crosses multiple SG32 and SG16 subgroup ranges, so the optional coopmat oracles validate cross-subgroup partial accumulation.
 
 The optional output-coopmat helper restores the fp32 shared output derivative cache after reducing output dW. This keeps the downstream final-hidden dW helper on the same shared derivative contract as the default subgroup output path.
 
@@ -121,7 +123,7 @@ The test:
 - selects an implemented KHR training profile with `requireTraining = true`, including the current 98304-byte shared-memory requirement;
 - creates a device with KHR cooperative matrix, fp32 storage-buffer atomic add, shader float16, storage buffer 16-bit access, subgroup size control, and full compute subgroup features, and requires subgroup arithmetic support reported by subgroup properties;
 - creates the KHR gradient pipeline through `nrc::vulkan::create_profile_compute_pipeline`;
-- dispatches a small train-record batch through `NrcGradientKhr.glsl`;
+- dispatches a 67-record train batch through `NrcGradientKhr.glsl`;
 - compares every hidden/output gradient region against `nrc::reference_backward_khr_fp16` if pipeline creation and dispatch succeed.
 
 Current local result:

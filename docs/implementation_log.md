@@ -4560,3 +4560,70 @@ The final-hidden oracle only changes hidden layer 4 `dW`. Other hidden layers an
 ### Next Step
 
 Extend the tile-streaming helper to an earlier hidden layer behind another explicit experimental switch, or broaden the final-hidden oracle/test batch coverage so multiple subgroups contribute non-zero partials before promoting the helper further.
+
+## 2026-07-09 - Milestone 69 Multi-Subgroup KHR Coopmat Gradient Oracle Coverage
+
+### Implemented
+
+- Increased the KHR gradient runtime test batch from 3 train records to 67 train records.
+- Kept the batch within one 128-wide KHR workgroup while making it span:
+  - at least three SG32 subgroup sample ranges;
+  - at least five SG16 subgroup sample ranges.
+- Reworked the generated train records so packed barycentric and scattered-direction inputs stay inside the unorm range without saturating.
+- Updated the output-coopmat CPU oracle to:
+  - bucket samples by the selected subgroup size;
+  - accumulate one output-layer partial per subgroup;
+  - fp16-round each subgroup partial before summing subgroup partials into the expected fp32 gradient.
+- Updated the final-hidden-coopmat CPU oracle to:
+  - bucket samples by the selected subgroup size;
+  - accumulate one hidden layer 4 partial per subgroup;
+  - fp16-round each subgroup partial before summing subgroup partials into the expected fp32 gradient.
+- Added SG16 and SG32 expected-gradient sanity generation before Vulkan profile selection, so oracle coverage is still checked on the local machine even when KHR training profile selection skips.
+- Added `VulkanKhrGradientRunner::selected_subgroup_size()` so runtime comparison chooses the correct oracle for the selected profile.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/vulkan_dispatch_harness.md`
+
+### Behavior
+
+The optional coopmat `dW` oracles now mirror the shader's cross-subgroup reduction shape:
+
+```text
+for each subgroup:
+  accumulate samples owned by that subgroup
+  fp16-round the subgroup partial tile
+
+expected gradient:
+  fp32 sum of all rounded subgroup partials
+```
+
+This replaces the earlier small-batch oracle shape where only subgroup 0 had non-zero samples and a single fp16 rounding step was enough.
+
+### Validation
+
+- Targeted KHR gradient runtime test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr" --output-on-failure -V`
+- Targeted test result:
+  - `3/3 tests passed`
+- Current local KHR training skip result for all three runtime modes remains:
+  - `SKIP: no Vulkan device supports an implemented NRC KHR cooperative matrix training profile`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `41/41 tests passed`
+
+### Current Limitations
+
+- The KHR runtime numerical comparison still has not executed locally because the current device does not satisfy the 98304-byte KHR training shared-memory profile gate.
+- The widened oracle still models one 128-wide workgroup. Multi-workgroup KHR gradient validation remains future work.
+- The default KHR gradient path still uses subgroup arithmetic for output and final-hidden `dW`.
+- Hidden layers 3, 2, 1, and 0 still use the subgroup `dW` path.
+
+### Next Step
+
+Either extend the tile-streaming helper to hidden layer 3 behind an explicit experimental switch or add multi-workgroup oracle coverage before broadening the coopmat path further.

@@ -30,7 +30,16 @@
 
 namespace {
 
-constexpr std::uint32_t kTrainCount = 3;
+constexpr std::uint32_t kTrainCount = 67;
+constexpr std::uint32_t kKhrGradientWorkgroupSize = 128;
+constexpr std::uint32_t kSmallestImplementedSubgroupSize = 16;
+constexpr std::uint32_t kLargestImplementedSubgroupSize = 32;
+constexpr std::uint32_t kMaxImplementedSubgroupCount =
+    kKhrGradientWorkgroupSize / kSmallestImplementedSubgroupSize;
+static_assert(kTrainCount > kLargestImplementedSubgroupSize * 2u,
+              "KHR gradient test batch should span multiple SG32 subgroup ranges");
+static_assert(kTrainCount <= kKhrGradientWorkgroupSize,
+              "KHR gradient oracle currently models one workgroup");
 
 struct SkipTest : std::runtime_error {
     using std::runtime_error::runtime_error;
@@ -129,18 +138,20 @@ std::vector<nrc::NrcTrainRecord> make_train_records() {
     std::vector<nrc::NrcTrainRecord> records(nrc::kTrainBatchCount * nrc::kTrainBatchSize);
     for (std::uint32_t i = 0; i < kTrainCount; ++i) {
         nrc::NrcTrainRecord record{};
-        record.biasR = 0.10f + 0.03f * static_cast<float>(i);
-        record.biasG = 0.07f + 0.02f * static_cast<float>(i);
-        record.biasB = 0.04f + 0.01f * static_cast<float>(i);
+        record.biasR = 0.08f + 0.003f * static_cast<float>((i * 5u) % 19u);
+        record.biasG = 0.05f + 0.002f * static_cast<float>((i * 7u) % 23u);
+        record.biasB = 0.03f + 0.0015f * static_cast<float>((i * 11u) % 29u);
         record.factorR = 1.0f;
         record.factorG = 1.0f;
         record.factorB = 1.0f;
         record.packedInput.primitiveId = i;
         record.packedInput.flipBitInstanceId = i;
-        record.packedInput.barycentric2x16U = pack_unorm2x16(0.25f + 0.10f * static_cast<float>(i),
-                                                             0.20f + 0.07f * static_cast<float>(i));
-        record.packedInput.scatteredDir2x16U = pack_unorm2x16(0.35f + 0.05f * static_cast<float>(i),
-                                                              0.65f - 0.04f * static_cast<float>(i));
+        record.packedInput.barycentric2x16U = pack_unorm2x16(
+            0.12f + 0.73f * static_cast<float>((i * 3u) % 31u) / 30.0f,
+            0.10f + 0.75f * static_cast<float>((i * 5u) % 37u) / 36.0f);
+        record.packedInput.scatteredDir2x16U = pack_unorm2x16(
+            0.15f + 0.70f * static_cast<float>((i * 7u) % 41u) / 40.0f,
+            0.18f + 0.67f * static_cast<float>((i * 11u) % 43u) / 42.0f);
         records[i] = record;
     }
     return records;
@@ -227,17 +238,29 @@ nrc::ReferenceOutput relative_luminance_output_derivative(const nrc::ReferenceOu
 
 std::vector<float> make_expected_khr_output_coopmat_gradients(
     std::span<const float> gpuVisibleWeights,
-    const std::vector<nrc::NrcTrainRecord> &trainRecords) {
+    const std::vector<nrc::NrcTrainRecord> &trainRecords,
+    std::uint32_t subgroupSize) {
     std::vector<float> gradients =
         make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
+
+    if (subgroupSize == 0 || (kKhrGradientWorkgroupSize % subgroupSize) != 0) {
+        throw std::invalid_argument("invalid KHR output-coopmat oracle subgroup size");
+    }
+    const std::uint32_t subgroupCount = kKhrGradientWorkgroupSize / subgroupSize;
+    if (subgroupCount > kMaxImplementedSubgroupCount) {
+        throw std::invalid_argument("unsupported KHR output-coopmat oracle subgroup count");
+    }
 
     const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
     std::fill(gradients.begin() + static_cast<std::ptrdiff_t>(outputOffset),
               gradients.begin() + static_cast<std::ptrdiff_t>(outputOffset + nrc::output_layer_weight_count()),
               0.0f);
 
-    std::array<float, nrc::kNnOutputWidth * nrc::kNnHiddenWidth> outputPartials{};
+    std::array<std::array<float, nrc::kNnOutputWidth * nrc::kNnHiddenWidth>,
+               kMaxImplementedSubgroupCount>
+        outputPartials{};
     for (std::uint32_t i = 0; i < kTrainCount; ++i) {
+        const std::uint32_t subgroup = i / subgroupSize;
         nrc::EncodedInput encoded{};
         nrc::encode_input(unpack_test_input(trainRecords[i].packedInput), encoded);
         const HiddenLayers hiddenLayers = forward_hidden_layers_fp16(gpuVisibleWeights, encoded);
@@ -255,23 +278,36 @@ std::vector<float> make_expected_khr_output_coopmat_gradients(
         for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
             const float stagedDOutput = fp16_round(dOutput[row]);
             for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-                outputPartials[row * nrc::kNnHiddenWidth + col] +=
+                outputPartials[subgroup][row * nrc::kNnHiddenWidth + col] +=
                     finalHidden[col] * stagedDOutput;
             }
         }
     }
 
     for (std::uint32_t i = 0; i < nrc::output_layer_weight_count(); ++i) {
-        gradients[outputOffset + i] = fp16_round(outputPartials[i]);
+        float value = 0.0f;
+        for (std::uint32_t subgroup = 0; subgroup < subgroupCount; ++subgroup) {
+            value += fp16_round(outputPartials[subgroup][i]);
+        }
+        gradients[outputOffset + i] = value;
     }
     return gradients;
 }
 
 std::vector<float> make_expected_khr_final_hidden_coopmat_gradients(
     std::span<const float> gpuVisibleWeights,
-    const std::vector<nrc::NrcTrainRecord> &trainRecords) {
+    const std::vector<nrc::NrcTrainRecord> &trainRecords,
+    std::uint32_t subgroupSize) {
     std::vector<float> gradients =
         make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
+
+    if (subgroupSize == 0 || (kKhrGradientWorkgroupSize % subgroupSize) != 0) {
+        throw std::invalid_argument("invalid KHR final-hidden-coopmat oracle subgroup size");
+    }
+    const std::uint32_t subgroupCount = kKhrGradientWorkgroupSize / subgroupSize;
+    if (subgroupCount > kMaxImplementedSubgroupCount) {
+        throw std::invalid_argument("unsupported KHR final-hidden-coopmat oracle subgroup count");
+    }
 
     const std::uint32_t layer = nrc::kNnHiddenLayerCount - 1u;
     const std::size_t layerOffset = nrc::layer_weight_offset(layer);
@@ -279,9 +315,12 @@ std::vector<float> make_expected_khr_final_hidden_coopmat_gradients(
               gradients.begin() + static_cast<std::ptrdiff_t>(layerOffset + nrc::hidden_layer_weight_count()),
               0.0f);
 
-    std::array<float, nrc::kNnHiddenWidth * nrc::kNnHiddenWidth> hiddenPartials{};
+    std::array<std::array<float, nrc::kNnHiddenWidth * nrc::kNnHiddenWidth>,
+               kMaxImplementedSubgroupCount>
+        hiddenPartials{};
     const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
     for (std::uint32_t i = 0; i < kTrainCount; ++i) {
+        const std::uint32_t subgroup = i / subgroupSize;
         nrc::EncodedInput encoded{};
         nrc::encode_input(unpack_test_input(trainRecords[i].packedInput), encoded);
         const HiddenLayers hiddenLayers = forward_hidden_layers_fp16(gpuVisibleWeights, encoded);
@@ -310,14 +349,18 @@ std::vector<float> make_expected_khr_final_hidden_coopmat_gradients(
             const float dPre = finalHidden[row] > 0.0f ? dHidden[row] : 0.0f;
             const float stagedDPre = fp16_round(dPre);
             for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
-                hiddenPartials[row * nrc::kNnHiddenWidth + col] +=
+                hiddenPartials[subgroup][row * nrc::kNnHiddenWidth + col] +=
                     stagedDPre * sourceHidden[col];
             }
         }
     }
 
     for (std::uint32_t i = 0; i < nrc::hidden_layer_weight_count(); ++i) {
-        gradients[layerOffset + i] = fp16_round(hiddenPartials[i]);
+        float value = 0.0f;
+        for (std::uint32_t subgroup = 0; subgroup < subgroupCount; ++subgroup) {
+            value += fp16_round(hiddenPartials[subgroup][i]);
+        }
+        gradients[layerOffset + i] = value;
     }
     return gradients;
 }
@@ -409,6 +452,15 @@ public:
         std::vector<float> gradients(nrc::weight_count());
         download(gradientBuffer, gradients.data(), static_cast<VkDeviceSize>(gradients.size() * sizeof(float)));
         return gradients;
+    }
+
+    std::uint32_t selected_subgroup_size() const {
+        const nrc::ProfileShaderConfig *config =
+            nrc::find_profile_shader_config(selectedProfile_->id);
+        if (config == nullptr || config->backend != nrc::BackendKind::KhrCooperativeMatrix) {
+            throw std::runtime_error("selected KHR profile has no shader config");
+        }
+        return config->subgroupSize;
     }
 
 private:
@@ -924,31 +976,45 @@ int main(int argc, char **argv) {
         const std::vector<float> gpuVisibleWeights =
             nrc::unpack_weights_fp16_uvec4(packedWeights, nrc::weight_count());
         const std::vector<nrc::NrcTrainRecord> trainRecords = make_train_records();
-        std::vector<float> expectedGradients;
+        std::vector<float> expectedGradients =
+            make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
+        std::vector<float> expectedCoopmatSg16;
+        std::vector<float> expectedCoopmatSg32;
         if (useCoopmatOutput) {
-            expectedGradients =
-                make_expected_khr_output_coopmat_gradients(gpuVisibleWeights, trainRecords);
+            expectedCoopmatSg16 =
+                make_expected_khr_output_coopmat_gradients(gpuVisibleWeights, trainRecords, 16u);
+            expectedCoopmatSg32 =
+                make_expected_khr_output_coopmat_gradients(gpuVisibleWeights, trainRecords, 32u);
         } else if (useCoopmatFinalHidden) {
-            expectedGradients =
-                make_expected_khr_final_hidden_coopmat_gradients(gpuVisibleWeights, trainRecords);
-        } else {
-            expectedGradients =
-                make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
+            expectedCoopmatSg16 =
+                make_expected_khr_final_hidden_coopmat_gradients(gpuVisibleWeights, trainRecords, 16u);
+            expectedCoopmatSg32 =
+                make_expected_khr_final_hidden_coopmat_gradients(gpuVisibleWeights, trainRecords, 32u);
         }
         if (!all_finite(expectedGradients)) {
             throw std::runtime_error("KHR expected gradients contain non-finite values");
         }
         if (useCoopmatOutput) {
+            if (!all_finite(expectedCoopmatSg16) || !all_finite(expectedCoopmatSg32)) {
+                throw std::runtime_error("KHR output-coopmat expected gradients contain non-finite values");
+            }
             const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
-            if (max_abs(std::span<const float>{expectedGradients.data() + outputOffset,
+            if (max_abs(std::span<const float>{expectedCoopmatSg16.data() + outputOffset,
+                                               nrc::output_layer_weight_count()}) == 0.0f ||
+                max_abs(std::span<const float>{expectedCoopmatSg32.data() + outputOffset,
                                                nrc::output_layer_weight_count()}) == 0.0f) {
                 throw std::runtime_error("KHR output-coopmat oracle produced all-zero output gradients");
             }
         }
         if (useCoopmatFinalHidden) {
+            if (!all_finite(expectedCoopmatSg16) || !all_finite(expectedCoopmatSg32)) {
+                throw std::runtime_error("KHR final-hidden coopmat expected gradients contain non-finite values");
+            }
             const std::size_t finalHiddenOffset =
                 nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 1u);
-            if (max_abs(std::span<const float>{expectedGradients.data() + finalHiddenOffset,
+            if (max_abs(std::span<const float>{expectedCoopmatSg16.data() + finalHiddenOffset,
+                                               nrc::hidden_layer_weight_count()}) == 0.0f ||
+                max_abs(std::span<const float>{expectedCoopmatSg32.data() + finalHiddenOffset,
                                                nrc::hidden_layer_weight_count()}) == 0.0f) {
                 throw std::runtime_error("KHR final-hidden coopmat oracle produced all-zero final-hidden gradients");
             }
@@ -958,6 +1024,16 @@ int main(int argc, char **argv) {
         queueState.trainCounts[0] = kTrainCount;
 
         VulkanKhrGradientRunner runner(argv[1], argv[2], argv[3]);
+        if (useCoopmatOutput || useCoopmatFinalHidden) {
+            const std::uint32_t selectedSubgroupSize = runner.selected_subgroup_size();
+            if (selectedSubgroupSize == 16u) {
+                expectedGradients = expectedCoopmatSg16;
+            } else if (selectedSubgroupSize == 32u) {
+                expectedGradients = expectedCoopmatSg32;
+            } else {
+                throw std::runtime_error("selected KHR profile has unsupported subgroup size for coopmat oracle");
+            }
+        }
         const std::vector<float> actualGradients = runner.run(trainRecords, queueState, packedWeights);
 
         bool ok = true;
