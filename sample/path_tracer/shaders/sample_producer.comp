@@ -16,10 +16,11 @@ layout(push_constant) uniform NrcSampleProducerConstants {
     uint trainRecordCount;
 } nrcSampleProducerConstants;
 
-PackedNrcInput NrcSamplePackedInput(uvec2 pixel) {
-    return NrcSampleMakePackedInputFromPixel(pixel,
-                                             uvec2(nrcSampleProducerConstants.width,
-                                                   nrcSampleProducerConstants.height));
+bool NrcSamplePackedInput(uvec2 pixel, out PackedNrcInput packedInput) {
+    return NrcSampleTracePrimaryPackedInput(pixel,
+                                            uvec2(nrcSampleProducerConstants.width,
+                                                  nrcSampleProducerConstants.height),
+                                            packedInput);
 }
 
 void main() {
@@ -35,19 +36,28 @@ void main() {
 
     uvec2 pixel = uvec2(pixelIndex % nrcSampleProducerConstants.width,
                         pixelIndex / nrcSampleProducerConstants.width);
+    PackedNrcInput screenInput;
+    if (!NrcSamplePackedInput(pixel, screenInput)) {
+        return;
+    }
+
     uint evalIndex;
-    NrcPushEvalRecord(NrcMakeEvalScreen(NrcSamplePackedInput(pixel), pixel),
+    NrcPushEvalRecord(NrcMakeEvalScreen(screenInput, pixel),
                       nrcSampleProducerConstants.evalCapacity,
                       evalIndex);
 
     if (pixelIndex == 0u && nrcSampleProducerConstants.trainRecordCount != 0u) {
+        PackedNrcInput trainInput;
+        if (!NrcSamplePackedInput(uvec2(0u, 0u), trainInput)) {
+            return;
+        }
+
         uint firstTrainIndex;
         uint reservedTrainCount;
         if (NrcReserveTrainRecords(0u,
                                    nrcSampleProducerConstants.trainRecordCount,
                                    firstTrainIndex,
                                    reservedTrainCount)) {
-            PackedNrcInput trainInput = NrcSamplePackedInput(uvec2(0u, 0u));
             vec3 trainBias;
             vec3 trainFactor;
             NrcSampleDirectLightingPayload(trainInput, trainBias, trainFactor);

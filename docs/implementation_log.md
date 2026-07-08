@@ -1196,3 +1196,80 @@ The host now mirrors the shader-side direct-lighting math and validates:
 ### Next Step
 
 Add a ray-query or simple path tracing stage so the sample can generate train records from actual traced paths rather than direct-lighting helper math.
+
+## 2026-07-08 - Milestone 16 Primary-Ray Triangle Tracing Sample
+
+### Implemented
+
+- Extended sample scene shader:
+  - `sample/path_tracer/shaders/sample_scene.glsl`
+- Updated sample producer shader:
+  - `sample/path_tracer/shaders/sample_producer.comp`
+- Updated sample host validation:
+  - `sample/path_tracer/sample.cpp`
+- Updated documentation:
+  - `docs/sample_path_tracer.md`
+  - `docs/project_structure.md`
+
+### Runtime Behavior
+
+The sample producer no longer maps pixels analytically to triangle ids and barycentrics. It now:
+
+1. builds a primary camera ray for each pixel;
+2. intersects that ray against the two sample triangles with a local Moller-Trumbore triangle test;
+3. packs the traced hit's primitive id and barycentrics into `PackedNrcInput`;
+4. emits screen eval records only for traced hits;
+5. uses the traced hit for the sample train records and direct-lighting payload.
+
+The two triangles cover the full `4x4` sample image, so the expected eval count remains:
+
+```text
+16 screen eval records + 1 train eval record = 17
+```
+
+### Validation Behavior
+
+The host-side verifier now mirrors the same primary-ray triangle intersection. It no longer relies on the older analytic pixel-to-triangle rule.
+
+The sample validates:
+
+- every screen eval record maps to a CPU-traced primary hit;
+- every packed primitive id, instance id, barycentric payload, and scattered direction payload matches the CPU reference;
+- the train eval record and train records use the traced primary hit for pixel `(0, 0)`;
+- scalar inference still resolves screen and train outputs correctly.
+
+### Design Note
+
+This milestone deliberately avoids Vulkan acceleration structures and ray query. The goal is to tighten the NRC integration shape first:
+
+- traced hit -> packed NRC input;
+- scene/material unpack -> encoded NRC input;
+- train record payload -> scalar inference resolve.
+
+Vulkan ray query can replace the sample-local triangle loop later without changing the reusable NRC queue or inference ABI.
+
+### Validation
+
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Manual sample run succeeded:
+  - `build/sample/path_tracer/Debug/nrc_reference_path_tracer.exe`
+- Manual sample output:
+  - `NRC reference path tracer minimal integration passed: 17 eval records, scalar inference screen/train resolve.`
+  - `This milestone uses primary-ray traced hits and direct-lighting train payloads; full ray tracing is pending.`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `15/15 tests passed`
+
+### Current Limitations
+
+- The sample uses a local triangle loop, not Vulkan ray query or hardware acceleration structures.
+- There are no secondary rays, shadow rays, BRDF sampling, scene loading, or visual output artifacts.
+- Train records still use deterministic direct lighting rather than multi-bounce path-traced radiance.
+- KHR cooperative matrix inference is not used in the sample because KHR pipeline creation remains driver-gated on the current AMD machine.
+- No gradient/backpropagation or optimizer pass is connected yet.
+
+### Next Step
+
+Add either a tiny visual output path or start the scalar gradient/backpropagation pass. The visual path would make integration regressions easier to inspect; the gradient pass would move the core NRC algorithm closer to VkNRC coverage.

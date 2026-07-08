@@ -174,9 +174,9 @@ std::array<SampleSceneTriangle, kSceneTriangleCount> make_sample_scene() {
             make_scene_vertex({-1.0f, 1.0f, 0.0f, 1.0f}, normalA, {0.18f, 0.30f, 0.82f, 1.0f}, specularA),
         },
         SampleSceneTriangle{
-            make_scene_vertex({1.0f, 1.0f, 0.15f, 1.0f}, normalB, {0.82f, 0.72f, 0.18f, 1.0f}, specularB),
-            make_scene_vertex({-1.0f, 1.0f, 0.05f, 1.0f}, normalB, {0.18f, 0.64f, 0.78f, 1.0f}, specularB),
-            make_scene_vertex({1.0f, -1.0f, 0.10f, 1.0f}, normalB, {0.70f, 0.28f, 0.78f, 1.0f}, specularB),
+            make_scene_vertex({1.0f, 1.0f, 0.0f, 1.0f}, normalB, {0.82f, 0.72f, 0.18f, 1.0f}, specularB),
+            make_scene_vertex({-1.0f, 1.0f, 0.0f, 1.0f}, normalB, {0.18f, 0.64f, 0.78f, 1.0f}, specularB),
+            make_scene_vertex({1.0f, -1.0f, 0.0f, 1.0f}, normalB, {0.70f, 0.28f, 0.78f, 1.0f}, specularB),
         },
     };
 }
@@ -187,24 +187,6 @@ std::uint32_t pack_unorm2x16(float x, float y) {
         return static_cast<std::uint32_t>(std::round(clamped * 65535.0f)) & 0xffffu;
     };
     return pack(x) | (pack(y) << 16u);
-}
-
-nrc::PackedNrcInput expected_packed_input(std::uint32_t x, std::uint32_t y) {
-    const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(kWidth);
-    const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(kHeight);
-    const bool firstTriangle = (u + v) <= 1.0f;
-    const std::uint32_t primitiveId = firstTriangle ? 0u : 1u;
-    const float baryX = firstTriangle ? u : 1.0f - u;
-    const float baryY = firstTriangle ? v : 1.0f - v;
-    const float scatteredX = 0.25f + 0.5f * u;
-    const float scatteredY = 0.75f - 0.5f * v;
-
-    nrc::PackedNrcInput packedInput{};
-    packedInput.primitiveId = primitiveId;
-    packedInput.flipBitInstanceId = primitiveId;
-    packedInput.barycentric2x16U = pack_unorm2x16(baryX, baryY);
-    packedInput.scatteredDir2x16U = pack_unorm2x16(scatteredX, scatteredY);
-    return packedInput;
 }
 
 Vec2 unpack_unorm2x16(std::uint32_t packedValue) {
@@ -233,6 +215,119 @@ Vec3 normalize_vec3(Vec3 value) {
         return {0.0f, 0.0f, 1.0f};
     }
     return {value.x / length, value.y / length, value.z / length};
+}
+
+struct SampleRay {
+    Vec3 origin;
+    Vec3 direction;
+};
+
+struct SampleHit {
+    std::uint32_t primitiveId = 0;
+    Vec2 barycentric2;
+    float t = std::numeric_limits<float>::max();
+};
+
+Vec3 sub_vec3(Vec3 lhs, Vec3 rhs) {
+    return {lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z};
+}
+
+Vec3 vec4_xyz(Vec4 value) {
+    return {value.x, value.y, value.z};
+}
+
+Vec3 cross_vec3(Vec3 lhs, Vec3 rhs) {
+    return {
+        lhs.y * rhs.z - lhs.z * rhs.y,
+        lhs.z * rhs.x - lhs.x * rhs.z,
+        lhs.x * rhs.y - lhs.y * rhs.x,
+    };
+}
+
+float dot_vec3(Vec3 lhs, Vec3 rhs) {
+    return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
+}
+
+SampleRay make_primary_ray(std::uint32_t x, std::uint32_t y) {
+    const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(kWidth);
+    const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(kHeight);
+    const Vec3 origin{0.0f, 0.0f, -2.0f};
+    const Vec3 target{u * 2.0f - 1.0f, v * 2.0f - 1.0f, 0.0f};
+    return {origin, normalize_vec3(sub_vec3(target, origin))};
+}
+
+bool intersect_triangle(const SampleRay &ray,
+                        std::uint32_t primitiveId,
+                        const SampleSceneTriangle &triangle,
+                        SampleHit &hit) {
+    const Vec3 p0 = vec4_xyz(triangle.v0.position);
+    const Vec3 p1 = vec4_xyz(triangle.v1.position);
+    const Vec3 p2 = vec4_xyz(triangle.v2.position);
+    const Vec3 edge1 = sub_vec3(p1, p0);
+    const Vec3 edge2 = sub_vec3(p2, p0);
+    const Vec3 pvec = cross_vec3(ray.direction, edge2);
+    const float det = dot_vec3(edge1, pvec);
+    if (std::fabs(det) < 0.000001f) {
+        return false;
+    }
+
+    const float invDet = 1.0f / det;
+    const Vec3 tvec = sub_vec3(ray.origin, p0);
+    const float u = dot_vec3(tvec, pvec) * invDet;
+    if (u < 0.0f || u > 1.0f) {
+        return false;
+    }
+
+    const Vec3 qvec = cross_vec3(tvec, edge1);
+    const float v = dot_vec3(ray.direction, qvec) * invDet;
+    if (v < 0.0f || u + v > 1.0f) {
+        return false;
+    }
+
+    const float t = dot_vec3(edge2, qvec) * invDet;
+    if (t <= 0.0f) {
+        return false;
+    }
+
+    hit.primitiveId = primitiveId;
+    hit.barycentric2 = {u, v};
+    hit.t = t;
+    return true;
+}
+
+bool trace_primary_hit(std::uint32_t x, std::uint32_t y, SampleHit &hit) {
+    const std::array<SampleSceneTriangle, kSceneTriangleCount> sceneTriangles = make_sample_scene();
+    const SampleRay ray = make_primary_ray(x, y);
+    bool found = false;
+    hit.t = std::numeric_limits<float>::max();
+
+    for (std::uint32_t primitiveId = 0; primitiveId < kSceneTriangleCount; ++primitiveId) {
+        SampleHit candidate{};
+        if (intersect_triangle(ray, primitiveId, sceneTriangles[primitiveId], candidate) &&
+            candidate.t < hit.t) {
+            hit = candidate;
+            found = true;
+        }
+    }
+
+    return found;
+}
+
+nrc::PackedNrcInput expected_packed_input(std::uint32_t x, std::uint32_t y) {
+    SampleHit hit{};
+    if (!trace_primary_hit(x, y, hit)) {
+        throw std::runtime_error("sample CPU reference ray missed the scene");
+    }
+
+    const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(kWidth);
+    const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(kHeight);
+
+    nrc::PackedNrcInput packedInput{};
+    packedInput.primitiveId = hit.primitiveId;
+    packedInput.flipBitInstanceId = hit.primitiveId;
+    packedInput.barycentric2x16U = pack_unorm2x16(hit.barycentric2.x, hit.barycentric2.y);
+    packedInput.scatteredDir2x16U = pack_unorm2x16(u, v);
+    return packedInput;
 }
 
 ExpectedTrainPayload expected_train_payload(const nrc::PackedNrcInput &packedInput) {
@@ -1418,7 +1513,7 @@ int main() {
 
         std::cout << "NRC reference path tracer minimal integration passed: "
                   << kEvalCapacity << " eval records, scalar inference screen/train resolve." << std::endl;
-        std::cout << "This milestone uses scene-backed hits and direct-lighting train payloads; full ray tracing is pending." << std::endl;
+        std::cout << "This milestone uses primary-ray traced hits and direct-lighting train payloads; full ray tracing is pending." << std::endl;
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
         std::cerr << "NRC reference path tracer sample failed: " << error.what() << std::endl;

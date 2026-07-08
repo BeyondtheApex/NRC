@@ -37,6 +37,17 @@ struct NrcSampleSurface {
     vec3 specular;
 };
 
+struct NrcSampleRay {
+    vec3 origin;
+    vec3 direction;
+};
+
+struct NrcSampleHit {
+    uint primitiveId;
+    vec2 barycentric2;
+    float t;
+};
+
 layout(std430, set = NRC_SAMPLE_SCENE_SET, binding = NRC_SAMPLE_SCENE_BINDING) readonly buffer NrcSampleSceneBuffer {
     NrcSampleSceneTriangle nrcSampleSceneTriangles[];
 };
@@ -48,6 +59,70 @@ vec4 NrcSampleBarycentricMix(vec4 v0, vec4 v1, vec4 v2, vec2 barycentric2) {
     return v0 * w0 + v1 * w1 + v2 * w2;
 }
 
+NrcSampleRay NrcSampleMakePrimaryRay(uvec2 pixel, uvec2 extent) {
+    vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(extent);
+    vec2 ndc = uv * 2.0 - vec2(1.0);
+
+    NrcSampleRay ray;
+    ray.origin = vec3(0.0, 0.0, -2.0);
+    ray.direction = normalize(vec3(ndc, 0.0) - ray.origin);
+    return ray;
+}
+
+bool NrcSampleIntersectTriangle(NrcSampleRay ray, uint primitiveId, out NrcSampleHit hit) {
+    NrcSampleSceneTriangle triangle = nrcSampleSceneTriangles[primitiveId];
+    vec3 p0 = triangle.v0.position.xyz;
+    vec3 p1 = triangle.v1.position.xyz;
+    vec3 p2 = triangle.v2.position.xyz;
+
+    vec3 edge1 = p1 - p0;
+    vec3 edge2 = p2 - p0;
+    vec3 pvec = cross(ray.direction, edge2);
+    float det = dot(edge1, pvec);
+    if (abs(det) < 0.000001) {
+        return false;
+    }
+
+    float invDet = 1.0 / det;
+    vec3 tvec = ray.origin - p0;
+    float u = dot(tvec, pvec) * invDet;
+    if (u < 0.0 || u > 1.0) {
+        return false;
+    }
+
+    vec3 qvec = cross(tvec, edge1);
+    float v = dot(ray.direction, qvec) * invDet;
+    if (v < 0.0 || u + v > 1.0) {
+        return false;
+    }
+
+    float t = dot(edge2, qvec) * invDet;
+    if (t <= 0.0) {
+        return false;
+    }
+
+    hit.primitiveId = primitiveId;
+    hit.barycentric2 = vec2(u, v);
+    hit.t = t;
+    return true;
+}
+
+bool NrcSampleTracePrimaryHit(uvec2 pixel, uvec2 extent, out NrcSampleHit hit) {
+    NrcSampleRay ray = NrcSampleMakePrimaryRay(pixel, extent);
+    bool found = false;
+    NrcSampleHit candidate;
+    hit.t = 3.402823466e38;
+
+    for (uint primitiveId = 0u; primitiveId < NRC_SAMPLE_SCENE_TRIANGLE_COUNT; ++primitiveId) {
+        if (NrcSampleIntersectTriangle(ray, primitiveId, candidate) && candidate.t < hit.t) {
+            hit = candidate;
+            found = true;
+        }
+    }
+
+    return found;
+}
+
 PackedNrcInput NrcSamplePackHit(uint primitiveId, uint instanceId, vec2 barycentric2, vec2 scatteredDir) {
     PackedNrcInput packedInput;
     packedInput.primitiveId = primitiveId;
@@ -57,15 +132,26 @@ PackedNrcInput NrcSamplePackHit(uint primitiveId, uint instanceId, vec2 barycent
     return packedInput;
 }
 
-PackedNrcInput NrcSampleMakePackedInputFromPixel(uvec2 pixel, uvec2 extent) {
+bool NrcSampleTracePrimaryPackedInput(uvec2 pixel, uvec2 extent, out PackedNrcInput packedInput) {
     vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(extent);
-    uv = clamp(uv, vec2(0.0), vec2(1.0));
+    NrcSampleHit hit;
+    if (!NrcSampleTracePrimaryHit(pixel, extent, hit)) {
+        return false;
+    }
 
-    uint primitiveId = (uv.x + uv.y <= 1.0) ? 0u : 1u;
-    vec2 barycentric2 = primitiveId == 0u ? uv : vec2(1.0 - uv.x, 1.0 - uv.y);
-    vec2 scatteredDir = vec2(0.25 + 0.5 * uv.x, 0.75 - 0.5 * uv.y);
+    packedInput = NrcSamplePackHit(hit.primitiveId,
+                                   hit.primitiveId,
+                                   hit.barycentric2,
+                                   clamp(uv, vec2(0.0), vec2(1.0)));
+    return true;
+}
 
-    return NrcSamplePackHit(primitiveId, primitiveId, barycentric2, scatteredDir);
+PackedNrcInput NrcSampleMakePackedInputFromPixel(uvec2 pixel, uvec2 extent) {
+    PackedNrcInput packedInput;
+    if (NrcSampleTracePrimaryPackedInput(pixel, extent, packedInput)) {
+        return packedInput;
+    }
+    return NrcSamplePackHit(0u, 0u, vec2(0.0), vec2(0.5));
 }
 
 NrcSampleSurface NrcSampleLoadSurface(PackedNrcInput packedInput) {
