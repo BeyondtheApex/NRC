@@ -236,6 +236,55 @@ if(NRC_GLSLC)
         add_test(NAME nrc_vulkan_gradient_scalar_test
             COMMAND nrc_vulkan_gradient_scalar_test "${NRC_GRADIENT_SCALAR_DISPATCH_SPV}")
 
+        set(NRC_TRAINING_STEP_PREPARE_SPV "${CMAKE_CURRENT_BINARY_DIR}/nrc_training_step_prepare.spv")
+        add_custom_command(
+            OUTPUT "${NRC_TRAINING_STEP_PREPARE_SPV}"
+            COMMAND "${NRC_GLSLC}"
+                "--target-env=vulkan1.1"
+                "-I${PROJECT_SOURCE_DIR}/shaders"
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_train_prepare_dispatch.comp"
+                "-o"
+                "${NRC_TRAINING_STEP_PREPARE_SPV}"
+            DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_train_prepare_dispatch.comp"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/passes/NrcTrainPrepare.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcTypes.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcConstants.glsl"
+            VERBATIM)
+
+        set(NRC_TRAINING_STEP_OPTIMIZE_SPV "${CMAKE_CURRENT_BINARY_DIR}/nrc_training_step_optimize.spv")
+        add_custom_command(
+            OUTPUT "${NRC_TRAINING_STEP_OPTIMIZE_SPV}"
+            COMMAND "${NRC_GLSLC}"
+                "--target-env=vulkan1.1"
+                "-DNRC_OPTIMIZE_WRITE_USE_WEIGHTS=1"
+                "-I${PROJECT_SOURCE_DIR}/shaders"
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_optimize_dispatch.comp"
+                "-o"
+                "${NRC_TRAINING_STEP_OPTIMIZE_SPV}"
+            DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_optimize_dispatch.comp"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/passes/NrcOptimize.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcTypes.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcConstants.glsl"
+            VERBATIM)
+
+        add_custom_target(nrc_training_step_shaders
+            DEPENDS
+                "${NRC_TRAINING_STEP_PREPARE_SPV}"
+                "${NRC_GRADIENT_SCALAR_DISPATCH_SPV}"
+                "${NRC_TRAINING_STEP_OPTIMIZE_SPV}")
+
+        add_executable(nrc_vulkan_training_step_test
+            vulkan_training_step_test.cpp)
+        target_link_libraries(nrc_vulkan_training_step_test PRIVATE nrc_vulkan)
+        add_dependencies(nrc_vulkan_training_step_test nrc_training_step_shaders)
+        add_test(NAME nrc_vulkan_training_step_test
+            COMMAND nrc_vulkan_training_step_test
+                "${NRC_TRAINING_STEP_PREPARE_SPV}"
+                "${NRC_GRADIENT_SCALAR_DISPATCH_SPV}"
+                "${NRC_TRAINING_STEP_OPTIMIZE_SPV}")
+
         set(NRC_KHR_DISPATCH_SG32_SPV "${CMAKE_CURRENT_BINARY_DIR}/nrc_khr_dispatch_sg32.spv")
         add_custom_command(
             OUTPUT "${NRC_KHR_DISPATCH_SG32_SPV}"

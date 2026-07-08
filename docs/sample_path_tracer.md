@@ -87,7 +87,7 @@ nrc_sample_reference_path_tracer_smoke
 - No acceleration structure, Vulkan ray query, material system, BRDF sampling, secondary rays, or scene loading exists yet.
 - Training records use deterministic direct lighting, not real multi-bounce path-traced samples.
 - KHR cooperative matrix inference is not used because KHR pipeline creation is driver-gated on the current AMD machine.
-- No gradient/backpropagation or optimizer pass is connected yet.
+- No gradient/backpropagation or optimizer pass is connected in the sample yet, although the reusable scalar training-step test now validates prepare -> gradient -> optimize.
 
 ## Next Steps
 
@@ -95,5 +95,5 @@ The next sample milestones should add:
 
 - replacing the sample-local triangle loop with Vulkan ray query or a fuller path tracing stage;
 - train-record production from multi-bounce sampled paths;
-- scalar gradient and optimizer once those passes exist;
+- scalar training updates using the existing prepare -> gradient -> optimize pass sequence;
 - visual output artifacts for inspection.

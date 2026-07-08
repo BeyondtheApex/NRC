@@ -14,6 +14,7 @@ This document covers the reusable training support added before the gradient pas
   - `tests/optimizer_test.cpp`
   - `tests/shader_compile/nrc_train_prepare_dispatch.comp`
   - `tests/shader_compile/nrc_optimize_dispatch.comp`
+  - `tests/vulkan_training_step_test.cpp`
 
 ## VkNRC Behavior Preserved
 
@@ -62,8 +63,26 @@ Shader compile tests validate the descriptor and GLSL ABI for:
 - optimize without `useWeights`;
 - optimize with `NRC_OPTIMIZE_WRITE_USE_WEIGHTS=1`.
 
+`nrc_vulkan_training_step_test` validates the first full Vulkan training step over the reusable passes. It runs:
+
+```text
+NrcTrainPrepare -> NrcGradientScalar -> NrcOptimize
+```
+
+The test uses the prepare pass output as the indirect dispatch command for the scalar gradient pass, then compares:
+
+- clamped train count;
+- optimizer state advancement;
+- indirect dispatch command;
+- full fp32 gradient buffer;
+- fp32 optimizer entries;
+- packed fp16 weights;
+- packed fp16 use-weights.
+
+The CPU oracle uses `nrc::encode_input`, `nrc::reference_backward`, and `nrc::optimize_weights` over the same fp16-rounded weights consumed by the shaders.
+
 ## Current Limitations
 
-- The scalar GPU gradient pass is compile-validated and runtime-validated against the CPU reference, but optimizer dispatch is not yet numerically validated through a full Vulkan training step.
-- The optimizer currently accepts externally supplied gradients in tests. A later training milestone should run prepare -> scalar gradient -> optimize from `NrcTrainRecord` batches.
+- Full prepare -> scalar gradient -> optimize validation exists, but it is still the scalar correctness path rather than a production-performance training backend.
+- The sample path tracer does not yet run the training update loop.
 - KHR/NV cooperative-matrix gradient paths are not implemented yet.

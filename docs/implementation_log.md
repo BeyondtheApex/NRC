@@ -1543,3 +1543,104 @@ New validation coverage:
 ### Next Step
 
 Add a full Vulkan training-step test that runs prepare -> scalar gradient -> optimize from `NrcTrainRecord` batches and compares updated fp32/fp16 weights against the CPU optimizer reference. After that, wire the same loop into the sample path tracer as a reference integration path.
+
+## 2026-07-08 - Milestone 21 Full Scalar Vulkan Training Step
+
+### Implemented
+
+- Added Vulkan full training-step test:
+  - `tests/vulkan_training_step_test.cpp`
+- Added CMake shader build/test registration for:
+  - `nrc_training_step_prepare.spv`
+  - existing `nrc_gradient_scalar_dispatch.spv`
+  - `nrc_training_step_optimize.spv`
+  - `nrc_training_step_shaders`
+  - `nrc_vulkan_training_step_test`
+- Updated documentation:
+  - `docs/training_optimizer.md`
+  - `docs/gradient_pass.md`
+  - `docs/sample_path_tracer.md`
+  - `docs/project_structure.md`
+
+### Behavior
+
+`nrc_vulkan_training_step_test` validates the reusable scalar training sequence as an actual multi-pass Vulkan flow:
+
+```text
+NrcTrainPrepare -> NrcGradientScalar -> NrcOptimize
+```
+
+The test uses separate descriptor sets for each pass while keeping the buffers shared in the same way an integration would:
+
+- prepare set:
+  - queue state;
+  - dispatch-indirect command;
+  - optimizer state;
+- gradient set:
+  - train records;
+  - queue state;
+  - packed fp16 weights;
+  - fp32 gradients;
+- optimize set:
+  - packed fp16 weights output;
+  - packed fp16 use-weights output;
+  - fp32 gradients;
+  - fp32 optimizer entries;
+  - queue state;
+  - optimizer state.
+
+The command buffer records:
+
+1. host-to-compute barrier for uploaded buffers;
+2. `NrcTrainPrepareMain`;
+3. compute-to-indirect/compute barrier;
+4. `vkCmdDispatchIndirect` for `NrcGradientScalarMain`;
+5. compute-to-compute barrier;
+6. `NrcOptimizeMain` with `NRC_OPTIMIZE_WRITE_USE_WEIGHTS=1`;
+7. compute-to-host barrier for readback.
+
+### CPU Oracle
+
+The CPU reference path mirrors the shader sequence:
+
+1. pack initial weights to fp16 and unpack them back to fp32 so the CPU oracle sees the same weights as the GPU;
+2. initialize optimizer entries from the GPU-visible weights;
+3. call `prepare_training_batch`;
+4. encode train records through `nrc::encode_input`;
+5. accumulate gradients through `nrc::reference_backward`;
+6. update entries and weights through `nrc::optimize_weights`;
+7. pack expected weights and use-weights to fp16 for comparison against shader output.
+
+### Validation
+
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Targeted test command succeeded:
+  - `ctest --test-dir build -C Debug -R nrc_vulkan_training_step_test --output-on-failure`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `24/24 tests passed`
+
+New validation coverage:
+
+- prepare clamps and writes the train count used by later passes;
+- prepare advances optimizer state;
+- prepare writes the dispatch-indirect command consumed by gradient;
+- scalar gradient produces the expected fp32 gradient buffer;
+- optimize consumes those gradients and writes updated fp32 optimizer entries;
+- optimize writes packed fp16 weights;
+- optimize writes packed fp16 use-weights.
+
+### Current Limitations
+
+- The full training-step validation is scalar and correctness-oriented. It is not the final high-performance KHR cooperative-matrix training backend.
+- The training-step test requires `VK_EXT_shader_atomic_float` / `shaderBufferFloat32AtomicAdd` because the scalar gradient pass accumulates fp32 gradients with storage-buffer atomics.
+- The sample path tracer still does not run the training update loop.
+- KHR cooperative-matrix gradient/backpropagation remains missing.
+
+### Next Step
+
+Wire the scalar prepare -> gradient -> optimize sequence into the sample path tracer so the reference integration performs an actual weight update after generating train records. After that, continue toward a KHR cooperative-matrix training backend and a richer path-tracing sample.

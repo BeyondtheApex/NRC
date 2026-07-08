@@ -22,7 +22,7 @@ sample/path_tracer/
   Reference integration sample used to validate NRC behavior. It currently uses a tiny primary-ray Vulkan pipeline and will grow into a full path tracer.
 
 tests/
-  ABI, profile selection, shader compilation, encoding, queue behavior, NN reference tests, and GPU dispatch validation.
+  ABI, profile selection, shader compilation, encoding, queue behavior, NN reference tests, GPU dispatch validation, and full scalar training-step validation.
 
 docs/
   Implementation log, design notes, integration guide, training notes, and milestone results.
