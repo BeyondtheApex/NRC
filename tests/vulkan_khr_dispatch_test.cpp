@@ -2,6 +2,7 @@
 #include "nrc/nrc_reference_nn.hpp"
 #include "nrc/nrc_weights.hpp"
 #include "nrc/vulkan/nrc_vulkan_capabilities.hpp"
+#include "nrc/vulkan/nrc_vulkan_descriptors.hpp"
 #include "nrc/vulkan/nrc_vulkan_pipeline.hpp"
 #include "nrc/vulkan/nrc_vulkan_shader.hpp"
 
@@ -447,21 +448,19 @@ private:
     }
 
     void create_descriptor_set_layout() {
-        std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
-        for (std::uint32_t i = 0; i < bindings.size(); ++i) {
-            bindings[i].binding = i;
-            bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            bindings[i].descriptorCount = 1;
-            bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        }
+        const std::array<nrc::vulkan::VulkanStorageBufferBinding, 3> bindings = {{
+            {0, VK_SHADER_STAGE_COMPUTE_BIT},
+            {1, VK_SHADER_STAGE_COMPUTE_BIT},
+            {2, VK_SHADER_STAGE_COMPUTE_BIT},
+        }};
 
-        VkDescriptorSetLayoutCreateInfo createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        createInfo.bindingCount = static_cast<std::uint32_t>(bindings.size());
-        createInfo.pBindings = bindings.data();
-
-        check_vk(vkCreateDescriptorSetLayout(device_, &createInfo, nullptr, &descriptorSetLayout_),
-                 "vkCreateDescriptorSetLayout");
+        nrc::vulkan::VulkanStorageBufferDescriptorSetLayoutCreateInfo createInfo{};
+        createInfo.device = device_;
+        createInfo.bindings = bindings;
+        const nrc::vulkan::VulkanDescriptorSetLayoutCreateResult result =
+            nrc::vulkan::create_storage_buffer_descriptor_set_layout(createInfo);
+        check_vk(result.validation.vkResult, "vkCreateDescriptorSetLayout");
+        descriptorSetLayout_ = result.layout;
     }
 
     void create_pipeline_layout() {
@@ -653,25 +652,18 @@ private:
                                const Buffer &weights,
                                const Buffer &inputs,
                                const Buffer &outputs) const {
-        std::array<VkDescriptorBufferInfo, 3> bufferInfos{};
-        bufferInfos[0].buffer = weights.buffer;
-        bufferInfos[0].range = weights.size;
-        bufferInfos[1].buffer = inputs.buffer;
-        bufferInfos[1].range = inputs.size;
-        bufferInfos[2].buffer = outputs.buffer;
-        bufferInfos[2].range = outputs.size;
-
-        std::array<VkWriteDescriptorSet, 3> writes{};
-        for (std::uint32_t i = 0; i < writes.size(); ++i) {
-            writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[i].dstSet = descriptorSet;
-            writes[i].dstBinding = i;
-            writes[i].descriptorCount = 1;
-            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            writes[i].pBufferInfo = &bufferInfos[i];
-        }
-
-        vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        const std::array<nrc::vulkan::VulkanStorageBufferDescriptorWrite, 3> writes = {{
+            {0, weights.buffer, 0, weights.size},
+            {1, inputs.buffer, 0, inputs.size},
+            {2, outputs.buffer, 0, outputs.size},
+        }};
+        nrc::vulkan::VulkanStorageBufferDescriptorUpdate update{};
+        update.device = device_;
+        update.descriptorSet = descriptorSet;
+        update.buffers = writes;
+        const nrc::vulkan::VulkanValidationStep validation =
+            nrc::vulkan::update_storage_buffer_descriptors(update);
+        check_vk(validation.vkResult, "vkUpdateDescriptorSets");
     }
 
     VkCommandBuffer allocate_command_buffer() const {

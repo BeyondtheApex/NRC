@@ -1,7 +1,9 @@
 #include "nrc/vulkan/nrc_vulkan_capabilities.hpp"
+#include "nrc/vulkan/nrc_vulkan_descriptors.hpp"
 #include "nrc/vulkan/nrc_vulkan_pipeline.hpp"
 #include "nrc/vulkan/nrc_vulkan_shader.hpp"
 
+#include <array>
 #include <cstdlib>
 #include <iostream>
 
@@ -59,6 +61,35 @@ int main() {
     property.scope = VK_SCOPE_WORKGROUP_KHR;
     auto noSubgroup = nrc::vulkan::translate_cooperative_matrix_property(property, VK_SHADER_STAGE_COMPUTE_BIT);
     ok &= require(!noSubgroup.has_value(), "reject non-subgroup cooperative matrix property");
+
+    const nrc::vulkan::VulkanDescriptorSetLayoutCreateResult invalidDescriptorLayout =
+        nrc::vulkan::create_storage_buffer_descriptor_set_layout({});
+    ok &= require(invalidDescriptorLayout.layout == VK_NULL_HANDLE,
+                  "invalid descriptor layout request returns null layout");
+    ok &= require(invalidDescriptorLayout.validation.status ==
+                      nrc::vulkan::VulkanValidationStepStatus::Failed,
+                  "invalid descriptor layout request fails safely");
+    ok &= require(invalidDescriptorLayout.validation.vkResult == VK_ERROR_INITIALIZATION_FAILED,
+                  "invalid descriptor layout request records initialization failure");
+
+    const std::array<nrc::vulkan::VulkanStorageBufferBinding, 2> duplicateBindings = {{
+        {0, VK_SHADER_STAGE_COMPUTE_BIT},
+        {0, VK_SHADER_STAGE_COMPUTE_BIT},
+    }};
+    nrc::vulkan::VulkanStorageBufferDescriptorSetLayoutCreateInfo duplicateLayoutInfo{};
+    duplicateLayoutInfo.bindings = duplicateBindings;
+    const nrc::vulkan::VulkanDescriptorSetLayoutCreateResult duplicateDescriptorLayout =
+        nrc::vulkan::create_storage_buffer_descriptor_set_layout(duplicateLayoutInfo);
+    ok &= require(duplicateDescriptorLayout.validation.status ==
+                      nrc::vulkan::VulkanValidationStepStatus::Failed,
+                  "duplicate descriptor layout bindings fail safely");
+
+    const nrc::vulkan::VulkanValidationStep invalidDescriptorUpdate =
+        nrc::vulkan::update_storage_buffer_descriptors({});
+    ok &= require(invalidDescriptorUpdate.status == nrc::vulkan::VulkanValidationStepStatus::Failed,
+                  "invalid descriptor update fails safely");
+    ok &= require(invalidDescriptorUpdate.vkResult == VK_ERROR_INITIALIZATION_FAILED,
+                  "invalid descriptor update records initialization failure");
 
     const nrc::vulkan::VulkanShaderModuleCreateResult invalidShaderModule =
         nrc::vulkan::create_shader_module({});

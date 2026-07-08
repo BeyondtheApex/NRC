@@ -44,6 +44,7 @@ if(NRC_BUILD_VULKAN_RUNTIME)
         add_library(nrc_vulkan STATIC)
         target_sources(nrc_vulkan PRIVATE
             runtime/vulkan/nrc_vulkan_capabilities.cpp
+            runtime/vulkan/nrc_vulkan_descriptors.cpp
             runtime/vulkan/nrc_vulkan_pipeline.cpp
             runtime/vulkan/nrc_vulkan_shader.cpp)
         target_link_libraries(nrc_vulkan PUBLIC

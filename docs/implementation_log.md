@@ -2218,3 +2218,77 @@ The Vulkan validation chain is now:
 ### Next Step
 
 Promote a small reusable SPIR-V file loading helper for tests/sample use, or move the next layer up and extract descriptor/resource barrier helpers needed by scalar and KHR dispatch validation.
+
+## 2026-07-09 - Milestone 30 Vulkan Storage Buffer Descriptor Helpers
+
+### Implemented
+
+- Added reusable storage-buffer descriptor helper API:
+  - `include/nrc/vulkan/nrc_vulkan_descriptors.hpp`
+  - `runtime/vulkan/nrc_vulkan_descriptors.cpp`
+  - `nrc::vulkan::VulkanStorageBufferBinding`
+  - `nrc::vulkan::VulkanStorageBufferDescriptorSetLayoutCreateInfo`
+  - `nrc::vulkan::VulkanDescriptorSetLayoutCreateResult`
+  - `nrc::vulkan::VulkanStorageBufferDescriptorWrite`
+  - `nrc::vulkan::VulkanStorageBufferDescriptorUpdate`
+  - `nrc::vulkan::create_storage_buffer_descriptor_set_layout`
+  - `nrc::vulkan::update_storage_buffer_descriptors`
+- The layout helper validates:
+  - non-null device;
+  - non-empty binding list;
+  - no duplicate bindings;
+  - non-zero stage flags.
+- The descriptor update helper validates:
+  - non-null device;
+  - non-null descriptor set;
+  - non-empty descriptor list;
+  - non-null buffers;
+  - non-zero ranges.
+- Refactored:
+  - `nrc_vulkan_scalar_dispatch_test`
+  - `nrc_vulkan_khr_dispatch_test`
+- Extended `nrc_vulkan_capabilities_test` to cover invalid descriptor layout/update requests.
+- Updated documentation:
+  - `docs/vulkan_capability_query.md`
+  - `docs/vulkan_dispatch_harness.md`
+  - `docs/khr_coopmat_backend.md`
+  - `README.md`
+
+### Behavior
+
+The helper intentionally covers only the common scalar/KHR validation shape:
+
+- storage buffers only;
+- one descriptor per binding;
+- explicit binding numbers;
+- caller-owned descriptor pools and descriptor sets;
+- caller-owned descriptor set layout lifetime.
+
+This avoids imposing an allocator or descriptor pool policy on integrations such as MCVR while still removing repeated layout/write boilerplate from the validation harness.
+
+### Validation
+
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_capabilities_test nrc_vulkan_scalar_dispatch_test nrc_vulkan_khr_dispatch_test`
+- Targeted verbose tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_capabilities_test|nrc_vulkan_scalar_dispatch_test|nrc_vulkan_khr_dispatch_test" --output-on-failure -V`
+- Verbose KHR dispatch test still reports a controlled local skip:
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR cooperative matrix shader`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- The helper does not allocate descriptor pools or descriptor sets.
+- The helper does not handle storage images, sampled images, samplers, acceleration structures, descriptor arrays, or bindless descriptors.
+- The scalar inference sample/test path still has image descriptor boilerplate outside this helper.
+- The local AMD KHR dispatch path still cannot numerically validate because pipeline creation raises a structured exception and is reported as a controlled skip.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Promote resource barrier helpers shared by scalar/KHR/queue/training dispatch tests, or add image descriptor helpers for the scalar inference pass and reference path tracer sample.

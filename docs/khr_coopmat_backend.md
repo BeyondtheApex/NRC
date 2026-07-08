@@ -53,6 +53,7 @@ The test:
 - Queries real Vulkan device capabilities through `nrc::vulkan::query_device_capabilities`.
 - Selects an implemented KHR inference profile with `requireTraining = false`.
 - Creates the device with KHR cooperative matrix, shader float16, storage buffer 16-bit access, subgroup size control, and full compute subgroup features.
+- Creates and updates the storage-buffer descriptor set layout through the reusable Vulkan descriptor helpers.
 - Creates the shader module through `nrc::vulkan::create_shader_module` and records the result in `VulkanProfileValidationReport`.
 - Creates the compute pipeline through `nrc::vulkan::create_profile_compute_pipeline`, which applies `VkPipelineShaderStageRequiredSubgroupSizeCreateInfo` and `VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT` from the selected `ProfileShaderConfig`.
 - Dispatches 149 samples and compares against an fp16-rounded CPU reference if pipeline creation and dispatch succeed.

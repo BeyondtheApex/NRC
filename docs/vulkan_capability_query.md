@@ -92,6 +92,25 @@ Header:
 
 The helper does not read files or own the returned shader module. Callers keep control of their asset system and must destroy the result with `vkDestroyShaderModule`.
 
+## Storage Buffer Descriptor Helper
+
+`nrc::vulkan::create_storage_buffer_descriptor_set_layout` creates a descriptor set layout from explicit storage-buffer bindings. `nrc::vulkan::update_storage_buffer_descriptors` writes storage-buffer descriptors into a caller-allocated descriptor set.
+
+Header:
+
+```cpp
+#include "nrc/vulkan/nrc_vulkan_descriptors.hpp"
+```
+
+The helper is intentionally narrow:
+
+- storage buffers only;
+- one descriptor per binding;
+- caller-owned descriptor pools and descriptor sets;
+- caller-owned layout destruction through `vkDestroyDescriptorSetLayout`.
+
+This covers the scalar and KHR forward dispatch validation path while leaving image descriptors, samplers, bindless arrays, and engine-specific descriptor allocation policies to the host renderer.
+
 ## Profile Compute Pipeline Helper
 
 `nrc::vulkan::create_profile_compute_pipeline` creates a compute pipeline from a caller-owned device, shader module, pipeline layout, and `ProfileShaderConfig`.
@@ -118,4 +137,4 @@ The helper does not own the returned pipeline. Callers must destroy it with `vkD
 
 ## Current Limit
 
-This module reports capabilities, aggregates profile validation state, creates shader modules from already-loaded SPIR-V words, and provides a small profile-aware compute pipeline creation helper. It does not create devices, enable features, compile shaders, read shader files, create pipeline layouts, create descriptors/resources, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own renderer code, then feed shader/pipeline/numerical outcomes back into `VulkanProfileValidationRequirements`.
+This module reports capabilities, aggregates profile validation state, creates shader modules from already-loaded SPIR-V words, writes simple storage-buffer descriptors, and provides a small profile-aware compute pipeline creation helper. It does not create devices, enable features, compile shaders, read shader files, create pipeline layouts, allocate descriptor pools/sets, create resources, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own renderer code, then feed shader/pipeline/numerical outcomes back into `VulkanProfileValidationRequirements`.

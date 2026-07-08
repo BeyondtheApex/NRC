@@ -50,12 +50,14 @@ This keeps the test focused on shader/runtime correctness rather than expected f
 - The test dispatches 73 samples to verify non-multiple-of-workgroup guards.
 - The test uses host-visible coherent storage buffers to avoid adding staging/copy complexity at this stage.
 - If no Vulkan 1.1 compute device or compatible host-visible coherent memory type is available, the test prints `SKIP:` and returns success.
+- The scalar dispatch descriptor set layout/update path uses `nrc::vulkan::create_storage_buffer_descriptor_set_layout` and `nrc::vulkan::update_storage_buffer_descriptors`.
 
 KHR-specific behavior:
 
 - The KHR dispatch shader uses `local_size_x = NRC_KHR_WORKGROUP_SIZE`, currently 128.
 - The test dispatches 149 samples to verify padded final workgroups.
 - The test selects SG32, SG16, or M8/SG32 SPIR-V through `nrc::find_profile_shader_config` after choosing an implemented profile from queried capabilities.
+- The KHR dispatch descriptor set layout/update path uses the same reusable storage-buffer descriptor helpers as the scalar dispatch test.
 - The KHR shader module is created through `nrc::vulkan::create_shader_module` and fed into `nrc::vulkan::evaluate_vulkan_profile_validation`.
 - The KHR pipeline is created through `nrc::vulkan::create_profile_compute_pipeline`, which applies the selected subgroup size and full compute subgroup requirements from `ProfileShaderConfig`.
 - On MSVC/Windows, the test catches structured exceptions from `vkCreateComputePipelines` and reports a controlled `SKIP:`. This is needed because the current local AMD driver advertises the profile but raises an exception while compiling the VkNRC-style KHR cooperative matrix shader.
@@ -75,4 +77,4 @@ The same pattern should be reused for:
 - Reference path tracer integration using the validated scalar inference pass.
 - Regression tests for future backend layout changes.
 
-The final runtime helper should not copy this test harness wholesale. It should continue promoting only reusable pieces: descriptor contract creation, resource barriers, and dispatch/numerical validation scaffolding.
+The final runtime helper should not copy this test harness wholesale. It should continue promoting only reusable pieces: image descriptor helpers, resource barriers, and dispatch/numerical validation scaffolding.
