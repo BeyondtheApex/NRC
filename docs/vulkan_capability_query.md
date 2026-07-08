@@ -129,9 +129,11 @@ Current descriptor update exclusions:
 
 This covers the scalar/KHR forward dispatch validation path and the scalar inference storage-image path while leaving engine-specific descriptor allocation policies to the host renderer.
 
-## Memory Barrier Helper
+## Memory/Pipeline Barrier Helpers
 
 `nrc::vulkan::cmd_memory_barrier` records a single `VkMemoryBarrier` and returns a `VulkanValidationStep`.
+
+`nrc::vulkan::cmd_pipeline_barrier` records caller-specified memory access barriers and image barriers in one `vkCmdPipelineBarrier` call. `nrc::vulkan::color_image_barrier` builds a one-mip, one-layer color image barrier for common storage-image upload/compute/readback transitions.
 
 Header:
 
@@ -145,7 +147,7 @@ Common presets are available for the dispatch validation path:
 - `compute_shader_write_to_host_read_barrier`
 - `compute_shader_write_to_compute_shader_barrier`
 
-The helper is deliberately limited to memory barriers. It does not perform image layout transitions or buffer/image memory barriers yet.
+The helpers do not track resource states, allocate resources, or infer queue ownership. Callers pass explicit stages, access masks, layouts, and subresource ranges.
 
 ## Compute Pipeline Helpers
 
@@ -175,4 +177,4 @@ The helpers do not own returned pipelines. Callers must destroy them with `vkDes
 
 ## Current Limit
 
-This module reports capabilities, aggregates profile validation state, creates shader modules from already-loaded SPIR-V words, creates descriptor set layouts, writes simple storage-buffer/storage-image descriptors, records simple memory barriers, and provides small compute pipeline creation helpers. It does not create devices, enable features, compile shaders, read shader files, create pipeline layouts, allocate descriptor pools/sets, create resources, perform image layout transitions, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own renderer code, then feed shader/pipeline/numerical outcomes back into `VulkanProfileValidationRequirements`.
+This module reports capabilities, aggregates profile validation state, creates shader modules from already-loaded SPIR-V words, creates descriptor set layouts, writes simple storage-buffer/storage-image descriptors, records simple memory/image pipeline barriers, and provides small compute pipeline creation helpers. It does not create devices, enable features, compile shaders, read shader files, create pipeline layouts, allocate descriptor pools/sets, create resources, track resource states, or dispatch NRC workloads. Applications and tests should run those Vulkan operations through their own renderer code, then feed shader/pipeline/numerical outcomes back into `VulkanProfileValidationRequirements`.

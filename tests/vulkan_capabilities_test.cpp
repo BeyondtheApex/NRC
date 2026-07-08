@@ -81,12 +81,38 @@ int main() {
     ok &= require(shaderToHost.dstAccessMask == VK_ACCESS_HOST_READ_BIT,
                   "shader to host barrier destination access");
 
+    const nrc::vulkan::VulkanImageBarrier colorBarrier =
+        nrc::vulkan::color_image_barrier(VK_NULL_HANDLE,
+                                         VK_IMAGE_LAYOUT_UNDEFINED,
+                                         VK_IMAGE_LAYOUT_GENERAL,
+                                         0,
+                                         VK_ACCESS_SHADER_WRITE_BIT);
+    ok &= require(colorBarrier.oldLayout == VK_IMAGE_LAYOUT_UNDEFINED,
+                  "color image barrier old layout");
+    ok &= require(colorBarrier.newLayout == VK_IMAGE_LAYOUT_GENERAL,
+                  "color image barrier new layout");
+    ok &= require(colorBarrier.dstAccessMask == VK_ACCESS_SHADER_WRITE_BIT,
+                  "color image barrier destination access");
+    ok &= require(colorBarrier.subresourceRange.aspectMask == VK_IMAGE_ASPECT_COLOR_BIT,
+                  "color image barrier aspect mask");
+    ok &= require(colorBarrier.subresourceRange.levelCount == 1,
+                  "color image barrier level count");
+    ok &= require(colorBarrier.subresourceRange.layerCount == 1,
+                  "color image barrier layer count");
+
     const nrc::vulkan::VulkanValidationStep invalidBarrier =
         nrc::vulkan::cmd_memory_barrier(VK_NULL_HANDLE, hostToCompute);
     ok &= require(invalidBarrier.status == nrc::vulkan::VulkanValidationStepStatus::Failed,
                   "invalid memory barrier request fails safely");
     ok &= require(invalidBarrier.vkResult == VK_ERROR_INITIALIZATION_FAILED,
                   "invalid memory barrier request records initialization failure");
+
+    const nrc::vulkan::VulkanValidationStep invalidPipelineBarrier =
+        nrc::vulkan::cmd_pipeline_barrier({});
+    ok &= require(invalidPipelineBarrier.status == nrc::vulkan::VulkanValidationStepStatus::Failed,
+                  "invalid pipeline barrier request fails safely");
+    ok &= require(invalidPipelineBarrier.vkResult == VK_ERROR_INITIALIZATION_FAILED,
+                  "invalid pipeline barrier request records initialization failure");
 
     const nrc::vulkan::VulkanDescriptorSetLayoutCreateResult invalidDescriptorLayout =
         nrc::vulkan::create_storage_buffer_descriptor_set_layout({});

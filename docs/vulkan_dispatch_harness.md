@@ -70,6 +70,7 @@ Inference-specific behavior:
 
 - The scalar inference shader module and non-profile compute pipeline use `nrc::vulkan::create_shader_module` plus plain `nrc::vulkan::create_compute_pipeline`.
 - The scalar inference descriptor set layout/update path uses `nrc::vulkan::create_descriptor_set_layout`, `nrc::vulkan::update_storage_buffer_descriptors`, and `nrc::vulkan::update_storage_image_descriptors`.
+- The scalar inference image layout transitions use `nrc::vulkan::color_image_barrier` and `nrc::vulkan::cmd_pipeline_barrier`.
 - The scalar inference test creates optimal-tiled `rgba32f` and `rg32f` storage images.
 - It uploads images through staging buffers, dispatches compute in `VK_IMAGE_LAYOUT_GENERAL`, then copies the screen output image back for verification.
 - It also verifies shader writes to the host-visible train-record buffer.
@@ -89,4 +90,4 @@ The same pattern should be reused for:
 - Reference path tracer integration using the validated scalar inference pass.
 - Regression tests for future backend layout changes.
 
-The final runtime helper should not copy this test harness wholesale. It should continue promoting only reusable pieces: sample descriptor migration, image layout transitions, and dispatch/numerical validation scaffolding.
+The final runtime helper should not copy this test harness wholesale. It should continue promoting only reusable pieces: sample descriptor/barrier migration and dispatch/numerical validation scaffolding.

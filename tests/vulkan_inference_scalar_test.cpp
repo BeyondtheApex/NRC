@@ -1,6 +1,7 @@
 #include "nrc/nrc_records.hpp"
 #include "nrc/nrc_reference_nn.hpp"
 #include "nrc/nrc_weights.hpp"
+#include "nrc/vulkan/nrc_vulkan_barriers.hpp"
 #include "nrc/vulkan/nrc_vulkan_descriptors.hpp"
 #include "nrc/vulkan/nrc_vulkan_pipeline.hpp"
 #include "nrc/vulkan/nrc_vulkan_shader.hpp"
@@ -756,26 +757,6 @@ private:
         return commandBuffer;
     }
 
-    VkImageMemoryBarrier image_barrier(const Image &image,
-                                       VkImageLayout oldLayout,
-                                       VkImageLayout newLayout,
-                                       VkAccessFlags srcAccess,
-                                       VkAccessFlags dstAccess) const {
-        VkImageMemoryBarrier barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.srcAccessMask = srcAccess;
-        barrier.dstAccessMask = dstAccess;
-        barrier.oldLayout = oldLayout;
-        barrier.newLayout = newLayout;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = image.image;
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.layerCount = 1;
-        return barrier;
-    }
-
     void copy_buffer_to_image(VkCommandBuffer commandBuffer, const Buffer &buffer, const Image &image) const {
         VkBufferImageCopy region{};
         region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -814,74 +795,62 @@ private:
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         check_vk(vkBeginCommandBuffer(commandBuffer, &beginInfo), "vkBeginCommandBuffer");
 
-        VkMemoryBarrier hostToTransfer{};
-        hostToTransfer.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        hostToTransfer.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-        hostToTransfer.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        vkCmdPipelineBarrier(commandBuffer,
-                             VK_PIPELINE_STAGE_HOST_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0,
-                             1,
-                             &hostToTransfer,
-                             0,
-                             nullptr,
-                             0,
-                             nullptr);
+        nrc::vulkan::VulkanValidationStep barrierValidation =
+            nrc::vulkan::cmd_memory_barrier(
+                commandBuffer,
+                {VK_PIPELINE_STAGE_HOST_BIT,
+                 VK_PIPELINE_STAGE_TRANSFER_BIT,
+                 VK_ACCESS_HOST_WRITE_BIT,
+                 VK_ACCESS_TRANSFER_READ_BIT,
+                 0});
+        check_vk(barrierValidation.vkResult, "host-to-transfer barrier");
 
-        std::array<VkImageMemoryBarrier, 2> uploadBarriers = {
-            image_barrier(biasImage,
-                          VK_IMAGE_LAYOUT_UNDEFINED,
-                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                          0,
-                          VK_ACCESS_TRANSFER_WRITE_BIT),
-            image_barrier(factorImage,
-                          VK_IMAGE_LAYOUT_UNDEFINED,
-                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                          0,
-                          VK_ACCESS_TRANSFER_WRITE_BIT),
-        };
-        vkCmdPipelineBarrier(commandBuffer,
-                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0,
-                             0,
-                             nullptr,
-                             0,
-                             nullptr,
-                             static_cast<std::uint32_t>(uploadBarriers.size()),
-                             uploadBarriers.data());
+        const std::array<nrc::vulkan::VulkanImageBarrier, 2> uploadBarriers = {{
+            nrc::vulkan::color_image_barrier(biasImage.image,
+                                             VK_IMAGE_LAYOUT_UNDEFINED,
+                                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                             0,
+                                             VK_ACCESS_TRANSFER_WRITE_BIT),
+            nrc::vulkan::color_image_barrier(factorImage.image,
+                                             VK_IMAGE_LAYOUT_UNDEFINED,
+                                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                             0,
+                                             VK_ACCESS_TRANSFER_WRITE_BIT),
+        }};
+        nrc::vulkan::VulkanPipelineBarrierInfo uploadBarrierInfo{};
+        uploadBarrierInfo.commandBuffer = commandBuffer;
+        uploadBarrierInfo.srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        uploadBarrierInfo.dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        uploadBarrierInfo.imageBarriers = uploadBarriers;
+        barrierValidation = nrc::vulkan::cmd_pipeline_barrier(uploadBarrierInfo);
+        check_vk(barrierValidation.vkResult, "image upload layout barrier");
 
         copy_buffer_to_image(commandBuffer, biasUpload, biasImage);
         copy_buffer_to_image(commandBuffer, factorUpload, factorImage);
 
-        std::array<VkImageMemoryBarrier, 2> computeImageBarriers = {
-            image_barrier(biasImage,
-                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                          VK_IMAGE_LAYOUT_GENERAL,
-                          VK_ACCESS_TRANSFER_WRITE_BIT,
-                          VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT),
-            image_barrier(factorImage,
-                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                          VK_IMAGE_LAYOUT_GENERAL,
-                          VK_ACCESS_TRANSFER_WRITE_BIT,
-                          VK_ACCESS_SHADER_READ_BIT),
-        };
-
-        VkMemoryBarrier hostToShader{};
-        hostToShader.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        hostToShader.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-        hostToShader.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-        vkCmdPipelineBarrier(commandBuffer,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             0,
-                             1,
-                             &hostToShader,
-                             0,
-                             nullptr,
-                             static_cast<std::uint32_t>(computeImageBarriers.size()),
-                             computeImageBarriers.data());
+        const std::array<nrc::vulkan::VulkanImageBarrier, 2> computeImageBarriers = {{
+            nrc::vulkan::color_image_barrier(biasImage.image,
+                                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                             VK_IMAGE_LAYOUT_GENERAL,
+                                             VK_ACCESS_TRANSFER_WRITE_BIT,
+                                             VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT),
+            nrc::vulkan::color_image_barrier(factorImage.image,
+                                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                             VK_IMAGE_LAYOUT_GENERAL,
+                                             VK_ACCESS_TRANSFER_WRITE_BIT,
+                                             VK_ACCESS_SHADER_READ_BIT),
+        }};
+        const std::array<nrc::vulkan::VulkanMemoryAccessBarrier, 1> hostToShaderBarriers = {{
+            {VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT},
+        }};
+        nrc::vulkan::VulkanPipelineBarrierInfo computeBarrierInfo{};
+        computeBarrierInfo.commandBuffer = commandBuffer;
+        computeBarrierInfo.srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT;
+        computeBarrierInfo.dstStageMask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+        computeBarrierInfo.memoryBarriers = hostToShaderBarriers;
+        computeBarrierInfo.imageBarriers = computeImageBarriers;
+        barrierValidation = nrc::vulkan::cmd_pipeline_barrier(computeBarrierInfo);
+        check_vk(barrierValidation.vkResult, "transfer-to-compute barrier");
 
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
         vkCmdBindDescriptorSets(commandBuffer,
@@ -896,42 +865,36 @@ private:
         const std::uint32_t groupCount = (evalCount + kWorkgroupSize - 1u) / kWorkgroupSize;
         vkCmdDispatch(commandBuffer, groupCount, 1, 1);
 
-        VkImageMemoryBarrier readbackBarrier = image_barrier(biasImage,
-                                                             VK_IMAGE_LAYOUT_GENERAL,
-                                                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                                             VK_ACCESS_SHADER_WRITE_BIT,
-                                                             VK_ACCESS_TRANSFER_READ_BIT);
-        VkMemoryBarrier shaderToHost{};
-        shaderToHost.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        shaderToHost.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        shaderToHost.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-        vkCmdPipelineBarrier(commandBuffer,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT,
-                             0,
-                             1,
-                             &shaderToHost,
-                             0,
-                             nullptr,
-                             1,
-                             &readbackBarrier);
+        const std::array<nrc::vulkan::VulkanImageBarrier, 1> readbackBarriers = {{
+            nrc::vulkan::color_image_barrier(biasImage.image,
+                                             VK_IMAGE_LAYOUT_GENERAL,
+                                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                             VK_ACCESS_SHADER_WRITE_BIT,
+                                             VK_ACCESS_TRANSFER_READ_BIT),
+        }};
+        const std::array<nrc::vulkan::VulkanMemoryAccessBarrier, 1> shaderToHostBarriers = {{
+            {VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT},
+        }};
+        nrc::vulkan::VulkanPipelineBarrierInfo readbackBarrierInfo{};
+        readbackBarrierInfo.commandBuffer = commandBuffer;
+        readbackBarrierInfo.srcStageMask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+        readbackBarrierInfo.dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT;
+        readbackBarrierInfo.memoryBarriers = shaderToHostBarriers;
+        readbackBarrierInfo.imageBarriers = readbackBarriers;
+        barrierValidation = nrc::vulkan::cmd_pipeline_barrier(readbackBarrierInfo);
+        check_vk(barrierValidation.vkResult, "compute-to-readback barrier");
 
         copy_image_to_buffer(commandBuffer, biasImage, biasReadback);
 
-        VkMemoryBarrier transferToHost{};
-        transferToHost.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        transferToHost.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        transferToHost.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-        vkCmdPipelineBarrier(commandBuffer,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_HOST_BIT,
-                             0,
-                             1,
-                             &transferToHost,
-                             0,
-                             nullptr,
-                             0,
-                             nullptr);
+        barrierValidation =
+            nrc::vulkan::cmd_memory_barrier(
+                commandBuffer,
+                {VK_PIPELINE_STAGE_TRANSFER_BIT,
+                 VK_PIPELINE_STAGE_HOST_BIT,
+                 VK_ACCESS_TRANSFER_WRITE_BIT,
+                 VK_ACCESS_HOST_READ_BIT,
+                 0});
+        check_vk(barrierValidation.vkResult, "transfer-to-host barrier");
 
         check_vk(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer");
     }

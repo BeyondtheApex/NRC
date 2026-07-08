@@ -2640,3 +2640,58 @@ The generic layout helper accepts explicit Vulkan descriptor types but still lea
 ### Next Step
 
 Add reusable image layout transition helpers, adopt them in scalar inference, then migrate the sample path tracer descriptor and image-transition boilerplate onto the same helper layer.
+
+## 2026-07-09 - Milestone 38 Image Pipeline Barrier Helper Adoption
+
+### Implemented
+
+- Extended the Vulkan barrier helper API with:
+  - `nrc::vulkan::VulkanMemoryAccessBarrier`
+  - `nrc::vulkan::VulkanImageBarrier`
+  - `nrc::vulkan::VulkanPipelineBarrierInfo`
+  - `nrc::vulkan::color_image_barrier`
+  - `nrc::vulkan::cmd_pipeline_barrier`
+- Kept the existing `nrc::vulkan::cmd_memory_barrier` API unchanged for simple memory-only barriers.
+- Implemented `cmd_pipeline_barrier` so callers can record memory access barriers and image barriers in one `vkCmdPipelineBarrier` call.
+- Extended `nrc_vulkan_capabilities_test` with:
+  - color image barrier field checks;
+  - invalid pipeline barrier request checks.
+- Refactored `nrc_vulkan_inference_scalar_test` so storage-image upload, compute, and readback layout transitions use `color_image_barrier` plus `cmd_pipeline_barrier`.
+- Refactored scalar inference host/transfer memory-only barriers to use `cmd_memory_barrier`.
+- Updated `docs/vulkan_capability_query.md` and `docs/vulkan_dispatch_harness.md`.
+
+### Behavior
+
+This milestone preserves the scalar inference synchronization plan:
+
+- host writes become visible to transfer reads;
+- bias/factor images transition from `UNDEFINED` to `TRANSFER_DST_OPTIMAL`;
+- copied images transition to `GENERAL` for compute;
+- the bias image transitions to `TRANSFER_SRC_OPTIMAL` for readback;
+- transfer writes become visible to host reads.
+
+The new `cmd_pipeline_barrier` helper keeps the memory+image barrier cases combined into a single Vulkan pipeline barrier call, matching the previous local test code rather than splitting them into extra barriers.
+
+### Validation
+
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_capabilities_test nrc_vulkan_inference_scalar_test`
+- Targeted verbose tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_capabilities_test|nrc_vulkan_inference_scalar_test" --output-on-failure -V`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- The helper records explicit barriers but does not track resource states or infer layout transitions.
+- The sample path tracer still owns local descriptor, shader/pipeline, and image-transition boilerplate.
+- Buffer image copy helpers are still local to scalar inference and the sample.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Migrate the sample path tracer onto the reusable descriptor, shader module, compute pipeline, and barrier helpers, or add small buffer/image copy helpers before doing that migration.
