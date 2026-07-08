@@ -1,0 +1,38 @@
+#version 460
+
+#define NRC_NN_BACKPROPAGATION
+#define NRC_NN_SET 0
+#define NRC_NN_WEIGHTS_BINDING 0
+#define NRC_NN_DWEIGHTS_BINDING 1
+#include "nrc/backend/khr_coopmat/NrcNNKhr.glsl"
+
+layout(local_size_x = NRC_KHR_WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 2) buffer NrcKhrBackpropSmokeOutput {
+    vec4 value[];
+} nrcKhrBackpropSmokeOutput;
+
+void main() {
+    NrcUnpackedInput sampleInput;
+    sampleInput.position = vec3(0.25, 0.5, 0.75);
+    sampleInput.scatteredDir = vec2(0.1, 0.9);
+    sampleInput.normal = vec2(0.5, 0.5);
+    sampleInput.roughness = 0.35;
+    sampleInput.diffuse = vec3(0.8, 0.7, 0.6);
+    sampleInput.specular = vec3(0.1, 0.2, 0.3);
+
+    uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT];
+    NrcEncodeInput(sampleInput, encoded);
+
+    vec3 prediction;
+    NrcKhrForward(encoded, prediction);
+
+    float dOutput[NRC_NN_OUTPUT_WIDTH];
+    NrcKhrOutputDerivative(prediction, vec3(0.2, 0.3, 0.4), dOutput);
+
+    if (gl_LocalInvocationID.x < NRC_NN_OUTPUT_WIDTH) {
+        NrcKhrGradientAtomicAdd(gl_LocalInvocationID.x, dOutput[gl_LocalInvocationID.x]);
+    }
+
+    nrcKhrBackpropSmokeOutput.value[gl_LocalInvocationID.x] = vec4(prediction, dOutput[0]);
+}

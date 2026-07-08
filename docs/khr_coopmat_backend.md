@@ -6,7 +6,7 @@ The first KHR backend is `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl`.
 
 Implemented:
 
-- Forward inference only.
+- Forward inference.
 - 64 input values.
 - 5 hidden ReLU layers of width 64.
 - 3 output values.
@@ -15,12 +15,18 @@ Implemented:
 - Workgroup size 128.
 - Subgroup size 16 or 32, selected by `NRC_KHR_SUBGROUP_SIZE`.
 - Matrix M size selected by `NRC_KHR_COOPMAT_M`.
+- Backpropagation ABI groundwork behind `NRC_NN_BACKPROPAGATION`:
+  - writable fp32 gradient buffer binding;
+  - scalar relative-L2 luminance output derivative;
+  - fp32 storage-buffer atomic add helper;
+  - enlarged shared-buffer allocation for future per-subgroup gradient reductions.
 
 Not implemented yet:
 
-- Backpropagation.
-- Gradient accumulation.
-- Optimizer.
+- Cooperative-matrix backpropagation through hidden and output layers.
+- Cooperative-matrix gradient accumulation/reduction.
+- A KHR training pass wired to train records.
+- KHR training runtime numerical validation.
 - Runtime numerical validation on a driver that can create the KHR cooperative matrix pipeline successfully.
 
 ## Weight Layout
@@ -41,7 +47,9 @@ NRC_KHR_SUBGROUP_SIZE=16
 NRC_KHR_SUBGROUP_SIZE=32, NRC_KHR_COOPMAT_M=8
 ```
 
-These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support or numerical correctness.
+CTest also compiles the same three variants with `NRC_NN_BACKPROPAGATION` enabled through `tests/shader_compile/nrc_khr_backprop_smoke.comp`. The backprop smoke test exercises the gradient buffer declaration, output derivative, atomic add helper, and forward path in one translation unit.
+
+These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support, gradient correctness, or training performance.
 
 ## Runtime Dispatch Test
 

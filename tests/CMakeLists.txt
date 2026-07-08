@@ -136,6 +136,31 @@ if(NRC_GLSLC)
             "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_khr_smoke.comp"
             "-o"
             "${CMAKE_CURRENT_BINARY_DIR}/nrc_khr_m8_sg32_smoke.spv")
+    add_test(NAME nrc_shader_khr_backprop_sg32_compile
+        COMMAND "${NRC_GLSLC}"
+            "--target-env=vulkan1.3"
+            "-DNRC_KHR_SUBGROUP_SIZE=32"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_khr_backprop_smoke.comp"
+            "-o"
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_khr_backprop_sg32_smoke.spv")
+    add_test(NAME nrc_shader_khr_backprop_sg16_compile
+        COMMAND "${NRC_GLSLC}"
+            "--target-env=vulkan1.3"
+            "-DNRC_KHR_SUBGROUP_SIZE=16"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_khr_backprop_smoke.comp"
+            "-o"
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_khr_backprop_sg16_smoke.spv")
+    add_test(NAME nrc_shader_khr_backprop_m8_sg32_compile
+        COMMAND "${NRC_GLSLC}"
+            "--target-env=vulkan1.3"
+            "-DNRC_KHR_SUBGROUP_SIZE=32"
+            "-DNRC_KHR_COOPMAT_M=8"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_khr_backprop_smoke.comp"
+            "-o"
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_khr_backprop_m8_sg32_smoke.spv")
 
     if(TARGET nrc_vulkan)
         set(NRC_SCALAR_DISPATCH_SPV "${CMAKE_CURRENT_BINARY_DIR}/nrc_scalar_dispatch.spv")

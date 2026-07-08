@@ -2847,3 +2847,50 @@ The number and placement of synchronization points remain aligned with the previ
 ### Next Step
 
 Decide whether to add small buffer/image copy helper wrappers, or shift from helper extraction back to missing NRC coverage: KHR cooperative-matrix training and richer iterative sample/path tracing behavior.
+
+## 2026-07-09 - Milestone 42 KHR Backprop Shader Groundwork
+
+### Implemented
+
+- Added guarded KHR backpropagation declarations to `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl` behind `NRC_NN_BACKPROPAGATION`:
+  - `GL_EXT_shader_atomic_float` requirement;
+  - configurable `NRC_NN_DWEIGHTS_BINDING`;
+  - writable fp32 gradient buffer;
+  - `NrcKhrGradientAtomicAdd`;
+  - `NrcKhrOutputDerivative`, matching the scalar relative-L2 luminance derivative;
+  - a larger shared-buffer allocation path reserved for per-subgroup gradient reductions.
+- Added `tests/shader_compile/nrc_khr_backprop_smoke.comp`.
+- Added compile smoke tests for all currently implemented KHR profile shader shapes:
+  - `nrc_shader_khr_backprop_sg32_compile`
+  - `nrc_shader_khr_backprop_sg16_compile`
+  - `nrc_shader_khr_backprop_m8_sg32_compile`
+- Updated `docs/khr_coopmat_backend.md` to distinguish backprop ABI groundwork from full KHR training support.
+
+### Behavior
+
+This milestone does not add a production KHR gradient pass yet. It establishes the first compile-checked shader-header boundary needed by a future KHR training implementation while preserving the existing forward inference entry point and profile shader variants.
+
+The output derivative intentionally mirrors the scalar gradient pass and CPU reference so future KHR numerical tests can compare against the existing correctness path before optimizing the cooperative-matrix gradient accumulation.
+
+### Validation
+
+- Reconfigured CMake after adding CTest entries:
+  - `cmake -S . -B build`
+- Targeted KHR shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_khr" --output-on-failure -V`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `28/28 tests passed`
+
+### Current Limitations
+
+- Cooperative-matrix dA and dW propagation is still missing.
+- KHR gradient reductions and gradient atomic accumulation are not wired through a full train-record pass.
+- KHR runtime numerical validation still depends on a driver that can create and dispatch the selected cooperative-matrix pipeline.
+
+### Next Step
+
+Implement the output-layer dW path for the KHR backend first, validate its gradient layout against the scalar/CPU reference on a small batch, then extend backward propagation through hidden layers.
