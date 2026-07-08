@@ -1,4 +1,6 @@
 #include "nrc/nrc_constants.hpp"
+#include "nrc/nrc_encoding.hpp"
+#include "nrc/nrc_optimizer.hpp"
 #include "nrc/nrc_records.hpp"
 #include "nrc/nrc_reference_nn.hpp"
 #include "nrc/nrc_weights.hpp"
@@ -15,6 +17,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -26,8 +29,11 @@ constexpr std::uint32_t kWidth = 4;
 constexpr std::uint32_t kHeight = 4;
 constexpr std::uint32_t kPixelCount = kWidth * kHeight;
 constexpr std::uint32_t kTrainRecordCount = 2;
+constexpr std::uint32_t kTrainBufferRecordCount = nrc::kTrainBatchCount * nrc::kTrainBatchSize;
 constexpr std::uint32_t kEvalCapacity = kPixelCount + 1;
 constexpr std::uint32_t kWorkgroupSize = 64;
+constexpr std::uint32_t kGradientWorkgroupSize = 128;
+constexpr std::uint32_t kOptimizeWorkgroupSize = 64;
 constexpr std::uint32_t kSceneTriangleCount = 2;
 
 struct Vec2 {
@@ -66,6 +72,10 @@ struct ExpectedTrainPayload {
     Vec3 factor;
 };
 
+struct SkipTest : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 static_assert(sizeof(SampleSceneVertex) == 64);
 static_assert(sizeof(SampleSceneTriangle) == 192);
 
@@ -76,6 +86,11 @@ struct ProducerConstants {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     std::uint32_t trainRecordCount = 0;
+};
+
+struct TrainingConstants {
+    std::uint32_t batch = 0;
+    std::uint32_t useEmaWeights = 0;
 };
 
 std::string vk_result_string(VkResult result) {
@@ -368,6 +383,74 @@ ExpectedTrainPayload expected_train_payload(const nrc::PackedNrcInput &packedInp
     return payload;
 }
 
+nrc::UnpackedNrcInput expected_unpacked_input(const nrc::PackedNrcInput &packedInput) {
+    const std::array<SampleSceneTriangle, kSceneTriangleCount> sceneTriangles = make_sample_scene();
+    const std::uint32_t primitiveId = std::min(packedInput.primitiveId, kSceneTriangleCount - 1u);
+    const SampleSceneTriangle &triangle = sceneTriangles[primitiveId];
+    const Vec2 barycentric2 = unpack_unorm2x16(packedInput.barycentric2x16U);
+    const Vec2 scatteredDir = unpack_unorm2x16(packedInput.scatteredDir2x16U);
+
+    const Vec4 position = mix_vec4(triangle.v0.position,
+                                   triangle.v1.position,
+                                   triangle.v2.position,
+                                   barycentric2);
+    const Vec4 normalRoughness = mix_vec4(triangle.v0.normalRoughness,
+                                          triangle.v1.normalRoughness,
+                                          triangle.v2.normalRoughness,
+                                          barycentric2);
+    const Vec4 diffuse = mix_vec4(triangle.v0.diffuse,
+                                  triangle.v1.diffuse,
+                                  triangle.v2.diffuse,
+                                  barycentric2);
+    const Vec4 specular = mix_vec4(triangle.v0.specular,
+                                   triangle.v1.specular,
+                                   triangle.v2.specular,
+                                   barycentric2);
+    const Vec3 normal = normalize_vec3({normalRoughness.x, normalRoughness.y, normalRoughness.z});
+    const nrc::Vec2 encodedNormal = nrc::spherical_encode({normal.x, normal.y, normal.z});
+
+    nrc::UnpackedNrcInput input{};
+    input.position = {position.x, position.y, position.z};
+    input.scatteredDir = {scatteredDir.x, scatteredDir.y};
+    input.normal = encodedNormal;
+    input.roughness = std::clamp(normalRoughness.w, 0.0f, 1.0f);
+    input.diffuse = {
+        std::clamp(diffuse.x, 0.0f, 1.0f),
+        std::clamp(diffuse.y, 0.0f, 1.0f),
+        std::clamp(diffuse.z, 0.0f, 1.0f),
+    };
+    input.specular = {
+        std::clamp(specular.x, 0.0f, 1.0f),
+        std::clamp(specular.y, 0.0f, 1.0f),
+        std::clamp(specular.z, 0.0f, 1.0f),
+    };
+    return input;
+}
+
+std::vector<float> make_expected_gradients(std::span<const float> gpuVisibleWeights,
+                                           const std::vector<nrc::NrcTrainRecord> &trainRecords,
+                                           std::uint32_t trainCount) {
+    std::vector<float> gradients(nrc::weight_count(), 0.0f);
+    for (std::uint32_t i = 0; i < trainCount; ++i) {
+        nrc::EncodedInput encoded{};
+        nrc::encode_input(expected_unpacked_input(trainRecords[i].packedInput), encoded);
+        const nrc::ReferenceOutput target{
+            trainRecords[i].biasR,
+            trainRecords[i].biasG,
+            trainRecords[i].biasB,
+        };
+        nrc::reference_backward(gpuVisibleWeights,
+                                encoded,
+                                target,
+                                gradients,
+                                nullptr,
+                                nrc::ReferenceLoss::RelativeL2Luminance,
+                                nrc::kLossScale,
+                                true);
+    }
+    return gradients;
+}
+
 bool same_packed_input(const nrc::PackedNrcInput &lhs, const nrc::PackedNrcInput &rhs) {
     return lhs.primitiveId == rhs.primitiveId &&
            lhs.flipBitInstanceId == rhs.flipBitInstanceId &&
@@ -415,9 +498,33 @@ std::uint32_t decode_train_right(std::uint32_t dst) {
     return dst >> 16u;
 }
 
+bool has_extension(VkPhysicalDevice device, const char *name) {
+    std::uint32_t count = 0;
+    check_vk(vkEnumerateDeviceExtensionProperties(device, nullptr, &count, nullptr),
+             "vkEnumerateDeviceExtensionProperties");
+    std::vector<VkExtensionProperties> extensions(count);
+    check_vk(vkEnumerateDeviceExtensionProperties(device, nullptr, &count, extensions.data()),
+             "vkEnumerateDeviceExtensionProperties");
+    for (const VkExtensionProperties &extension : extensions) {
+        if (std::strcmp(extension.extensionName, name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool close_enough(float lhs, float rhs, float absolute = 5.0e-3f, float relative = 2.0e-3f) {
+    const float tolerance = absolute + relative * std::max(std::fabs(lhs), std::fabs(rhs));
+    return std::fabs(lhs - rhs) <= tolerance;
+}
+
 class MinimalIntegrationSample {
 public:
-    MinimalIntegrationSample(const char *producerSpirv, const char *inferenceSpirv) {
+    MinimalIntegrationSample(const char *producerSpirv,
+                             const char *inferenceSpirv,
+                             const char *trainPrepareSpirv,
+                             const char *gradientSpirv,
+                             const char *optimizeSpirv) {
         create_instance();
         pick_physical_device();
         check_formats();
@@ -425,6 +532,9 @@ public:
         create_command_pool();
         create_producer_pipeline(producerSpirv);
         create_inference_pipeline(inferenceSpirv);
+        create_train_prepare_pipeline(trainPrepareSpirv);
+        create_gradient_pipeline(gradientSpirv);
+        create_optimize_pipeline(optimizeSpirv);
     }
 
     MinimalIntegrationSample(const MinimalIntegrationSample &) = delete;
@@ -441,17 +551,44 @@ public:
             if (inferencePipeline_ != VK_NULL_HANDLE) {
                 vkDestroyPipeline(device_, inferencePipeline_, nullptr);
             }
+            if (optimizePipeline_ != VK_NULL_HANDLE) {
+                vkDestroyPipeline(device_, optimizePipeline_, nullptr);
+            }
+            if (gradientPipeline_ != VK_NULL_HANDLE) {
+                vkDestroyPipeline(device_, gradientPipeline_, nullptr);
+            }
+            if (trainPreparePipeline_ != VK_NULL_HANDLE) {
+                vkDestroyPipeline(device_, trainPreparePipeline_, nullptr);
+            }
             if (producerPipelineLayout_ != VK_NULL_HANDLE) {
                 vkDestroyPipelineLayout(device_, producerPipelineLayout_, nullptr);
             }
             if (inferencePipelineLayout_ != VK_NULL_HANDLE) {
                 vkDestroyPipelineLayout(device_, inferencePipelineLayout_, nullptr);
             }
+            if (optimizePipelineLayout_ != VK_NULL_HANDLE) {
+                vkDestroyPipelineLayout(device_, optimizePipelineLayout_, nullptr);
+            }
+            if (gradientPipelineLayout_ != VK_NULL_HANDLE) {
+                vkDestroyPipelineLayout(device_, gradientPipelineLayout_, nullptr);
+            }
+            if (trainPreparePipelineLayout_ != VK_NULL_HANDLE) {
+                vkDestroyPipelineLayout(device_, trainPreparePipelineLayout_, nullptr);
+            }
             if (producerSetLayout_ != VK_NULL_HANDLE) {
                 vkDestroyDescriptorSetLayout(device_, producerSetLayout_, nullptr);
             }
             if (inferenceSetLayout_ != VK_NULL_HANDLE) {
                 vkDestroyDescriptorSetLayout(device_, inferenceSetLayout_, nullptr);
+            }
+            if (optimizeSetLayout_ != VK_NULL_HANDLE) {
+                vkDestroyDescriptorSetLayout(device_, optimizeSetLayout_, nullptr);
+            }
+            if (gradientSetLayout_ != VK_NULL_HANDLE) {
+                vkDestroyDescriptorSetLayout(device_, gradientSetLayout_, nullptr);
+            }
+            if (trainPrepareSetLayout_ != VK_NULL_HANDLE) {
+                vkDestroyDescriptorSetLayout(device_, trainPrepareSetLayout_, nullptr);
             }
             vkDestroyDevice(device_, nullptr);
         }
@@ -463,6 +600,10 @@ public:
     bool run() {
         const std::vector<float> weights = make_constant_prediction_weights();
         const std::vector<nrc::PackedFp16x8> packedWeights = nrc::pack_weights_fp16_uvec4(weights);
+        const std::vector<float> gpuVisibleWeights =
+            nrc::unpack_weights_fp16_uvec4(packedWeights, nrc::weight_count());
+        std::vector<nrc::NrcOptimizerEntry> initialOptimizerEntries(nrc::weight_count());
+        nrc::initialize_optimizer_entries(gpuVisibleWeights, initialOptimizerEntries);
         const std::vector<Vec4> initialBiasFactorR = make_bias_factor_r();
         const std::vector<Vec2> initialFactorGb = make_factor_gb();
         const std::array<SampleSceneTriangle, kSceneTriangleCount> sceneTriangles = make_sample_scene();
@@ -470,12 +611,23 @@ public:
         Buffer queueState = create_host_buffer(sizeof(nrc::NrcQueueState), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         Buffer evalRecords = create_host_buffer(kEvalCapacity * sizeof(nrc::NrcEvalRecord),
                                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-        Buffer trainRecords = create_host_buffer(kTrainRecordCount * sizeof(nrc::NrcTrainRecord),
+        Buffer trainRecords = create_host_buffer(kTrainBufferRecordCount * sizeof(nrc::NrcTrainRecord),
                                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         Buffer sceneBuffer = create_host_buffer(static_cast<VkDeviceSize>(sceneTriangles.size() * sizeof(SampleSceneTriangle)),
                                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         Buffer weightBuffer = create_host_buffer(static_cast<VkDeviceSize>(packedWeights.size() * sizeof(nrc::PackedFp16x8)),
                                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        Buffer useWeightBuffer = create_host_buffer(static_cast<VkDeviceSize>(packedWeights.size() * sizeof(nrc::PackedFp16x8)),
+                                                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        Buffer gradientBuffer = create_host_buffer(static_cast<VkDeviceSize>(nrc::weight_count() * sizeof(float)),
+                                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        Buffer optimizerEntryBuffer = create_host_buffer(static_cast<VkDeviceSize>(initialOptimizerEntries.size() * sizeof(nrc::NrcOptimizerEntry)),
+                                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        Buffer optimizerStateBuffer = create_host_buffer(sizeof(nrc::NrcOptimizerState),
+                                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        Buffer indirectBuffer = create_host_buffer(sizeof(VkDispatchIndirectCommand),
+                                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                                       VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
         Buffer biasUpload = create_host_buffer(static_cast<VkDeviceSize>(initialBiasFactorR.size() * sizeof(Vec4)),
                                                VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
         Buffer factorUpload = create_host_buffer(static_cast<VkDeviceSize>(initialFactorGb.size() * sizeof(Vec2)),
@@ -485,7 +637,11 @@ public:
 
         nrc::NrcQueueState initialQueueState{};
         std::vector<nrc::NrcEvalRecord> zeroEvalRecords(kEvalCapacity);
-        std::vector<nrc::NrcTrainRecord> zeroTrainRecords(kTrainRecordCount);
+        std::vector<nrc::NrcTrainRecord> zeroTrainRecords(kTrainBufferRecordCount);
+        std::vector<float> zeroGradients(nrc::weight_count(), 0.0f);
+        std::vector<nrc::PackedFp16x8> zeroUseWeights(packedWeights.size());
+        nrc::NrcOptimizerState initialOptimizerState{};
+        VkDispatchIndirectCommand initialIndirect{};
         upload(queueState, &initialQueueState, sizeof(initialQueueState));
         upload(evalRecords, zeroEvalRecords.data(), static_cast<VkDeviceSize>(zeroEvalRecords.size() * sizeof(nrc::NrcEvalRecord)));
         upload(trainRecords,
@@ -495,6 +651,15 @@ public:
                sceneTriangles.data(),
                static_cast<VkDeviceSize>(sceneTriangles.size() * sizeof(SampleSceneTriangle)));
         upload(weightBuffer, packedWeights.data(), static_cast<VkDeviceSize>(packedWeights.size() * sizeof(nrc::PackedFp16x8)));
+        upload(useWeightBuffer,
+               zeroUseWeights.data(),
+               static_cast<VkDeviceSize>(zeroUseWeights.size() * sizeof(nrc::PackedFp16x8)));
+        upload(gradientBuffer, zeroGradients.data(), static_cast<VkDeviceSize>(zeroGradients.size() * sizeof(float)));
+        upload(optimizerEntryBuffer,
+               initialOptimizerEntries.data(),
+               static_cast<VkDeviceSize>(initialOptimizerEntries.size() * sizeof(nrc::NrcOptimizerEntry)));
+        upload(optimizerStateBuffer, &initialOptimizerState, sizeof(initialOptimizerState));
+        upload(indirectBuffer, &initialIndirect, sizeof(initialIndirect));
         upload(biasUpload, initialBiasFactorR.data(), static_cast<VkDeviceSize>(initialBiasFactorR.size() * sizeof(Vec4)));
         upload(factorUpload, initialFactorGb.data(), static_cast<VkDeviceSize>(initialFactorGb.size() * sizeof(Vec2)));
 
@@ -504,32 +669,66 @@ public:
         VkDescriptorPool descriptorPool = create_descriptor_pool();
         VkDescriptorSet producerSet = allocate_descriptor_set(descriptorPool, producerSetLayout_);
         VkDescriptorSet inferenceSet = allocate_descriptor_set(descriptorPool, inferenceSetLayout_);
+        VkDescriptorSet trainPrepareSet = allocate_descriptor_set(descriptorPool, trainPrepareSetLayout_);
+        VkDescriptorSet gradientSet = allocate_descriptor_set(descriptorPool, gradientSetLayout_);
+        VkDescriptorSet optimizeSet = allocate_descriptor_set(descriptorPool, optimizeSetLayout_);
         update_producer_set(producerSet, queueState, evalRecords, trainRecords, sceneBuffer);
         update_inference_set(inferenceSet, weightBuffer, evalRecords, queueState, biasImage, factorImage, trainRecords, sceneBuffer);
+        update_train_prepare_set(trainPrepareSet, queueState, indirectBuffer, optimizerStateBuffer);
+        update_gradient_set(gradientSet, trainRecords, queueState, weightBuffer, gradientBuffer, sceneBuffer);
+        update_optimize_set(optimizeSet,
+                            weightBuffer,
+                            useWeightBuffer,
+                            gradientBuffer,
+                            optimizerEntryBuffer,
+                            queueState,
+                            optimizerStateBuffer);
 
         submit(queueState,
                evalRecords,
+               indirectBuffer,
                biasUpload,
                factorUpload,
                biasImage,
                factorImage,
                biasReadback,
                producerSet,
-               inferenceSet);
+               inferenceSet,
+               trainPrepareSet,
+               gradientSet,
+               optimizeSet);
 
         vkDestroyDescriptorPool(device_, descriptorPool, nullptr);
 
         nrc::NrcQueueState finalQueueState{};
+        nrc::NrcOptimizerState finalOptimizerState{};
+        VkDispatchIndirectCommand finalIndirect{};
         std::vector<nrc::NrcEvalRecord> finalEvalRecords(kEvalCapacity);
         std::vector<nrc::NrcTrainRecord> finalTrainRecords(kTrainRecordCount);
+        std::vector<float> finalGradients(nrc::weight_count());
+        std::vector<nrc::NrcOptimizerEntry> finalOptimizerEntries(nrc::weight_count());
+        std::vector<nrc::PackedFp16x8> finalWeights(nrc::weight_uvec4_count());
+        std::vector<nrc::PackedFp16x8> finalUseWeights(nrc::weight_uvec4_count());
         std::vector<Vec4> finalBiasFactorR(kPixelCount);
         download(queueState, &finalQueueState, sizeof(finalQueueState));
+        download(optimizerStateBuffer, &finalOptimizerState, sizeof(finalOptimizerState));
+        download(indirectBuffer, &finalIndirect, sizeof(finalIndirect));
         download(evalRecords,
                  finalEvalRecords.data(),
                  static_cast<VkDeviceSize>(finalEvalRecords.size() * sizeof(nrc::NrcEvalRecord)));
         download(trainRecords,
                  finalTrainRecords.data(),
                  static_cast<VkDeviceSize>(finalTrainRecords.size() * sizeof(nrc::NrcTrainRecord)));
+        download(gradientBuffer, finalGradients.data(), static_cast<VkDeviceSize>(finalGradients.size() * sizeof(float)));
+        download(optimizerEntryBuffer,
+                 finalOptimizerEntries.data(),
+                 static_cast<VkDeviceSize>(finalOptimizerEntries.size() * sizeof(nrc::NrcOptimizerEntry)));
+        download(weightBuffer,
+                 finalWeights.data(),
+                 static_cast<VkDeviceSize>(finalWeights.size() * sizeof(nrc::PackedFp16x8)));
+        download(useWeightBuffer,
+                 finalUseWeights.data(),
+                 static_cast<VkDeviceSize>(finalUseWeights.size() * sizeof(nrc::PackedFp16x8)));
         download(biasReadback,
                  finalBiasFactorR.data(),
                  static_cast<VkDeviceSize>(finalBiasFactorR.size() * sizeof(Vec4)));
@@ -539,7 +738,16 @@ public:
                       finalTrainRecords,
                       initialBiasFactorR,
                       initialFactorGb,
-                      finalBiasFactorR);
+                      finalBiasFactorR) &&
+               verify_training(finalQueueState,
+                               finalTrainRecords,
+                               gpuVisibleWeights,
+                               finalOptimizerState,
+                               finalIndirect,
+                               finalGradients,
+                               finalOptimizerEntries,
+                               finalWeights,
+                               finalUseWeights);
     }
 
 private:
@@ -667,7 +875,11 @@ private:
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         createInfo.pApplicationInfo = &appInfo;
 
-        check_vk(vkCreateInstance(&createInfo, nullptr, &instance_), "vkCreateInstance");
+        const VkResult result = vkCreateInstance(&createInfo, nullptr, &instance_);
+        if (result == VK_ERROR_INCOMPATIBLE_DRIVER) {
+            throw SkipTest("no compatible Vulkan loader/driver was found");
+        }
+        check_vk(result, "vkCreateInstance");
     }
 
     void pick_physical_device() {
@@ -683,7 +895,18 @@ private:
         for (VkPhysicalDevice device : devices) {
             VkPhysicalDeviceProperties properties{};
             vkGetPhysicalDeviceProperties(device, &properties);
-            if (properties.apiVersion < VK_API_VERSION_1_1) {
+            if (properties.apiVersion < VK_API_VERSION_1_1 ||
+                !has_extension(device, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME)) {
+                continue;
+            }
+
+            VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloat{};
+            atomicFloat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+            VkPhysicalDeviceFeatures2 features2{};
+            features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+            features2.pNext = &atomicFloat;
+            vkGetPhysicalDeviceFeatures2(device, &features2);
+            if (atomicFloat.shaderBufferFloat32AtomicAdd != VK_TRUE) {
                 continue;
             }
 
@@ -702,7 +925,7 @@ private:
             }
         }
 
-        throw std::runtime_error("no Vulkan 1.1 compute-capable device was found");
+        throw SkipTest("no Vulkan compute device supports shaderBufferFloat32AtomicAdd");
     }
 
     void check_format(VkFormat format, const char *name) const {
@@ -730,10 +953,19 @@ private:
         queueInfo.queueCount = 1;
         queueInfo.pQueuePriorities = &priority;
 
+        VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloat{};
+        atomicFloat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+        atomicFloat.shaderBufferFloat32AtomicAdd = VK_TRUE;
+
+        const char *extensions[] = {VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME};
+
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        createInfo.pNext = &atomicFloat;
         createInfo.queueCreateInfoCount = 1;
         createInfo.pQueueCreateInfos = &queueInfo;
+        createInfo.enabledExtensionCount = 1;
+        createInfo.ppEnabledExtensionNames = extensions;
 
         check_vk(vkCreateDevice(physicalDevice_, &createInfo, nullptr, &device_), "vkCreateDevice");
         vkGetDeviceQueue(device_, queueFamilyIndex_, 0, &queue_);
@@ -779,6 +1011,63 @@ private:
         inferenceSetLayout_ = create_set_layout(bindings);
         inferencePipelineLayout_ = create_pipeline_layout(inferenceSetLayout_, nullptr);
         inferencePipeline_ = create_compute_pipeline(inferenceSpirv, inferencePipelineLayout_);
+    }
+
+    void create_train_prepare_pipeline(const char *trainPrepareSpirv) {
+        std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+        for (std::uint32_t i = 0; i < bindings.size(); ++i) {
+            bindings[i].binding = i;
+            bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            bindings[i].descriptorCount = 1;
+            bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        }
+
+        trainPrepareSetLayout_ = create_set_layout(bindings);
+
+        VkPushConstantRange pushRange{};
+        pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        pushRange.offset = 0;
+        pushRange.size = sizeof(TrainingConstants);
+        trainPreparePipelineLayout_ = create_pipeline_layout(trainPrepareSetLayout_, &pushRange);
+        trainPreparePipeline_ = create_compute_pipeline(trainPrepareSpirv, trainPreparePipelineLayout_);
+    }
+
+    void create_gradient_pipeline(const char *gradientSpirv) {
+        std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
+        for (std::uint32_t i = 0; i < bindings.size(); ++i) {
+            bindings[i].binding = i;
+            bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            bindings[i].descriptorCount = 1;
+            bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        }
+
+        gradientSetLayout_ = create_set_layout(bindings);
+
+        VkPushConstantRange pushRange{};
+        pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        pushRange.offset = 0;
+        pushRange.size = sizeof(TrainingConstants);
+        gradientPipelineLayout_ = create_pipeline_layout(gradientSetLayout_, &pushRange);
+        gradientPipeline_ = create_compute_pipeline(gradientSpirv, gradientPipelineLayout_);
+    }
+
+    void create_optimize_pipeline(const char *optimizeSpirv) {
+        std::array<VkDescriptorSetLayoutBinding, 6> bindings{};
+        for (std::uint32_t i = 0; i < bindings.size(); ++i) {
+            bindings[i].binding = i;
+            bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            bindings[i].descriptorCount = 1;
+            bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        }
+
+        optimizeSetLayout_ = create_set_layout(bindings);
+
+        VkPushConstantRange pushRange{};
+        pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        pushRange.offset = 0;
+        pushRange.size = sizeof(TrainingConstants);
+        optimizePipelineLayout_ = create_pipeline_layout(optimizeSetLayout_, &pushRange);
+        optimizePipeline_ = create_compute_pipeline(optimizeSpirv, optimizePipelineLayout_);
     }
 
     template <std::size_t N>
@@ -954,13 +1243,13 @@ private:
     VkDescriptorPool create_descriptor_pool() const {
         std::array<VkDescriptorPoolSize, 2> poolSizes{};
         poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        poolSizes[0].descriptorCount = 9;
+        poolSizes[0].descriptorCount = 24;
         poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         poolSizes[1].descriptorCount = 2;
 
         VkDescriptorPoolCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        createInfo.maxSets = 2;
+        createInfo.maxSets = 5;
         createInfo.poolSizeCount = static_cast<std::uint32_t>(poolSizes.size());
         createInfo.pPoolSizes = poolSizes.data();
 
@@ -1056,6 +1345,79 @@ private:
         vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 
+    void update_train_prepare_set(VkDescriptorSet set,
+                                  const Buffer &queueState,
+                                  const Buffer &indirectBuffer,
+                                  const Buffer &optimizerState) const {
+        std::array<VkDescriptorBufferInfo, 3> infos{};
+        infos[0] = {queueState.buffer, 0, queueState.size};
+        infos[1] = {indirectBuffer.buffer, 0, indirectBuffer.size};
+        infos[2] = {optimizerState.buffer, 0, optimizerState.size};
+
+        std::array<VkWriteDescriptorSet, 3> writes{};
+        for (std::uint32_t i = 0; i < writes.size(); ++i) {
+            writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[i].dstSet = set;
+            writes[i].dstBinding = i;
+            writes[i].descriptorCount = 1;
+            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[i].pBufferInfo = &infos[i];
+        }
+        vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    }
+
+    void update_gradient_set(VkDescriptorSet set,
+                             const Buffer &trainRecords,
+                             const Buffer &queueState,
+                             const Buffer &weights,
+                             const Buffer &gradients,
+                             const Buffer &sceneBuffer) const {
+        std::array<VkDescriptorBufferInfo, 5> infos{};
+        infos[0] = {trainRecords.buffer, 0, trainRecords.size};
+        infos[1] = {queueState.buffer, 0, queueState.size};
+        infos[2] = {weights.buffer, 0, weights.size};
+        infos[3] = {gradients.buffer, 0, gradients.size};
+        infos[4] = {sceneBuffer.buffer, 0, sceneBuffer.size};
+
+        std::array<VkWriteDescriptorSet, 5> writes{};
+        for (std::uint32_t i = 0; i < writes.size(); ++i) {
+            writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[i].dstSet = set;
+            writes[i].dstBinding = i;
+            writes[i].descriptorCount = 1;
+            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[i].pBufferInfo = &infos[i];
+        }
+        vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    }
+
+    void update_optimize_set(VkDescriptorSet set,
+                             const Buffer &weights,
+                             const Buffer &useWeights,
+                             const Buffer &gradients,
+                             const Buffer &optimizerEntries,
+                             const Buffer &queueState,
+                             const Buffer &optimizerState) const {
+        std::array<VkDescriptorBufferInfo, 6> infos{};
+        infos[0] = {weights.buffer, 0, weights.size};
+        infos[1] = {useWeights.buffer, 0, useWeights.size};
+        infos[2] = {gradients.buffer, 0, gradients.size};
+        infos[3] = {optimizerEntries.buffer, 0, optimizerEntries.size};
+        infos[4] = {queueState.buffer, 0, queueState.size};
+        infos[5] = {optimizerState.buffer, 0, optimizerState.size};
+
+        std::array<VkWriteDescriptorSet, 6> writes{};
+        for (std::uint32_t i = 0; i < writes.size(); ++i) {
+            writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[i].dstSet = set;
+            writes[i].dstBinding = i;
+            writes[i].descriptorCount = 1;
+            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[i].pBufferInfo = &infos[i];
+        }
+        vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    }
+
     VkCommandBuffer allocate_command_buffer() const {
         VkCommandBufferAllocateInfo allocateInfo{};
         allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -1116,13 +1478,17 @@ private:
 
     void submit(const Buffer &queueState,
                 const Buffer &evalRecords,
+                const Buffer &indirectBuffer,
                 const Buffer &biasUpload,
                 const Buffer &factorUpload,
                 const Image &biasImage,
                 const Image &factorImage,
                 const Buffer &biasReadback,
                 VkDescriptorSet producerSet,
-                VkDescriptorSet inferenceSet) const {
+                VkDescriptorSet inferenceSet,
+                VkDescriptorSet trainPrepareSet,
+                VkDescriptorSet gradientSet,
+                VkDescriptorSet optimizeSet) const {
         VkCommandBuffer commandBuffer = allocate_command_buffer();
         VkFence fence = VK_NULL_HANDLE;
 
@@ -1134,13 +1500,17 @@ private:
             record_commands(commandBuffer,
                             queueState,
                             evalRecords,
+                            indirectBuffer,
                             biasUpload,
                             factorUpload,
                             biasImage,
                             factorImage,
                             biasReadback,
                             producerSet,
-                            inferenceSet);
+                            inferenceSet,
+                            trainPrepareSet,
+                            gradientSet,
+                            optimizeSet);
 
             VkSubmitInfo submitInfo{};
             submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1164,13 +1534,17 @@ private:
     void record_commands(VkCommandBuffer commandBuffer,
                          const Buffer &queueState,
                          const Buffer &evalRecords,
+                         const Buffer &indirectBuffer,
                          const Buffer &biasUpload,
                          const Buffer &factorUpload,
                          const Image &biasImage,
                          const Image &factorImage,
                          const Buffer &biasReadback,
                          VkDescriptorSet producerSet,
-                         VkDescriptorSet inferenceSet) const {
+                         VkDescriptorSet inferenceSet,
+                         VkDescriptorSet trainPrepareSet,
+                         VkDescriptorSet gradientSet,
+                         VkDescriptorSet optimizeSet) const {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         check_vk(vkBeginCommandBuffer(commandBuffer, &beginInfo), "vkBeginCommandBuffer");
@@ -1296,6 +1670,108 @@ private:
                                 0,
                                 nullptr);
         vkCmdDispatch(commandBuffer, (kPixelCount + kWorkgroupSize - 1u) / kWorkgroupSize, 1, 1);
+
+        VkMemoryBarrier inferenceToPrepare{};
+        inferenceToPrepare.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        inferenceToPrepare.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        inferenceToPrepare.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        vkCmdPipelineBarrier(commandBuffer,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0,
+                             1,
+                             &inferenceToPrepare,
+                             0,
+                             nullptr,
+                             0,
+                             nullptr);
+
+        const TrainingConstants batchConstants{0u, 0u};
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, trainPreparePipeline_);
+        vkCmdBindDescriptorSets(commandBuffer,
+                                VK_PIPELINE_BIND_POINT_COMPUTE,
+                                trainPreparePipelineLayout_,
+                                0,
+                                1,
+                                &trainPrepareSet,
+                                0,
+                                nullptr);
+        vkCmdPushConstants(commandBuffer,
+                           trainPreparePipelineLayout_,
+                           VK_SHADER_STAGE_COMPUTE_BIT,
+                           0,
+                           sizeof(batchConstants),
+                           &batchConstants);
+        vkCmdDispatch(commandBuffer, 1, 1, 1);
+
+        VkMemoryBarrier prepareToGradient{};
+        prepareToGradient.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        prepareToGradient.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        prepareToGradient.dstAccessMask =
+            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+        vkCmdPipelineBarrier(commandBuffer,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+                             0,
+                             1,
+                             &prepareToGradient,
+                             0,
+                             nullptr,
+                             0,
+                             nullptr);
+
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, gradientPipeline_);
+        vkCmdBindDescriptorSets(commandBuffer,
+                                VK_PIPELINE_BIND_POINT_COMPUTE,
+                                gradientPipelineLayout_,
+                                0,
+                                1,
+                                &gradientSet,
+                                0,
+                                nullptr);
+        vkCmdPushConstants(commandBuffer,
+                           gradientPipelineLayout_,
+                           VK_SHADER_STAGE_COMPUTE_BIT,
+                           0,
+                           sizeof(batchConstants),
+                           &batchConstants);
+        vkCmdDispatchIndirect(commandBuffer, indirectBuffer.buffer, 0);
+
+        VkMemoryBarrier gradientToOptimize{};
+        gradientToOptimize.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        gradientToOptimize.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        gradientToOptimize.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        vkCmdPipelineBarrier(commandBuffer,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0,
+                             1,
+                             &gradientToOptimize,
+                             0,
+                             nullptr,
+                             0,
+                             nullptr);
+
+        const TrainingConstants optimizeConstants{0u, 1u};
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, optimizePipeline_);
+        vkCmdBindDescriptorSets(commandBuffer,
+                                VK_PIPELINE_BIND_POINT_COMPUTE,
+                                optimizePipelineLayout_,
+                                0,
+                                1,
+                                &optimizeSet,
+                                0,
+                                nullptr);
+        vkCmdPushConstants(commandBuffer,
+                           optimizePipelineLayout_,
+                           VK_SHADER_STAGE_COMPUTE_BIT,
+                           0,
+                           sizeof(optimizeConstants),
+                           &optimizeConstants);
+        vkCmdDispatch(commandBuffer,
+                      (nrc::weight_uvec4_count() + kOptimizeWorkgroupSize - 1u) / kOptimizeWorkgroupSize,
+                      1,
+                      1);
 
         VkImageMemoryBarrier readbackBarrier = image_barrier(biasImage,
                                                              VK_IMAGE_LAYOUT_GENERAL,
@@ -1487,6 +1963,153 @@ private:
         return ok;
     }
 
+    bool verify_training(const nrc::NrcQueueState &queueState,
+                         const std::vector<nrc::NrcTrainRecord> &trainRecords,
+                         const std::vector<float> &gpuVisibleWeights,
+                         const nrc::NrcOptimizerState &actualState,
+                         const VkDispatchIndirectCommand &actualIndirect,
+                         const std::vector<float> &actualGradients,
+                         const std::vector<nrc::NrcOptimizerEntry> &actualEntries,
+                         const std::vector<nrc::PackedFp16x8> &actualWeights,
+                         const std::vector<nrc::PackedFp16x8> &actualUseWeights) const {
+        bool ok = true;
+
+        if (queueState.trainCounts[0] > trainRecords.size()) {
+            std::cerr << "FAIL: training validation only read " << trainRecords.size()
+                      << " records, but queue reports " << queueState.trainCounts[0] << '\n';
+            return false;
+        }
+
+        std::vector<nrc::NrcOptimizerEntry> expectedEntries(nrc::weight_count());
+        nrc::initialize_optimizer_entries(gpuVisibleWeights, expectedEntries);
+
+        nrc::NrcOptimizerState expectedState{};
+        const std::uint32_t preparedTrainCount =
+            nrc::prepare_training_batch(queueState.trainCounts[0], expectedState);
+        const std::vector<float> expectedGradients =
+            make_expected_gradients(gpuVisibleWeights, trainRecords, preparedTrainCount);
+
+        std::vector<float> expectedWeights(nrc::weight_count(), 0.0f);
+        std::vector<float> expectedUseWeights(nrc::weight_count(), 0.0f);
+        nrc::optimize_weights(expectedGradients,
+                              preparedTrainCount,
+                              expectedState,
+                              expectedEntries,
+                              expectedWeights,
+                              expectedUseWeights,
+                              true);
+
+        const std::vector<nrc::PackedFp16x8> expectedPackedWeights =
+            nrc::pack_weights_fp16_uvec4(expectedWeights);
+        const std::vector<nrc::PackedFp16x8> expectedPackedUseWeights =
+            nrc::pack_weights_fp16_uvec4(expectedUseWeights);
+
+        const std::uint32_t expectedDispatchX =
+            (preparedTrainCount + kGradientWorkgroupSize - 1u) / kGradientWorkgroupSize;
+        if (actualIndirect.x != expectedDispatchX || actualIndirect.y != 1u || actualIndirect.z != 1u) {
+            std::cerr << "FAIL: training indirect dispatch expected ("
+                      << expectedDispatchX << ", 1, 1) got ("
+                      << actualIndirect.x << ", " << actualIndirect.y << ", "
+                      << actualIndirect.z << ")\n";
+            ok = false;
+        }
+
+        if (actualState.step != expectedState.step ||
+            !close_enough(actualState.beta1T, expectedState.beta1T) ||
+            !close_enough(actualState.beta2T, expectedState.beta2T) ||
+            !close_enough(actualState.alphaT, expectedState.alphaT) ||
+            !close_enough(actualState.alphaTMinus1, expectedState.alphaTMinus1)) {
+            std::cerr << "FAIL: optimizer state expected step/b1/b2/a/am1 ("
+                      << expectedState.step << ", " << expectedState.beta1T << ", "
+                      << expectedState.beta2T << ", " << expectedState.alphaT << ", "
+                      << expectedState.alphaTMinus1 << ") got ("
+                      << actualState.step << ", " << actualState.beta1T << ", "
+                      << actualState.beta2T << ", " << actualState.alphaT << ", "
+                      << actualState.alphaTMinus1 << ")\n";
+            ok = false;
+        }
+
+        std::uint32_t mismatchCount = 0;
+        for (std::uint32_t i = 0; i < nrc::weight_count(); ++i) {
+            if (!close_enough(actualGradients[i], expectedGradients[i])) {
+                if (mismatchCount < 8u) {
+                    std::cerr << "FAIL: sample gradient " << i
+                              << " expected " << expectedGradients[i]
+                              << " got " << actualGradients[i] << '\n';
+                }
+                ++mismatchCount;
+                ok = false;
+            }
+        }
+        if (mismatchCount != 0u) {
+            std::cerr << "FAIL: total sample gradient mismatches " << mismatchCount << '\n';
+        }
+
+        mismatchCount = 0;
+        for (std::uint32_t i = 0; i < nrc::weight_count(); ++i) {
+            const nrc::NrcOptimizerEntry &actual = actualEntries[i];
+            const nrc::NrcOptimizerEntry &expected = expectedEntries[i];
+            const bool entryOk = close_enough(actual.moment1, expected.moment1, 2.0e-3f, 2.0e-3f) &&
+                                 close_enough(actual.moment2, expected.moment2, 2.0e-3f, 2.0e-3f) &&
+                                 close_enough(actual.weight, expected.weight, 2.0e-3f, 2.0e-3f) &&
+                                 close_enough(actual.emaWeight, expected.emaWeight, 2.0e-3f, 2.0e-3f);
+            if (!entryOk) {
+                if (mismatchCount < 8u) {
+                    std::cerr << "FAIL: sample optimizer entry " << i
+                              << " expected m1/m2/w/ema (" << expected.moment1
+                              << ", " << expected.moment2 << ", " << expected.weight
+                              << ", " << expected.emaWeight << ") got ("
+                              << actual.moment1 << ", " << actual.moment2
+                              << ", " << actual.weight << ", " << actual.emaWeight << ")\n";
+                }
+                ++mismatchCount;
+                ok = false;
+            }
+        }
+        if (mismatchCount != 0u) {
+            std::cerr << "FAIL: total sample optimizer entry mismatches " << mismatchCount << '\n';
+        }
+
+        const std::vector<float> actualWeightValues =
+            nrc::unpack_weights_fp16_uvec4(actualWeights, nrc::weight_count());
+        const std::vector<float> expectedWeightValues =
+            nrc::unpack_weights_fp16_uvec4(expectedPackedWeights, nrc::weight_count());
+        const std::vector<float> actualUseWeightValues =
+            nrc::unpack_weights_fp16_uvec4(actualUseWeights, nrc::weight_count());
+        const std::vector<float> expectedUseWeightValues =
+            nrc::unpack_weights_fp16_uvec4(expectedPackedUseWeights, nrc::weight_count());
+
+        mismatchCount = 0;
+        for (std::uint32_t i = 0; i < nrc::weight_count(); ++i) {
+            if (!close_enough(actualWeightValues[i], expectedWeightValues[i], 3.0e-3f, 2.0e-3f) ||
+                !close_enough(actualUseWeightValues[i], expectedUseWeightValues[i], 3.0e-3f, 2.0e-3f)) {
+                if (mismatchCount < 8u) {
+                    std::cerr << "FAIL: sample packed weight " << i
+                              << " expected weight/use (" << expectedWeightValues[i]
+                              << ", " << expectedUseWeightValues[i] << ") got ("
+                              << actualWeightValues[i] << ", " << actualUseWeightValues[i] << ")\n";
+                }
+                ++mismatchCount;
+                ok = false;
+            }
+        }
+        if (mismatchCount != 0u) {
+            std::cerr << "FAIL: total sample packed weight mismatches " << mismatchCount << '\n';
+        }
+
+        float maxPackedWeightDelta = 0.0f;
+        for (std::uint32_t i = 0; i < nrc::weight_count(); ++i) {
+            maxPackedWeightDelta =
+                std::max(maxPackedWeightDelta, std::fabs(actualWeightValues[i] - gpuVisibleWeights[i]));
+        }
+        if (maxPackedWeightDelta == 0.0f) {
+            std::cerr << "FAIL: sample training step did not change any packed weight\n";
+            ok = false;
+        }
+
+        return ok;
+    }
+
     VkInstance instance_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkPhysicalDeviceMemoryProperties memoryProperties_{};
@@ -1496,24 +2119,40 @@ private:
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout producerSetLayout_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout inferenceSetLayout_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout trainPrepareSetLayout_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout gradientSetLayout_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout optimizeSetLayout_ = VK_NULL_HANDLE;
     VkPipelineLayout producerPipelineLayout_ = VK_NULL_HANDLE;
     VkPipelineLayout inferencePipelineLayout_ = VK_NULL_HANDLE;
+    VkPipelineLayout trainPreparePipelineLayout_ = VK_NULL_HANDLE;
+    VkPipelineLayout gradientPipelineLayout_ = VK_NULL_HANDLE;
+    VkPipelineLayout optimizePipelineLayout_ = VK_NULL_HANDLE;
     VkPipeline producerPipeline_ = VK_NULL_HANDLE;
     VkPipeline inferencePipeline_ = VK_NULL_HANDLE;
+    VkPipeline trainPreparePipeline_ = VK_NULL_HANDLE;
+    VkPipeline gradientPipeline_ = VK_NULL_HANDLE;
+    VkPipeline optimizePipeline_ = VK_NULL_HANDLE;
 };
 
 } // namespace
 
 int main() {
     try {
-        MinimalIntegrationSample sample(NRC_SAMPLE_PRODUCER_SPV, NRC_SAMPLE_INFERENCE_SPV);
+        MinimalIntegrationSample sample(NRC_SAMPLE_PRODUCER_SPV,
+                                        NRC_SAMPLE_INFERENCE_SPV,
+                                        NRC_SAMPLE_TRAIN_PREPARE_SPV,
+                                        NRC_SAMPLE_GRADIENT_SPV,
+                                        NRC_SAMPLE_OPTIMIZE_SPV);
         if (!sample.run()) {
             return EXIT_FAILURE;
         }
 
         std::cout << "NRC reference path tracer minimal integration passed: "
-                  << kEvalCapacity << " eval records, scalar inference screen/train resolve." << std::endl;
+                  << kEvalCapacity << " eval records, scalar inference resolve, and one scalar training update." << std::endl;
         std::cout << "This milestone uses primary-ray traced hits and direct-lighting train payloads; full ray tracing is pending." << std::endl;
+        return EXIT_SUCCESS;
+    } catch (const SkipTest &skip) {
+        std::cout << "SKIP: " << skip.what() << std::endl;
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
         std::cerr << "NRC reference path tracer sample failed: " << error.what() << std::endl;

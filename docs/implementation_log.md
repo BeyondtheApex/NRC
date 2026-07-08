@@ -1644,3 +1644,102 @@ New validation coverage:
 ### Next Step
 
 Wire the scalar prepare -> gradient -> optimize sequence into the sample path tracer so the reference integration performs an actual weight update after generating train records. After that, continue toward a KHR cooperative-matrix training backend and a richer path-tracing sample.
+
+## 2026-07-09 - Milestone 22 Sample Scalar Training Integration
+
+### Implemented
+
+- Added sample training shader wrappers:
+  - `sample/path_tracer/shaders/sample_train_prepare.comp`
+  - `sample/path_tracer/shaders/sample_gradient_scalar.comp`
+  - `sample/path_tracer/shaders/sample_optimize.comp`
+- Updated sample CMake shader build:
+  - `nrc_sample_train_prepare.spv`
+  - `nrc_sample_gradient_scalar.spv`
+  - `nrc_sample_optimize.spv`
+- Updated sample config generation:
+  - `NRC_SAMPLE_TRAIN_PREPARE_SPV`
+  - `NRC_SAMPLE_GRADIENT_SPV`
+  - `NRC_SAMPLE_OPTIMIZE_SPV`
+- Extended `sample/path_tracer/sample.cpp` to run:
+  - queue reset;
+  - scene-backed eval/train production;
+  - scalar inference resolve;
+  - train prepare;
+  - scalar gradient through indirect dispatch;
+  - optimizer;
+  - readback validation.
+- Updated documentation:
+  - `docs/sample_path_tracer.md`
+  - `docs/training_optimizer.md`
+  - `docs/gradient_pass.md`
+  - `docs/project_structure.md`
+
+### Behavior
+
+The sample now performs one real scalar NRC training update after generating train records and resolving their target radiance through scalar inference.
+
+Important integration changes:
+
+- the sample train-record buffer now uses the full flat layout expected by reusable training passes:
+  - `NRC_TRAIN_BATCH_COUNT * NRC_TRAIN_BATCH_SIZE`;
+- the sample creates fp32 optimizer state and entries initialized from fp16-rounded GPU-visible weights;
+- the sample creates fp32 gradient storage and an indirect dispatch command buffer;
+- the sample enables `VK_EXT_shader_atomic_float` and `shaderBufferFloat32AtomicAdd` for scalar gradient accumulation;
+- `sample_gradient_scalar.comp` uses `sample_scene.glsl` for `NrcUnpackPackedInput`, so gradient validation exercises the same scene/material unpacking path as inference.
+
+The command buffer sequence is now:
+
+```text
+upload screen images
+producer reset
+producer emit eval/train records
+scalar inference resolve
+train prepare
+scalar gradient via vkCmdDispatchIndirect
+optimizer
+screen image readback
+```
+
+### CPU Oracle
+
+The host verifier mirrors the sample scene path and training math:
+
+1. unpack initial packed fp16 weights back to fp32;
+2. initialize optimizer entries from the GPU-visible weights;
+3. verify screen and train resolve as before;
+4. encode the final train records with the CPU `nrc::encode_input` mirror and sample scene unpacking;
+5. accumulate gradients with `nrc::reference_backward`;
+6. update weights with `nrc::optimize_weights`;
+7. compare actual gradients, optimizer entries, packed weights, and packed use-weights against the CPU result;
+8. verify at least one packed weight changes.
+
+### Validation
+
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Targeted sample build succeeded:
+  - `cmake --build build --config Debug --target nrc_reference_path_tracer`
+- Manual sample run succeeded:
+  - `build/sample/path_tracer/Debug/nrc_reference_path_tracer.exe`
+- Manual sample output:
+  - `NRC reference path tracer minimal integration passed: 17 eval records, scalar inference resolve, and one scalar training update.`
+  - `This milestone uses primary-ray traced hits and direct-lighting train payloads; full ray tracing is pending.`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `24/24 tests passed`
+
+### Current Limitations
+
+- The sample still uses a local primary-ray triangle loop, not Vulkan ray query or acceleration structures.
+- Training records still use deterministic direct lighting rather than multi-bounce path-traced radiance.
+- The sample runs one validated update, not an iterative per-frame training loop.
+- Sample training uses the scalar correctness path and therefore requires fp32 storage-buffer atomic add support.
+- KHR cooperative-matrix gradient/backpropagation remains missing.
+
+### Next Step
+
+Turn the single sample update into a small iterative training loop with repeated frame-like steps and then add a visual output artifact. In parallel, continue toward the KHR cooperative-matrix training backend so the reusable implementation can move beyond the scalar correctness path.

@@ -44,6 +44,8 @@ The luminance denominator is treated as the current prediction scale, matching V
 
 `tests/vulkan_training_step_test.cpp` runs the gradient pass between `NrcTrainPrepare` and `NrcOptimize`, using prepare's indirect dispatch command and comparing the final optimizer state and packed weights against the CPU reference path.
 
+`sample/path_tracer` dispatches the same scalar gradient pass with sample scene unpacking after scalar inference has resolved train-record targets.
+
 `tests/encoding_test.cpp` validates the host-side `nrc::encode_input` mirror that the Vulkan gradient test uses to match the shader-side `NrcEncodeInput` path.
 
 ## Current Limitations
@@ -51,5 +53,5 @@ The luminance denominator is treated as the current prediction scale, matching V
 - The pass uses scalar loops and one invocation per train record. It is not a production-performance path.
 - It uses fp32 storage-buffer atomic add and therefore requires `VK_EXT_shader_atomic_float` / `shaderBufferFloat32AtomicAdd`.
 - The Vulkan gradient test is feature-gated and reports a controlled skip on devices without fp32 storage-buffer atomic add support.
-- Sample-path-tracer integration of the training update loop is still pending.
+- The sample path tracer currently runs one validated scalar training update, not an iterative training loop.
 - KHR cooperative-matrix gradient/backpropagation is not implemented yet.

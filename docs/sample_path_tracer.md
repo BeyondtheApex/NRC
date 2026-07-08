@@ -9,7 +9,8 @@ The current sample is a minimal Vulkan integration skeleton with a tiny primary-
 3. Train-record production.
 4. Scalar inference.
 5. Screen and train-record resolve.
-6. Readback validation.
+6. Scalar training update.
+7. Readback validation.
 
 ## Current Files
 
@@ -19,6 +20,10 @@ The current sample is a minimal Vulkan integration skeleton with a tiny primary-
   - `sample/path_tracer/shaders/sample_producer.comp`
 - Inference shader wrapper:
   - `sample/path_tracer/shaders/sample_inference_scalar.comp`
+- Training shader wrappers:
+  - `sample/path_tracer/shaders/sample_train_prepare.comp`
+  - `sample/path_tracer/shaders/sample_gradient_scalar.comp`
+  - `sample/path_tracer/shaders/sample_optimize.comp`
 - Shared sample scene shader:
   - `sample/path_tracer/shaders/sample_scene.glsl`
 - Build config template:
@@ -30,9 +35,13 @@ The sample creates:
 
 - a queue state buffer;
 - an eval-record buffer;
-- a small train-record buffer;
+- a train-record buffer using the full flat batch layout expected by reusable training passes;
 - a small scene buffer containing two triangles with per-vertex position, normal, roughness, diffuse, and specular data;
 - packed fp16 weights;
+- packed fp16 use-weights;
+- fp32 optimizer state and entries;
+- fp32 gradients;
+- a dispatch-indirect command buffer;
 - a `4x4` `rgba32f` bias/factor-R image;
 - a `4x4` `rg32f` factor-GB image;
 - a readback buffer.
@@ -43,11 +52,14 @@ It records one command buffer:
 2. Dispatch `sample_producer.comp` in reset mode.
 3. Dispatch `sample_producer.comp` in producer mode, emitting screen eval records plus one train eval record.
 4. Dispatch `sample_inference_scalar.comp`.
-5. Copy the resolved screen image back to the CPU and read back train records.
+5. Dispatch `sample_train_prepare.comp`.
+6. Dispatch `sample_gradient_scalar.comp` through the prepare pass's indirect command.
+7. Dispatch `sample_optimize.comp`.
+8. Copy the resolved screen image back to the CPU and read back train records, gradients, optimizer entries, and packed weights.
 
 The producer traces one primary ray for every `4x4` pixel, emits a screen eval record for each hit, reserves two train records in batch 0, and emits one train eval record targeting those records. Train-record bias and factor values come from a deterministic direct-lighting payload over the traced sample scene hit.
 
-`sample_scene.glsl` builds a camera ray, intersects it against the two sample triangles, packs `primitiveId`, instance id, barycentrics, and scattered direction into `PackedNrcInput`, then unpacks the same payload into `NrcUnpackedInput` for `NrcInferenceScalar.glsl`.
+`sample_scene.glsl` builds a camera ray, intersects it against the two sample triangles, packs `primitiveId`, instance id, barycentrics, and scattered direction into `PackedNrcInput`, then unpacks the same payload into `NrcUnpackedInput` for scalar inference and scalar gradient training.
 
 Weights are configured so the scalar MLP predicts:
 
@@ -67,6 +79,10 @@ The host verifies:
 - both train record bias values were resolved as `directLightingBias + directLightingFactor * prediction`;
 - both train record factor values match the CPU reference direct-lighting payload;
 - output alpha is zero, matching the inference pass contract.
+- training prepare advances optimizer state and writes the expected indirect dispatch command;
+- scalar gradient matches the CPU reference over the sample scene unpacking path;
+- optimizer entries match the CPU Adam/EMA reference;
+- packed weights and packed use-weights match the CPU reference and at least one packed weight changes.
 
 ## Build and Test
 
@@ -74,6 +90,7 @@ The sample builds when:
 
 - `nrc_vulkan` is available;
 - `glslc` is available.
+- `VK_EXT_shader_atomic_float` / `shaderBufferFloat32AtomicAdd` is available for the scalar gradient pass.
 
 CTest runs:
 
@@ -87,7 +104,7 @@ nrc_sample_reference_path_tracer_smoke
 - No acceleration structure, Vulkan ray query, material system, BRDF sampling, secondary rays, or scene loading exists yet.
 - Training records use deterministic direct lighting, not real multi-bounce path-traced samples.
 - KHR cooperative matrix inference is not used because KHR pipeline creation is driver-gated on the current AMD machine.
-- No gradient/backpropagation or optimizer pass is connected in the sample yet, although the reusable scalar training-step test now validates prepare -> gradient -> optimize.
+- Training uses the scalar correctness path, not a production-performance KHR cooperative-matrix backend.
 
 ## Next Steps
 
@@ -95,5 +112,5 @@ The next sample milestones should add:
 
 - replacing the sample-local triangle loop with Vulkan ray query or a fuller path tracing stage;
 - train-record production from multi-bounce sampled paths;
-- scalar training updates using the existing prepare -> gradient -> optimize pass sequence;
+- iterative per-frame training instead of a single validated update;
 - visual output artifacts for inspection.

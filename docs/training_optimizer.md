@@ -15,6 +15,7 @@ This document covers the reusable training support added before the gradient pas
   - `tests/shader_compile/nrc_train_prepare_dispatch.comp`
   - `tests/shader_compile/nrc_optimize_dispatch.comp`
   - `tests/vulkan_training_step_test.cpp`
+  - `sample/path_tracer`
 
 ## VkNRC Behavior Preserved
 
@@ -81,8 +82,10 @@ The test uses the prepare pass output as the indirect dispatch command for the s
 
 The CPU oracle uses `nrc::encode_input`, `nrc::reference_backward`, and `nrc::optimize_weights` over the same fp16-rounded weights consumed by the shaders.
 
+`sample/path_tracer` also runs the scalar training sequence after producing scene-backed train records and resolving them through scalar inference. The sample compares gradients, optimizer entries, packed weights, and packed use-weights against a CPU oracle that mirrors the sample scene unpacking path.
+
 ## Current Limitations
 
 - Full prepare -> scalar gradient -> optimize validation exists, but it is still the scalar correctness path rather than a production-performance training backend.
-- The sample path tracer does not yet run the training update loop.
+- The sample path tracer runs one validated training update, not an iterative per-frame training loop.
 - KHR/NV cooperative-matrix gradient paths are not implemented yet.

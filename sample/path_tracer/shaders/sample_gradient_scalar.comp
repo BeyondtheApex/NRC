@@ -1,0 +1,20 @@
+#version 460
+
+#define NRC_NN_SET 0
+#define NRC_NN_WEIGHTS_BINDING 2
+#define NRC_GRADIENT_SET 0
+#define NRC_SAMPLE_SCENE_BINDING 4
+
+#include "sample_scene.glsl"
+
+NrcUnpackedInput NrcUnpackPackedInput(PackedNrcInput packedInput) {
+    return NrcSampleUnpackPackedInput(packedInput);
+}
+
+#include "nrc/passes/NrcGradientScalar.glsl"
+
+layout(local_size_x = NRC_GRADIENT_WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    NrcGradientScalarMain();
+}
