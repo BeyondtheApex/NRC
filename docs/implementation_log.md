@@ -952,3 +952,72 @@ The sample verifies:
 ### Next Step
 
 Add a small scene/hit representation to the sample and replace the synthetic producer with real `PackedNrcInput` generation. After that, add train-record production so the sample begins covering the path tracer-to-training side of VkNRC's workflow.
+
+## 2026-07-08 - Milestone 13 Sample Train Record Integration
+
+### Implemented
+
+- Extended sample producer shader:
+  - `sample/path_tracer/shaders/sample_producer.comp`
+- Updated sample host validation:
+  - `sample/path_tracer/sample.cpp`
+- Updated sample documentation:
+  - `docs/sample_path_tracer.md`
+
+### Runtime Behavior
+
+The sample still emits one screen eval record for each `4x4` pixel.
+
+It now also:
+
+- reserves two train records in batch 0 through `NrcReserveTrainRecords`;
+- writes synthetic train records with:
+  - bias `vec3(0.5, 1.0, 1.5)`;
+  - factor `vec3(2.0, 3.0, 4.0)`;
+  - a packed input payload;
+- pushes one train eval record targeting batch 0 records `[0, 1]`.
+
+The scalar inference pass then resolves:
+
+- all screen eval records into the screen image;
+- the train eval record into the referenced train-record bias fields.
+
+### Validated Behavior
+
+The sample now verifies:
+
+- `evalCount == 17`;
+- all 16 pixels have exactly one screen eval record;
+- exactly one train eval record exists;
+- the train eval record targets batch 0 records `[0, 1]`;
+- train batch 0 count is 2;
+- train batches 1-3 remain zero;
+- both train records preserve their factor values;
+- both train-record bias values are updated with `bias + factor * prediction`;
+- all screen pixels still resolve correctly.
+
+### Validation
+
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Manual sample run succeeded:
+  - `build/sample/path_tracer/Debug/nrc_reference_path_tracer.exe`
+- Manual sample output:
+  - `NRC reference path tracer minimal integration passed: 17 eval records, scalar inference screen/train resolve.`
+  - `This milestone is a synthetic integration skeleton; full ray tracing is pending.`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `15/15 tests passed`
+
+### Current Limitations
+
+- Train records are still synthetic and not generated from real path-traced samples.
+- No acceleration structure, ray query, material system, BRDF sampling, scene loading, or visual output file exists yet.
+- The scene unpack function remains deterministic fake data.
+- KHR cooperative matrix inference is not used in the sample because KHR pipeline creation is driver-gated on the current AMD machine.
+- No gradient/backpropagation or optimizer pass is connected yet.
+
+### Next Step
+
+Add a small scene/hit representation to the sample so `PackedNrcInput` comes from a real geometry/material model instead of synthetic pixel data. After that, add a simple path tracing loop and use the generated train records as inputs for scalar gradient/optimizer once those passes exist.

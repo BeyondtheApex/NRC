@@ -9,6 +9,7 @@ layout(push_constant) uniform NrcSampleProducerConstants {
     uint evalCapacity;
     uint pixelCount;
     uint width;
+    uint trainRecordCount;
 } nrcSampleProducerConstants;
 
 PackedNrcInput NrcSamplePackedInput(uvec2 pixel) {
@@ -39,4 +40,26 @@ void main() {
     NrcPushEvalRecord(NrcMakeEvalScreen(NrcSamplePackedInput(pixel), pixel),
                       nrcSampleProducerConstants.evalCapacity,
                       evalIndex);
+
+    if (pixelIndex == 0u && nrcSampleProducerConstants.trainRecordCount != 0u) {
+        uint firstTrainIndex;
+        uint reservedTrainCount;
+        if (NrcReserveTrainRecords(0u,
+                                   nrcSampleProducerConstants.trainRecordCount,
+                                   firstTrainIndex,
+                                   reservedTrainCount)) {
+            NrcTrainRecord trainRecord = NrcMakeTrainRecord(vec3(0.5, 1.0, 1.5),
+                                                            vec3(2.0, 3.0, 4.0),
+                                                            NrcSamplePackedInput(uvec2(0u, 0u)));
+            NrcStoreTrainRecords(0u, firstTrainIndex, reservedTrainCount, trainRecord);
+            if (reservedTrainCount != 0u) {
+                NrcPushEvalRecord(NrcMakeEvalTrain(NrcSamplePackedInput(uvec2(0u, 0u)),
+                                                   0u,
+                                                   firstTrainIndex,
+                                                   firstTrainIndex + reservedTrainCount - 1u),
+                                  nrcSampleProducerConstants.evalCapacity,
+                                  evalIndex);
+            }
+        }
+    }
 }

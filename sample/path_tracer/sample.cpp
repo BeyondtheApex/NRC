@@ -25,6 +25,8 @@ namespace {
 constexpr std::uint32_t kWidth = 4;
 constexpr std::uint32_t kHeight = 4;
 constexpr std::uint32_t kPixelCount = kWidth * kHeight;
+constexpr std::uint32_t kTrainRecordCount = 2;
+constexpr std::uint32_t kEvalCapacity = kPixelCount + 1;
 constexpr std::uint32_t kWorkgroupSize = 64;
 
 struct Vec2 {
@@ -44,6 +46,7 @@ struct ProducerConstants {
     std::uint32_t evalCapacity = 0;
     std::uint32_t pixelCount = 0;
     std::uint32_t width = 0;
+    std::uint32_t trainRecordCount = 0;
 };
 
 std::string vk_result_string(VkResult result) {
@@ -132,6 +135,21 @@ std::uint32_t decode_screen_y(std::uint32_t dst) {
     return dst >> 15u;
 }
 
+std::uint32_t decode_train_batch(std::uint32_t dst) {
+    dst >>= 1u;
+    return dst & 3u;
+}
+
+std::uint32_t decode_train_left(std::uint32_t dst) {
+    dst >>= 1u;
+    return (dst >> 2u) & 0x3fffu;
+}
+
+std::uint32_t decode_train_right(std::uint32_t dst) {
+    dst >>= 1u;
+    return dst >> 16u;
+}
+
 class MinimalIntegrationSample {
 public:
     MinimalIntegrationSample(const char *producerSpirv, const char *inferenceSpirv) {
@@ -184,9 +202,10 @@ public:
         const std::vector<Vec2> initialFactorGb = make_factor_gb();
 
         Buffer queueState = create_host_buffer(sizeof(nrc::NrcQueueState), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-        Buffer evalRecords = create_host_buffer(kPixelCount * sizeof(nrc::NrcEvalRecord),
+        Buffer evalRecords = create_host_buffer(kEvalCapacity * sizeof(nrc::NrcEvalRecord),
                                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-        Buffer trainRecords = create_host_buffer(sizeof(nrc::NrcTrainRecord), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        Buffer trainRecords = create_host_buffer(kTrainRecordCount * sizeof(nrc::NrcTrainRecord),
+                                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         Buffer weightBuffer = create_host_buffer(static_cast<VkDeviceSize>(packedWeights.size() * sizeof(nrc::PackedFp16x8)),
                                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         Buffer biasUpload = create_host_buffer(static_cast<VkDeviceSize>(initialBiasFactorR.size() * sizeof(Vec4)),
@@ -197,11 +216,13 @@ public:
                                                  VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
         nrc::NrcQueueState initialQueueState{};
-        std::vector<nrc::NrcEvalRecord> zeroEvalRecords(kPixelCount);
-        nrc::NrcTrainRecord zeroTrainRecord{};
+        std::vector<nrc::NrcEvalRecord> zeroEvalRecords(kEvalCapacity);
+        std::vector<nrc::NrcTrainRecord> zeroTrainRecords(kTrainRecordCount);
         upload(queueState, &initialQueueState, sizeof(initialQueueState));
         upload(evalRecords, zeroEvalRecords.data(), static_cast<VkDeviceSize>(zeroEvalRecords.size() * sizeof(nrc::NrcEvalRecord)));
-        upload(trainRecords, &zeroTrainRecord, sizeof(zeroTrainRecord));
+        upload(trainRecords,
+               zeroTrainRecords.data(),
+               static_cast<VkDeviceSize>(zeroTrainRecords.size() * sizeof(nrc::NrcTrainRecord)));
         upload(weightBuffer, packedWeights.data(), static_cast<VkDeviceSize>(packedWeights.size() * sizeof(nrc::PackedFp16x8)));
         upload(biasUpload, initialBiasFactorR.data(), static_cast<VkDeviceSize>(initialBiasFactorR.size() * sizeof(Vec4)));
         upload(factorUpload, initialFactorGb.data(), static_cast<VkDeviceSize>(initialFactorGb.size() * sizeof(Vec2)));
@@ -228,17 +249,26 @@ public:
         vkDestroyDescriptorPool(device_, descriptorPool, nullptr);
 
         nrc::NrcQueueState finalQueueState{};
-        std::vector<nrc::NrcEvalRecord> finalEvalRecords(kPixelCount);
+        std::vector<nrc::NrcEvalRecord> finalEvalRecords(kEvalCapacity);
+        std::vector<nrc::NrcTrainRecord> finalTrainRecords(kTrainRecordCount);
         std::vector<Vec4> finalBiasFactorR(kPixelCount);
         download(queueState, &finalQueueState, sizeof(finalQueueState));
         download(evalRecords,
                  finalEvalRecords.data(),
                  static_cast<VkDeviceSize>(finalEvalRecords.size() * sizeof(nrc::NrcEvalRecord)));
+        download(trainRecords,
+                 finalTrainRecords.data(),
+                 static_cast<VkDeviceSize>(finalTrainRecords.size() * sizeof(nrc::NrcTrainRecord)));
         download(biasReadback,
                  finalBiasFactorR.data(),
                  static_cast<VkDeviceSize>(finalBiasFactorR.size() * sizeof(Vec4)));
 
-        return verify(finalQueueState, finalEvalRecords, initialBiasFactorR, initialFactorGb, finalBiasFactorR);
+        return verify(finalQueueState,
+                      finalEvalRecords,
+                      finalTrainRecords,
+                      initialBiasFactorR,
+                      initialFactorGb,
+                      finalBiasFactorR);
     }
 
 private:
@@ -944,7 +974,7 @@ private:
                                 &producerSet,
                                 0,
                                 nullptr);
-        dispatch_producer(commandBuffer, {0u, kPixelCount, kPixelCount, kWidth});
+        dispatch_producer(commandBuffer, {0u, kEvalCapacity, kPixelCount, kWidth, kTrainRecordCount});
 
         VkMemoryBarrier resetToProducer{};
         resetToProducer.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -961,7 +991,7 @@ private:
                              0,
                              nullptr);
 
-        dispatch_producer(commandBuffer, {1u, kPixelCount, kPixelCount, kWidth});
+        dispatch_producer(commandBuffer, {1u, kEvalCapacity, kPixelCount, kWidth, kTrainRecordCount});
 
         VkMemoryBarrier producerToInference{};
         producerToInference.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -1043,17 +1073,23 @@ private:
 
     bool verify(const nrc::NrcQueueState &queueState,
                 const std::vector<nrc::NrcEvalRecord> &evalRecords,
+                const std::vector<nrc::NrcTrainRecord> &trainRecords,
                 const std::vector<Vec4> &initialBiasFactorR,
                 const std::vector<Vec2> &initialFactorGb,
                 const std::vector<Vec4> &finalBiasFactorR) const {
         bool ok = true;
 
-        if (queueState.evalCount != kPixelCount) {
-            std::cerr << "FAIL: expected " << kPixelCount
+        if (queueState.evalCount != kEvalCapacity) {
+            std::cerr << "FAIL: expected " << kEvalCapacity
                       << " eval records, got " << queueState.evalCount << '\n';
             ok = false;
         }
-        for (std::uint32_t batch = 0; batch < nrc::kTrainBatchCount; ++batch) {
+        if (queueState.trainCounts[0] != kTrainRecordCount) {
+            std::cerr << "FAIL: train batch 0 expected " << kTrainRecordCount
+                      << " records, got " << queueState.trainCounts[0] << '\n';
+            ok = false;
+        }
+        for (std::uint32_t batch = 1; batch < nrc::kTrainBatchCount; ++batch) {
             if (queueState.trainCounts[batch] != 0u) {
                 std::cerr << "FAIL: train batch " << batch
                           << " expected 0 records, got " << queueState.trainCounts[batch] << '\n';
@@ -1062,20 +1098,34 @@ private:
         }
 
         std::array<bool, kPixelCount> seen{};
-        for (std::uint32_t i = 0; i < kPixelCount; ++i) {
-            const std::uint32_t x = decode_screen_x(evalRecords[i].dst);
-            const std::uint32_t y = decode_screen_y(evalRecords[i].dst);
-            if ((evalRecords[i].dst & 1u) != 0u || x >= kWidth || y >= kHeight) {
-                std::cerr << "FAIL: eval record " << i << " has invalid screen dst " << evalRecords[i].dst << '\n';
-                ok = false;
-                continue;
+        bool sawTrainEval = false;
+        for (std::uint32_t i = 0; i < kEvalCapacity; ++i) {
+            if ((evalRecords[i].dst & 1u) == 0u) {
+                const std::uint32_t x = decode_screen_x(evalRecords[i].dst);
+                const std::uint32_t y = decode_screen_y(evalRecords[i].dst);
+                if (x >= kWidth || y >= kHeight) {
+                    std::cerr << "FAIL: eval record " << i << " has invalid screen dst "
+                              << evalRecords[i].dst << '\n';
+                    ok = false;
+                    continue;
+                }
+                const std::uint32_t pixelIndex = y * kWidth + x;
+                if (seen[pixelIndex]) {
+                    std::cerr << "FAIL: duplicate eval record for pixel " << pixelIndex << '\n';
+                    ok = false;
+                }
+                seen[pixelIndex] = true;
+            } else {
+                const std::uint32_t batch = decode_train_batch(evalRecords[i].dst);
+                const std::uint32_t left = decode_train_left(evalRecords[i].dst);
+                const std::uint32_t right = decode_train_right(evalRecords[i].dst);
+                if (batch != 0u || left != 0u || right != kTrainRecordCount - 1u || sawTrainEval) {
+                    std::cerr << "FAIL: eval record " << i << " has invalid train dst "
+                              << evalRecords[i].dst << '\n';
+                    ok = false;
+                }
+                sawTrainEval = true;
             }
-            const std::uint32_t pixelIndex = y * kWidth + x;
-            if (seen[pixelIndex]) {
-                std::cerr << "FAIL: duplicate eval record for pixel " << pixelIndex << '\n';
-                ok = false;
-            }
-            seen[pixelIndex] = true;
         }
 
         for (std::uint32_t i = 0; i < kPixelCount; ++i) {
@@ -1083,6 +1133,10 @@ private:
                 std::cerr << "FAIL: missing eval record for pixel " << i << '\n';
                 ok = false;
             }
+        }
+        if (!sawTrainEval) {
+            std::cerr << "FAIL: missing train eval record\n";
+            ok = false;
         }
 
         for (std::uint32_t i = 0; i < kPixelCount; ++i) {
@@ -1102,6 +1156,27 @@ private:
                           << expected.z << ", " << expected.w << ") got ("
                           << actual.x << ", " << actual.y << ", "
                           << actual.z << ", " << actual.w << ")\n";
+                ok = false;
+            }
+        }
+
+        for (std::uint32_t i = 0; i < kTrainRecordCount; ++i) {
+            const float expectedBiasR = 0.5f + 2.0f * 0.25f;
+            const float expectedBiasG = 1.0f + 3.0f * 0.5f;
+            const float expectedBiasB = 1.5f + 4.0f * 0.75f;
+            if (!near(trainRecords[i].biasR, expectedBiasR) ||
+                !near(trainRecords[i].biasG, expectedBiasG) ||
+                !near(trainRecords[i].biasB, expectedBiasB) ||
+                !near(trainRecords[i].factorR, 2.0f) ||
+                !near(trainRecords[i].factorG, 3.0f) ||
+                !near(trainRecords[i].factorB, 4.0f)) {
+                std::cerr << "FAIL: train record " << i
+                          << " expected bias (" << expectedBiasR << ", " << expectedBiasG << ", "
+                          << expectedBiasB << ") factor (2, 3, 4) got bias ("
+                          << trainRecords[i].biasR << ", " << trainRecords[i].biasG << ", "
+                          << trainRecords[i].biasB << ") factor ("
+                          << trainRecords[i].factorR << ", " << trainRecords[i].factorG << ", "
+                          << trainRecords[i].factorB << ")\n";
                 ok = false;
             }
         }
@@ -1134,7 +1209,7 @@ int main() {
         }
 
         std::cout << "NRC reference path tracer minimal integration passed: "
-                  << kPixelCount << " eval records, scalar inference screen resolve." << std::endl;
+                  << kEvalCapacity << " eval records, scalar inference screen/train resolve." << std::endl;
         std::cout << "This milestone is a synthetic integration skeleton; full ray tracing is pending." << std::endl;
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
