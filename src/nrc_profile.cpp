@@ -360,4 +360,28 @@ TrainingProfileSelection choose_training_profile(
     return selection;
 }
 
+TrainingShaderCompileConfig make_training_shader_compile_config(
+    const TrainingProfileSelection &selection) {
+    TrainingShaderCompileConfig config{};
+    if (!selection.selected || selection.shaderConfig == nullptr) {
+        return config;
+    }
+
+    config.valid = true;
+    config.backend = selection.shaderConfig->backend;
+    config.shaderHeader = selection.shaderConfig->shaderHeader;
+    config.workgroupSize = selection.shaderConfig->workgroupSize;
+    config.subgroupSize = selection.shaderConfig->subgroupSize;
+    config.cooperativeMatrixM = selection.shaderConfig->cooperativeMatrixM;
+    config.cooperativeMatrixN = selection.shaderConfig->cooperativeMatrixN;
+    config.cooperativeMatrixK = selection.shaderConfig->cooperativeMatrixK;
+    config.requireFullSubgroups = selection.shaderConfig->requireFullSubgroups;
+    config.requireSubgroupSizeControl = selection.shaderConfig->requireSubgroupSizeControl;
+    config.requireSubgroupArithmeticForTraining =
+        selection.shaderConfig->requireSubgroupArithmeticForTraining;
+    config.useKhrCoopmatAllDWeights = selection.useKhrCoopmatAllDWeights;
+    config.useKhrCoopmatAllDActivation = selection.useKhrCoopmatAllDActivation;
+    return config;
+}
+
 } // namespace nrc

@@ -102,6 +102,30 @@ int main() {
                   "default KHR training selection does not enable experimental all-coopmat flags");
     ok &= require(defaultTraining.khrProfileSupport.supported,
                   "default training selection carries supported KHR report");
+    const nrc::TrainingShaderCompileConfig defaultTrainingCompile =
+        nrc::make_training_shader_compile_config(defaultTraining);
+    ok &= require(defaultTrainingCompile.valid,
+                  "default training compile config is valid");
+    ok &= require(defaultTrainingCompile.backend ==
+                      nrc::BackendKind::KhrCooperativeMatrix,
+                  "default training compile config records KHR backend");
+    ok &= require(std::strcmp(defaultTrainingCompile.shaderHeader,
+                              "nrc/backend/khr_coopmat/NrcNNKhr.glsl") == 0,
+                  "default training compile config records KHR shader header");
+    ok &= require(defaultTrainingCompile.workgroupSize == 128u &&
+                      defaultTrainingCompile.subgroupSize == 32u,
+                  "default training compile config records workgroup and subgroup sizes");
+    ok &= require(defaultTrainingCompile.cooperativeMatrixM == 16u &&
+                      defaultTrainingCompile.cooperativeMatrixN == 16u &&
+                      defaultTrainingCompile.cooperativeMatrixK == 16u,
+                  "default training compile config records cooperative matrix shape");
+    ok &= require(defaultTrainingCompile.requireFullSubgroups &&
+                      defaultTrainingCompile.requireSubgroupSizeControl &&
+                      defaultTrainingCompile.requireSubgroupArithmeticForTraining,
+                  "default training compile config records KHR pipeline requirements");
+    ok &= require(!defaultTrainingCompile.useKhrCoopmatAllDWeights &&
+                      !defaultTrainingCompile.useKhrCoopmatAllDActivation,
+                  "default training compile config keeps all-coopmat defines disabled");
 
     const nrc::TrainingProfileSelection allCoopmatTraining =
         nrc::choose_training_profile(
@@ -121,6 +145,13 @@ int main() {
     ok &= require(allCoopmatTraining.useKhrCoopmatAllDWeights &&
                       allCoopmatTraining.useKhrCoopmatAllDActivation,
                   "experimental all-coopmat training enables both all-dW and all-dA flags");
+    const nrc::TrainingShaderCompileConfig allCoopmatCompile =
+        nrc::make_training_shader_compile_config(allCoopmatTraining);
+    ok &= require(allCoopmatCompile.valid,
+                  "experimental all-coopmat compile config is valid");
+    ok &= require(allCoopmatCompile.useKhrCoopmatAllDWeights &&
+                      allCoopmatCompile.useKhrCoopmatAllDActivation,
+                  "experimental all-coopmat compile config enables both all-coopmat defines");
 
     const nrc::TrainingProfileSelection noAllowedKhrTraining =
         nrc::choose_training_profile(
@@ -133,6 +164,8 @@ int main() {
                   "disabled KHR training modes record no supported training profile");
     ok &= require(noAllowedKhrTraining.khrProfileSupport.supported,
                   "disabled KHR training modes still carry supported KHR capability report");
+    ok &= require(!nrc::make_training_shader_compile_config(noAllowedKhrTraining).valid,
+                  "unselected training profile has invalid compile config");
 
     const nrc::TrainingProfileSelection scalarBecauseKhrDisabled =
         nrc::choose_training_profile(
@@ -151,6 +184,18 @@ int main() {
                   "scalar fallback records scalar profile id");
     ok &= require(scalarBecauseKhrDisabled.fallback,
                   "scalar training selection records fallback");
+    const nrc::TrainingShaderCompileConfig scalarFallbackCompile =
+        nrc::make_training_shader_compile_config(scalarBecauseKhrDisabled);
+    ok &= require(scalarFallbackCompile.valid,
+                  "scalar fallback compile config is valid");
+    ok &= require(scalarFallbackCompile.backend == nrc::BackendKind::ScalarReference,
+                  "scalar fallback compile config records scalar backend");
+    ok &= require(std::strcmp(scalarFallbackCompile.shaderHeader,
+                              "nrc/backend/scalar/NrcNNScalar.glsl") == 0,
+                  "scalar fallback compile config records scalar shader header");
+    ok &= require(scalarFallbackCompile.workgroupSize == 64u &&
+                      scalarFallbackCompile.subgroupSize == 0u,
+                  "scalar fallback compile config records scalar workgroup shape");
 
     const nrc::Profile *sg32Profile =
         nrc::find_profile(nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128);
@@ -221,6 +266,9 @@ int main() {
     ok &= require(nrc::choose_training_profile(caps16Sg16).profileId ==
                       nrc::ProfileId::KhrFp16M16N16K16Sg16Wg128,
                   "training selection chooses SG16 profile when SG32 is unavailable");
+    ok &= require(nrc::make_training_shader_compile_config(
+                      nrc::choose_training_profile(caps16Sg16)).subgroupSize == 16u,
+                  "training compile config records SG16 profile subgroup size");
 
     const nrc::DeviceCapabilitiesView noAtomic{
         true,
@@ -363,6 +411,9 @@ int main() {
     ok &= require(nrc::choose_training_profile(capsM8Only).profileId ==
                       nrc::ProfileId::KhrFp16M8N16K16Sg32Wg128,
                   "training selection chooses implemented M8 profile when M16 is unavailable");
+    ok &= require(nrc::make_training_shader_compile_config(
+                      nrc::choose_training_profile(capsM8Only)).cooperativeMatrixM == 8u,
+                  "training compile config records implemented M8 matrix shape");
 
     const nrc::DeviceCapabilitiesView emptyCaps{};
     ok &= require(nrc::choose_profile(emptyCaps) == nrc::ProfileId::None,

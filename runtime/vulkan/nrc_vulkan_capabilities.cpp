@@ -284,4 +284,34 @@ VulkanProfileValidationReport evaluate_vulkan_profile_validation(
     return report;
 }
 
+VulkanTrainingProfilePlan make_vulkan_training_profile_plan(
+    const VulkanDeviceCapabilities &capabilities,
+    const TrainingProfileSelectionOptions &selectionOptions,
+    const VulkanProfileValidationRequirements &validationRequirements) {
+    VulkanTrainingProfilePlan plan{};
+    plan.selection = choose_training_profile(capabilities.view(), selectionOptions);
+    plan.shaderCompile = make_training_shader_compile_config(plan.selection);
+    plan.selected = plan.selection.selected;
+
+    if (!plan.selection.selected) {
+        return plan;
+    }
+
+    const Profile *profile = find_profile(plan.selection.profileId);
+    if (profile == nullptr) {
+        return plan;
+    }
+
+    const ProfileRequirements profileRequirements{
+        true,
+        plan.selection.implementation == TrainingImplementationKind::ScalarReference,
+    };
+    plan.validation = evaluate_vulkan_profile_validation(capabilities,
+                                                         profileRequirements,
+                                                         *profile,
+                                                         validationRequirements);
+    plan.usable = plan.shaderCompile.valid && plan.validation.usable;
+    return plan;
+}
+
 } // namespace nrc::vulkan

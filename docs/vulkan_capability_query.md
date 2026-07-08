@@ -17,6 +17,8 @@ nrc::vulkan::VulkanDeviceCapabilities caps =
 nrc::ProfileId profile = nrc::choose_profile(caps.view());
 nrc::TrainingProfileSelection training =
     nrc::choose_training_profile(caps.view());
+nrc::vulkan::VulkanTrainingProfilePlan trainingPlan =
+    nrc::vulkan::make_vulkan_training_profile_plan(caps);
 ```
 
 `getCoopMatrixPropertiesKHR` should usually come from the application's Vulkan loader, for example volk or `vkGetInstanceProcAddr`.
@@ -119,6 +121,21 @@ NRC_KHR_USE_COOPMAT_ALL_DA=1
 ```
 
 The selection carries the decisive KHR `ProfileSupportReport`, so integrations can log why a device rejected KHR training, such as missing subgroup arithmetic, missing matrix shape, or insufficient `maxComputeSharedMemorySize`. Scalar fallback is available only when `allowScalarReferenceFallback` is set.
+
+`nrc::vulkan::make_vulkan_training_profile_plan` combines the renderer-neutral selection with a shader compile config and a Vulkan validation report:
+
+```cpp
+nrc::vulkan::VulkanProfileValidationRequirements validation{};
+validation.requirePipelineCreation = true;
+validation.pipelineCreation.status = pipelineCreated
+    ? nrc::vulkan::VulkanValidationStepStatus::Passed
+    : nrc::vulkan::VulkanValidationStepStatus::Failed;
+
+nrc::vulkan::VulkanTrainingProfilePlan plan =
+    nrc::vulkan::make_vulkan_training_profile_plan(caps, options, validation);
+```
+
+`plan.shaderCompile` is the integration-facing shader plan. For KHR profiles it carries the selected workgroup size, subgroup size, cooperative matrix shape, full-subgroup requirement, and all-coopmat switches. `plan.usable` is true only when a training profile was selected, the shader compile config is valid, and the requested Vulkan validation stages are usable.
 
 ## Shader Module Helper
 

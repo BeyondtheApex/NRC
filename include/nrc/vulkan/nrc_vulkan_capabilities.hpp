@@ -72,6 +72,14 @@ struct VulkanProfileValidationReport {
     bool usable = false;
 };
 
+struct VulkanTrainingProfilePlan {
+    TrainingProfileSelection selection;
+    TrainingShaderCompileConfig shaderCompile;
+    VulkanProfileValidationReport validation;
+    bool selected = false;
+    bool usable = false;
+};
+
 ComponentType map_component_type(VkComponentTypeKHR type);
 std::vector<std::uint32_t> enumerate_subgroup_sizes(std::uint32_t minSize,
                                                     std::uint32_t maxSize,
@@ -88,6 +96,11 @@ VulkanProfileValidationReport evaluate_vulkan_profile_validation(
     const VulkanDeviceCapabilities &capabilities,
     const ProfileRequirements &profileRequirements,
     const Profile &profile,
+    const VulkanProfileValidationRequirements &validationRequirements = {});
+
+VulkanTrainingProfilePlan make_vulkan_training_profile_plan(
+    const VulkanDeviceCapabilities &capabilities,
+    const TrainingProfileSelectionOptions &selectionOptions = {},
     const VulkanProfileValidationRequirements &validationRequirements = {});
 
 } // namespace nrc::vulkan

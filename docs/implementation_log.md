@@ -5779,3 +5779,97 @@ This keeps all-coopmat available for integration testing without declaring it th
 ### Next Step
 
 Connect the training selection contract to the Vulkan runtime harness and sample-facing integration path. The useful next shape is a small host-side plan object that combines `TrainingProfileSelection`, `ProfileShaderConfig`, shader compile defines, and Vulkan validation results, so an application can log exactly which NRC training path it is using and why it fell back.
+
+## 2026-07-09 - Milestone 84 Training Shader and Vulkan Plan Contracts
+
+### Implemented
+
+- Added `TrainingShaderCompileConfig` to the renderer-neutral profile layer.
+- Added `make_training_shader_compile_config(selection)`, which converts a selected training profile into shader-facing integration data:
+  - backend kind;
+  - shader header path;
+  - workgroup size;
+  - subgroup size;
+  - cooperative matrix `M`, `N`, and `K`;
+  - full-subgroup and subgroup-size-control requirements;
+  - subgroup-arithmetic requirement for training;
+  - all-coopmat `dW` and `dA` compile switches.
+- Added `VulkanTrainingProfilePlan` to the Vulkan capability layer.
+- Added `make_vulkan_training_profile_plan(capabilities, selectionOptions, validationRequirements)`, which bundles:
+  - `TrainingProfileSelection`;
+  - `TrainingShaderCompileConfig`;
+  - `VulkanProfileValidationReport`;
+  - selected/usable booleans.
+- Kept ownership boundaries unchanged:
+  - the new plan does not create shader modules;
+  - it does not create pipelines;
+  - it does not allocate descriptors or resources;
+  - it does not dispatch workloads.
+- Extended `nrc_profile_layout_test` to validate:
+  - default KHR compile config;
+  - all-coopmat compile switches;
+  - invalid compile config for unselected training profiles;
+  - scalar fallback compile config;
+  - SG16 subgroup propagation into compile config;
+  - M8 cooperative-matrix shape propagation into compile config.
+- Extended `nrc_vulkan_capabilities_test` to validate:
+  - default Vulkan training plan selection;
+  - all-coopmat Vulkan training plan selection;
+  - required pipeline validation blocking `plan.usable` when it has not run;
+  - scalar fallback Vulkan training plan when KHR training shared memory is insufficient.
+- Updated current documentation:
+  - `docs/profile_and_layout.md`
+  - `docs/vulkan_capability_query.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/vulkan_dispatch_harness.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+The integration contract now has three nested levels:
+
+```text
+TrainingProfileSelection
+  answers: which training implementation should be attempted?
+
+TrainingShaderCompileConfig
+  answers: which shader header/profile dimensions/experimental defines should be used?
+
+VulkanTrainingProfilePlan
+  answers: is the selected Vulkan training path usable after the requested validation stages?
+```
+
+Default KHR training plans still compile the conservative groundwork path. Experimental all-coopmat plans surface both compile switches:
+
+```text
+NRC_KHR_USE_COOPMAT_ALL_DW=1
+NRC_KHR_USE_COOPMAT_ALL_DA=1
+```
+
+If an integration requires pipeline or numerical validation, the Vulkan plan remains selected but not usable until those validation stages pass. This keeps logging and fallback decisions explicit instead of conflating capability selection with runtime proof.
+
+### Validation
+
+- Targeted plan build succeeded:
+  - `cmake --build build --config Debug --target nrc_profile_layout_test nrc_vulkan_capabilities_test`
+- Targeted plan tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_profile_layout_test|nrc_vulkan_capabilities_test" --output-on-failure -V`
+- Targeted plan test result:
+  - `2/2 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `85/85 tests passed`
+
+### Current Limitations
+
+- The plan object is still a host-side contract. It does not perform shader compilation, pipeline creation, dispatch, numerical validation, or performance validation.
+- The sample path tracer has not yet adopted `VulkanTrainingProfilePlan`; it still runs the scalar training path directly.
+- All-coopmat remains experimental and opt-in.
+- Local KHR training numerical validation is still blocked by the 98304-byte shared-memory profile gate on the current device.
+
+### Next Step
+
+Adopt the plan object in an actual integration path. The next useful target is the sample path tracer: query capabilities, build a `VulkanTrainingProfilePlan`, log/record the selected training implementation, and keep scalar training as the active execution path until KHR training runtime validation can execute successfully.

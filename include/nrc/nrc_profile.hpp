@@ -142,6 +142,22 @@ struct TrainingProfileSelection {
     bool useKhrCoopmatAllDActivation = false;
 };
 
+struct TrainingShaderCompileConfig {
+    bool valid = false;
+    BackendKind backend = BackendKind::None;
+    const char *shaderHeader = "";
+    std::uint32_t workgroupSize = 0;
+    std::uint32_t subgroupSize = 0;
+    std::uint32_t cooperativeMatrixM = 0;
+    std::uint32_t cooperativeMatrixN = 0;
+    std::uint32_t cooperativeMatrixK = 0;
+    bool requireFullSubgroups = false;
+    bool requireSubgroupSizeControl = false;
+    bool requireSubgroupArithmeticForTraining = false;
+    bool useKhrCoopmatAllDWeights = false;
+    bool useKhrCoopmatAllDActivation = false;
+};
+
 std::span<const Profile> profiles();
 const Profile *find_profile(ProfileId id);
 std::span<const ProfileShaderConfig> profile_shader_configs();
@@ -158,5 +174,7 @@ ProfileId choose_profile(const DeviceCapabilitiesView &capabilities,
 TrainingProfileSelection choose_training_profile(
     const DeviceCapabilitiesView &capabilities,
     const TrainingProfileSelectionOptions &options = {});
+TrainingShaderCompileConfig make_training_shader_compile_config(
+    const TrainingProfileSelection &selection);
 
 } // namespace nrc

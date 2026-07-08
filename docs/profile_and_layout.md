@@ -46,6 +46,19 @@ NRC_KHR_USE_COOPMAT_ALL_DW=1
 NRC_KHR_USE_COOPMAT_ALL_DA=1
 ```
 
+`nrc::make_training_shader_compile_config(selection)` converts a selected training profile into a compact compile-time plan:
+
+- backend kind;
+- shader header;
+- workgroup size;
+- subgroup size;
+- cooperative matrix `M`, `N`, and `K`;
+- subgroup-size-control/full-subgroup requirements;
+- subgroup arithmetic requirement for training;
+- all-coopmat `dW` and `dA` switches.
+
+The compile config is invalid when no training profile is selected. For scalar reference fallback, the config records the scalar shader header and workgroup size while leaving KHR subgroup and matrix dimensions at zero.
+
 `TrainingProfileSelectionOptions::enableExperimentalAllCoopmat = true` selects `KhrAllCoopmat` when the same KHR training profile is supported. This is intentionally opt-in until all-coopmat runtime numerical validation has passed on a device that can create and dispatch the training pipeline.
 
 `TrainingProfileSelectionOptions::allowScalarReferenceFallback = true` allows `ScalarReference` when no allowed KHR training implementation can be selected. This is intended for tests, diagnostics, and bring-up paths. Production integrations should treat scalar fallback as an explicit debug/reference choice.

@@ -259,6 +259,59 @@ int main() {
                           nrc::vulkan::VulkanValidationStepStatus::NotRun,
                       "Vulkan validation defaults numerical validation to not run");
 
+        const nrc::vulkan::VulkanTrainingProfilePlan defaultPlan =
+            nrc::vulkan::make_vulkan_training_profile_plan(validCapabilities);
+        ok &= require(defaultPlan.selected,
+                      "Vulkan training plan selects default KHR training profile");
+        ok &= require(defaultPlan.usable,
+                      "Vulkan training plan is usable when no validation stages are required");
+        ok &= require(defaultPlan.selection.implementation ==
+                          nrc::TrainingImplementationKind::KhrGroundwork,
+                      "Vulkan training plan defaults to KHR groundwork");
+        ok &= require(defaultPlan.shaderCompile.valid,
+                      "Vulkan training plan carries compile config");
+        ok &= require(defaultPlan.shaderCompile.backend ==
+                          nrc::BackendKind::KhrCooperativeMatrix,
+                      "Vulkan training plan compile config records KHR backend");
+        ok &= require(defaultPlan.shaderCompile.subgroupSize == 32u &&
+                          defaultPlan.shaderCompile.cooperativeMatrixM == 16u,
+                      "Vulkan training plan compile config records selected KHR profile shape");
+        ok &= require(!defaultPlan.shaderCompile.useKhrCoopmatAllDWeights &&
+                          !defaultPlan.shaderCompile.useKhrCoopmatAllDActivation,
+                      "Vulkan training plan default compile config keeps all-coopmat disabled");
+        ok &= require(defaultPlan.validation.usable,
+                      "Vulkan training plan carries usable validation report");
+
+        const nrc::vulkan::VulkanTrainingProfilePlan allCoopmatPlan =
+            nrc::vulkan::make_vulkan_training_profile_plan(
+                validCapabilities,
+                {.enableExperimentalAllCoopmat = true});
+        ok &= require(allCoopmatPlan.selected,
+                      "Vulkan all-coopmat training plan selects KHR profile");
+        ok &= require(allCoopmatPlan.usable,
+                      "Vulkan all-coopmat training plan is usable without required runtime stages");
+        ok &= require(allCoopmatPlan.selection.implementation ==
+                          nrc::TrainingImplementationKind::KhrAllCoopmat,
+                      "Vulkan all-coopmat training plan records implementation");
+        ok &= require(allCoopmatPlan.shaderCompile.useKhrCoopmatAllDWeights &&
+                          allCoopmatPlan.shaderCompile.useKhrCoopmatAllDActivation,
+                      "Vulkan all-coopmat training plan exposes all-coopmat compile defines");
+
+        nrc::vulkan::VulkanProfileValidationRequirements requirePlanPipeline{};
+        requirePlanPipeline.requirePipelineCreation = true;
+        const nrc::vulkan::VulkanTrainingProfilePlan missingPlanPipeline =
+            nrc::vulkan::make_vulkan_training_profile_plan(
+                validCapabilities,
+                {},
+                requirePlanPipeline);
+        ok &= require(missingPlanPipeline.selected,
+                      "Vulkan training plan still selects profile when required pipeline has not run");
+        ok &= require(!missingPlanPipeline.usable,
+                      "Vulkan training plan is not usable when required pipeline validation has not run");
+        ok &= require(missingPlanPipeline.validation.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::PipelineCreationNotRun,
+                      "Vulkan training plan preserves missing pipeline validation status");
+
         nrc::vulkan::VulkanProfileValidationRequirements requireShaderModule{};
         requireShaderModule.requireShaderModuleCreation = true;
         const nrc::vulkan::VulkanProfileValidationReport missingShaderModule =
@@ -430,6 +483,24 @@ int main() {
         ok &= require(missingSharedMemory.profileSupport.status ==
                           nrc::ProfileSupportStatus::MissingSharedMemory,
                       "Vulkan validation carries missing shared memory status");
+
+        const nrc::vulkan::VulkanTrainingProfilePlan sharedMemoryFallbackPlan =
+            nrc::vulkan::make_vulkan_training_profile_plan(
+                missingSharedMemoryCapabilities,
+                {false, true, true});
+        ok &= require(sharedMemoryFallbackPlan.selected,
+                      "Vulkan training plan selects scalar fallback on insufficient shared memory when allowed");
+        ok &= require(sharedMemoryFallbackPlan.usable,
+                      "Vulkan scalar fallback training plan is usable without required runtime stages");
+        ok &= require(sharedMemoryFallbackPlan.selection.implementation ==
+                          nrc::TrainingImplementationKind::ScalarReference,
+                      "Vulkan training plan records scalar fallback implementation");
+        ok &= require(sharedMemoryFallbackPlan.selection.khrProfileSupport.status ==
+                          nrc::ProfileSupportStatus::MissingSharedMemory,
+                      "Vulkan scalar fallback training plan preserves KHR rejection reason");
+        ok &= require(sharedMemoryFallbackPlan.shaderCompile.backend ==
+                          nrc::BackendKind::ScalarReference,
+                      "Vulkan scalar fallback training plan carries scalar compile config");
     }
 
     nrc::vulkan::VulkanDeviceCapabilities emptyCapabilities{};
