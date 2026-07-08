@@ -337,3 +337,56 @@ Start Milestone 4 with a scalar/reference NN backend and CPU tests, or begin KHR
 ### Next Step
 
 Start Milestone 5 by adding weight initialization/packing utilities and a deterministic packed-weight fixture, then use that fixture for scalar GPU and future KHR backend validation.
+
+## 2026-07-08 - Milestone 5 Weight Initialization and Packing
+
+### Implemented
+
+- Added public weight utility API:
+  - `include/nrc/nrc_weights.hpp`
+- Added implementation:
+  - `src/nrc_weights.cpp`
+- Added test:
+  - `tests/weights_test.cpp`
+- Registered CTest test:
+  - `nrc_weights_test`
+
+### Behavior
+
+- Added self-contained float32 to IEEE 754 binary16 conversion.
+- Added binary16 to float32 conversion.
+- Added deterministic Kaiming/He initialization using:
+  - `std::mt19937`
+  - normal distribution with standard deviation `sqrt(2 / 64)`.
+- Added packed fp16 weight layout:
+  - 8 fp16 values per `uvec4`.
+  - Each `uint` stores two fp16 values.
+  - Even lane uses low 16 bits.
+  - Odd lane uses high 16 bits.
+
+### VkNRC Compatibility Decisions
+
+- Weight count remains `20672`.
+- Packed weight block count is `20672 / 8 = 2584`.
+- Packed byte count is `2584 * sizeof(uvec4) = 41344`, matching the resource layout test.
+- The packed lane order matches `NrcScalarLoadWeight` in `NrcNNScalar.glsl`.
+
+### Validation
+
+- Full Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `6/6 tests passed`.
+
+### Current Limitations
+
+- Kaiming initialization currently uses the C++ standard library RNG. This is deterministic for a given implementation, but may not be bit-identical across all C++ standard library implementations.
+- No GPU runtime test uploads packed weights yet.
+- No scalar GPU dispatch test compares shader output to CPU reference output yet.
+- No optimizer state initialization helper has been added yet.
+
+### Next Step
+
+Start Milestone 6 by adding a minimal compute dispatch harness for the scalar shader or by implementing the first KHR cooperative matrix inference shader scaffold against the same packed weight layout.

@@ -12,6 +12,13 @@ target_link_libraries(nrc_reference_nn_test PRIVATE nrc_core)
 
 add_test(NAME nrc_reference_nn_test COMMAND nrc_reference_nn_test)
 
+add_executable(nrc_weights_test
+    weights_test.cpp)
+
+target_link_libraries(nrc_weights_test PRIVATE nrc_core)
+
+add_test(NAME nrc_weights_test COMMAND nrc_weights_test)
+
 if(TARGET nrc_vulkan)
     add_executable(nrc_vulkan_capabilities_test
         vulkan_capabilities_test.cpp)
