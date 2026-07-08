@@ -4488,3 +4488,75 @@ This is the first hidden-layer cooperative-matrix `dW` implementation surface. I
 ### Next Step
 
 Add a CPU oracle path for the final-hidden cooperative-matrix `dW` helper, then add a runtime validation mode similar to `--coopmat-output` once the oracle is available. After that, extend the same tile-streaming helper to earlier hidden layers one layer at a time while keeping the default path stable until numerical validation succeeds.
+
+## 2026-07-09 - Milestone 68 Final-Hidden Coopmat dW Runtime Oracle
+
+### Implemented
+
+- Added a test-side CPU oracle for the optional final-hidden cooperative-matrix `dW` path in `tests/vulkan_gradient_khr_test.cpp`.
+- The oracle starts from the current KHR groundwork gradients and replaces hidden layer 4 `dW` with the tile-streaming coopmat expectation:
+  - propagate `dOutput` to hidden layer 4 in fp32;
+  - apply the hidden activation ReLU gate;
+  - stage each row-block `dPre` value through fp16 rounding;
+  - accumulate against the saved fp16 source activation for hidden layer 3;
+  - round the final hidden-layer partials back through fp16 before writing the expected fp32 gradient buffer.
+- Added expected-gradient sanity checks before Vulkan device selection:
+  - all expected gradients must be finite;
+  - output-coopmat expected output gradients must be non-zero;
+  - final-hidden-coopmat expected hidden layer 4 gradients must be non-zero.
+- Added `--coopmat-final-hidden` to `nrc_vulkan_gradient_khr_test`.
+- Added runtime SPIR-V generation for `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW=1`:
+  - SG32;
+  - SG16;
+  - M8/SG32.
+- Added `nrc_gradient_khr_coopmat_final_hidden_dispatch_shaders`.
+- Added `nrc_vulkan_gradient_khr_coopmat_final_hidden_test`.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/vulkan_dispatch_harness.md`
+  - `docs/training_optimizer.md`
+  - `docs/khr_shared_memory_layout.md`
+
+### Behavior
+
+The KHR gradient runtime test now has three modes:
+
+```text
+default:                 KHR groundwork oracle
+--coopmat-output:        output-layer fp16 coopmat dW oracle
+--coopmat-final-hidden:  hidden layer 4 fp16 coopmat dW oracle
+```
+
+The final-hidden oracle only changes hidden layer 4 `dW`. Other hidden layers and the output layer remain compared against the existing KHR groundwork oracle.
+
+### Validation
+
+- Reconfigured CMake so the new runtime SPIR-V target and test are registered:
+  - `cmake -S . -B build`
+- Targeted KHR gradient runtime test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr" --output-on-failure -V`
+- Targeted test result:
+  - `3/3 tests passed`
+- Current local KHR training skip result for all three runtime modes:
+  - `SKIP: no Vulkan device supports an implemented NRC KHR cooperative matrix training profile`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `41/41 tests passed`
+
+### Current Limitations
+
+- The final-hidden coopmat runtime validation path is wired, but the current local device does not satisfy the 98304-byte KHR training shared-memory profile gate. The numerical comparison therefore has not executed locally.
+- The default KHR gradient path still uses subgroup arithmetic for final-hidden `dW`.
+- Hidden layers 3, 2, 1, and 0 still use the subgroup `dW` path.
+- KHR `dA` propagation still uses scalar arrays rather than cooperative matrices.
+- The test-side final-hidden oracle currently mirrors the single-workgroup test batch. Broader batch/workgroup coverage should be added before making this helper a default path.
+
+### Next Step
+
+Extend the tile-streaming helper to an earlier hidden layer behind another explicit experimental switch, or broaden the final-hidden oracle/test batch coverage so multiple subgroups contribute non-zero partials before promoting the helper further.

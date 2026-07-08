@@ -267,6 +267,61 @@ std::vector<float> make_expected_khr_output_coopmat_gradients(
     return gradients;
 }
 
+std::vector<float> make_expected_khr_final_hidden_coopmat_gradients(
+    std::span<const float> gpuVisibleWeights,
+    const std::vector<nrc::NrcTrainRecord> &trainRecords) {
+    std::vector<float> gradients =
+        make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
+
+    const std::uint32_t layer = nrc::kNnHiddenLayerCount - 1u;
+    const std::size_t layerOffset = nrc::layer_weight_offset(layer);
+    std::fill(gradients.begin() + static_cast<std::ptrdiff_t>(layerOffset),
+              gradients.begin() + static_cast<std::ptrdiff_t>(layerOffset + nrc::hidden_layer_weight_count()),
+              0.0f);
+
+    std::array<float, nrc::kNnHiddenWidth * nrc::kNnHiddenWidth> hiddenPartials{};
+    const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
+    for (std::uint32_t i = 0; i < kTrainCount; ++i) {
+        nrc::EncodedInput encoded{};
+        nrc::encode_input(unpack_test_input(trainRecords[i].packedInput), encoded);
+        const HiddenLayers hiddenLayers = forward_hidden_layers_fp16(gpuVisibleWeights, encoded);
+        const HiddenVector &finalHidden = hiddenLayers[nrc::kNnHiddenLayerCount - 1u];
+        const HiddenVector &sourceHidden = hiddenLayers[nrc::kNnHiddenLayerCount - 2u];
+        const nrc::ReferenceOutput prediction =
+            output_from_final_hidden_fp16(gpuVisibleWeights, finalHidden);
+        const nrc::ReferenceOutput target{
+            trainRecords[i].biasR,
+            trainRecords[i].biasG,
+            trainRecords[i].biasB,
+        };
+        const nrc::ReferenceOutput dOutput =
+            relative_luminance_output_derivative(prediction, target);
+
+        HiddenVector dHidden{};
+        for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
+            for (std::uint32_t row = 0; row < nrc::kNnOutputWidth; ++row) {
+                dHidden[col] +=
+                    gpuVisibleWeights[outputOffset + row * nrc::kNnHiddenWidth + col] *
+                    dOutput[row];
+            }
+        }
+
+        for (std::uint32_t row = 0; row < nrc::kNnHiddenWidth; ++row) {
+            const float dPre = finalHidden[row] > 0.0f ? dHidden[row] : 0.0f;
+            const float stagedDPre = fp16_round(dPre);
+            for (std::uint32_t col = 0; col < nrc::kNnHiddenWidth; ++col) {
+                hiddenPartials[row * nrc::kNnHiddenWidth + col] +=
+                    stagedDPre * sourceHidden[col];
+            }
+        }
+    }
+
+    for (std::uint32_t i = 0; i < nrc::hidden_layer_weight_count(); ++i) {
+        gradients[layerOffset + i] = fp16_round(hiddenPartials[i]);
+    }
+    return gradients;
+}
+
 class VulkanKhrGradientRunner {
 public:
     VulkanKhrGradientRunner(const char *sg32SpirvPath,
@@ -838,12 +893,28 @@ bool close_enough(float lhs, float rhs) {
     return std::fabs(lhs - rhs) <= tolerance;
 }
 
+float max_abs(std::span<const float> values) {
+    float result = 0.0f;
+    for (float value : values) {
+        result = std::max(result, std::fabs(value));
+    }
+    return result;
+}
+
+bool all_finite(std::span<const float> values) {
+    return std::all_of(values.begin(), values.end(), [](float value) {
+        return std::isfinite(value);
+    });
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
     const bool useCoopmatOutput = argc == 5 && std::strcmp(argv[4], "--coopmat-output") == 0;
-    if (argc != 4 && !useCoopmatOutput) {
-        std::cerr << "usage: nrc_vulkan_gradient_khr_test <sg32.spv> <sg16.spv> <m8_sg32.spv> [--coopmat-output]\n";
+    const bool useCoopmatFinalHidden =
+        argc == 5 && std::strcmp(argv[4], "--coopmat-final-hidden") == 0;
+    if (argc != 4 && !useCoopmatOutput && !useCoopmatFinalHidden) {
+        std::cerr << "usage: nrc_vulkan_gradient_khr_test <sg32.spv> <sg16.spv> <m8_sg32.spv> [--coopmat-output|--coopmat-final-hidden]\n";
         return EXIT_FAILURE;
     }
 
@@ -853,10 +924,35 @@ int main(int argc, char **argv) {
         const std::vector<float> gpuVisibleWeights =
             nrc::unpack_weights_fp16_uvec4(packedWeights, nrc::weight_count());
         const std::vector<nrc::NrcTrainRecord> trainRecords = make_train_records();
-        const std::vector<float> expectedGradients =
-            useCoopmatOutput
-                ? make_expected_khr_output_coopmat_gradients(gpuVisibleWeights, trainRecords)
-                : make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
+        std::vector<float> expectedGradients;
+        if (useCoopmatOutput) {
+            expectedGradients =
+                make_expected_khr_output_coopmat_gradients(gpuVisibleWeights, trainRecords);
+        } else if (useCoopmatFinalHidden) {
+            expectedGradients =
+                make_expected_khr_final_hidden_coopmat_gradients(gpuVisibleWeights, trainRecords);
+        } else {
+            expectedGradients =
+                make_expected_khr_groundwork_gradients(gpuVisibleWeights, trainRecords);
+        }
+        if (!all_finite(expectedGradients)) {
+            throw std::runtime_error("KHR expected gradients contain non-finite values");
+        }
+        if (useCoopmatOutput) {
+            const std::size_t outputOffset = nrc::layer_weight_offset(nrc::kNnHiddenLayerCount);
+            if (max_abs(std::span<const float>{expectedGradients.data() + outputOffset,
+                                               nrc::output_layer_weight_count()}) == 0.0f) {
+                throw std::runtime_error("KHR output-coopmat oracle produced all-zero output gradients");
+            }
+        }
+        if (useCoopmatFinalHidden) {
+            const std::size_t finalHiddenOffset =
+                nrc::layer_weight_offset(nrc::kNnHiddenLayerCount - 1u);
+            if (max_abs(std::span<const float>{expectedGradients.data() + finalHiddenOffset,
+                                               nrc::hidden_layer_weight_count()}) == 0.0f) {
+                throw std::runtime_error("KHR final-hidden coopmat oracle produced all-zero final-hidden gradients");
+            }
+        }
 
         nrc::NrcQueueState queueState{};
         queueState.trainCounts[0] = kTrainCount;

@@ -71,6 +71,8 @@ The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_FINAL_H
 
 `tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-output` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_output_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1`. That mode compares output-layer gradients against a test-side oracle that mirrors fp16 output derivative staging and fp16 output partial storage, while hidden-layer gradients still use `nrc::reference_backward_khr_fp16`.
 
+`tests/vulkan_gradient_khr_test.cpp` also has a `--coopmat-final-hidden` mode. CTest registers it as `nrc_vulkan_gradient_khr_coopmat_final_hidden_test` with SPIR-V variants compiled using `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW=1`. That mode compares final-hidden gradients against a test-side oracle that mirrors fp16 dPre row-block staging and fp16 final-hidden partial storage, while the other hidden/output regions use the current KHR groundwork oracle.
+
 The optional output-coopmat helper restores the fp32 shared output derivative cache after reducing output dW. This keeps the downstream final-hidden dW helper on the same shared derivative contract as the default subgroup output path.
 
 `nrc::compute_khr_shader_shared_memory_layout` mirrors the backend's shared-memory constants on the host side. The current KHR backprop layout allocates 6144 `uvec4` values, or 98304 bytes, for the active tile, six activation-sized regions, and reduction scratch. `docs/khr_shared_memory_layout.md` records the per-profile scratch sizes and the hidden dW partial-storage constraint.
@@ -79,7 +81,7 @@ Training profile selection now requires device `maxComputeSharedMemorySize` to m
 
 The same layout model now records a hidden-layer cooperative-matrix `dW` tile-streaming plan. It avoids the SG16 full-layer partial overwrite hazard by using only the active tile for row-block dPre staging and one tile of partials per subgroup.
 
-`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` implements the first shader helper using that plan. It currently has compile validation for final-hidden `dW`; runtime numerical validation and earlier hidden-layer integration are still pending.
+`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` implements the first shader helper using that plan. It currently has compile validation and a runtime validation entry for final-hidden `dW`; successful dispatch still depends on hardware/driver support for the selected training profile.
 
 These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support, gradient correctness, or training performance.
 
@@ -116,7 +118,7 @@ This means capability/profile selection is necessary but not sufficient for prod
 The test:
 
 - queries real Vulkan device capabilities;
-- selects an implemented KHR training profile with `requireTraining = true`;
+- selects an implemented KHR training profile with `requireTraining = true`, including the current 98304-byte shared-memory requirement;
 - creates a device with KHR cooperative matrix, fp32 storage-buffer atomic add, shader float16, storage buffer 16-bit access, subgroup size control, and full compute subgroup features, and requires subgroup arithmetic support reported by subgroup properties;
 - creates the KHR gradient pipeline through `nrc::vulkan::create_profile_compute_pipeline`;
 - dispatches a small train-record batch through `NrcGradientKhr.glsl`;
@@ -124,8 +126,10 @@ The test:
 
 Current local result:
 
-- `vkCreateComputePipelines` raises a structured exception for the KHR gradient shader.
-- The default KHR gradient test and the optional output-coopmat KHR gradient test catch this on MSVC/Windows, print `SKIP:`, and return success so the rest of the suite remains usable.
+- The default KHR gradient test, optional output-coopmat KHR gradient test, and optional final-hidden-coopmat KHR gradient test all report:
+  - `SKIP: no Vulkan device supports an implemented NRC KHR cooperative matrix training profile`
+- This skip happens at profile selection because the current training profile requires the 98304-byte KHR backprop shared-memory layout.
+- The KHR inference dispatch test still uses `requireTraining = false`, so it is not blocked by the training shared-memory gate and can still reach pipeline creation on devices that report the inference profile.
 
 ## Profile Selection
 
@@ -139,4 +143,4 @@ Profiles carry an `implemented` flag. The implemented KHR inference profiles are
 
 After selecting a profile, integrations should call `nrc::find_profile_shader_config` and use the returned workgroup, subgroup, and cooperative-matrix dimensions to select or compile the matching shader variant. The Vulkan KHR dispatch test uses this path to choose between SG32, SG16, and M8/SG32 SPIR-V files, then uses `nrc::vulkan::create_profile_compute_pipeline` for profile-specific pipeline creation.
 
-Training profile selection additionally requires subgroup arithmetic support because the current KHR gradient helpers use `subgroupAdd` for hidden/output `dW` reductions. Inference-only selection can pass `ProfileRequirements{.requireTraining = false}` and does not require subgroup arithmetic or fp32 buffer atomic add.
+Training profile selection additionally requires subgroup arithmetic support because the current KHR gradient helpers use `subgroupAdd` for hidden/output `dW` reductions, fp32 buffer atomic add for gradient accumulation, and enough compute shared memory for the current KHR backprop layout. Inference-only selection can pass `ProfileRequirements{.requireTraining = false}` and does not require subgroup arithmetic, fp32 buffer atomic add, or the training shared-memory allocation.
