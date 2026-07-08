@@ -58,7 +58,7 @@ The luminance denominator is treated as the current prediction scale, matching V
 - It uses fp32 storage-buffer atomic add and therefore requires `VK_EXT_shader_atomic_float` / `shaderBufferFloat32AtomicAdd`.
 - The Vulkan gradient test is feature-gated and reports a controlled skip on devices without fp32 storage-buffer atomic add support.
 - The sample path tracer currently runs one validated scalar training update, not an iterative training loop.
-- The KHR cooperative-matrix pass now has full hidden/output `dW` training groundwork and scalar workgroup reduction for output-layer, final-hidden-layer, and hidden-layer 3 `dW`, but remaining hidden-layer cooperative-matrix reduction and runtime numerical validation on a successful KHR pipeline creation path are still missing.
+- The KHR cooperative-matrix pass now has full hidden/output `dW` training groundwork and scalar workgroup reduction for output-layer and hidden-layer 4/3/2/1 `dW`, but hidden-layer 0 cooperative-matrix reduction and runtime numerical validation on a successful KHR pipeline creation path are still missing.
 
 ## KHR Gradient Pass
 
@@ -85,14 +85,14 @@ Current behavior:
 - hidden-layer 4 derivative is propagated to hidden-layer 3 activations;
 - hidden-layer 3 `dW` is reduced across the workgroup through shared fp32 `dZ` scratch and accumulated into the same fp32 row-major gradient layout as the scalar pass;
 - hidden-layer 3 derivative is propagated to hidden-layer 2 activations;
-- hidden-layer 2 `dW` is accumulated into the same fp32 row-major gradient layout as the scalar pass;
+- hidden-layer 2 `dW` is reduced across the workgroup through shared fp32 `dZ` scratch and accumulated into the same fp32 row-major gradient layout as the scalar pass;
 - hidden-layer 2 derivative is propagated to hidden-layer 1 activations;
-- hidden-layer 1 `dW` is accumulated into the same fp32 row-major gradient layout as the scalar pass;
+- hidden-layer 1 `dW` is reduced across the workgroup through shared fp32 `dZ` scratch and accumulated into the same fp32 row-major gradient layout as the scalar pass;
 - hidden-layer 1 derivative is propagated to hidden-layer 0 activations;
 - hidden-layer 0 `dW` is accumulated from the encoded input into the same fp32 row-major gradient layout as the scalar pass.
 
 Current limitations:
 
-- output-layer, hidden-layer 4, and hidden-layer 3 `dW` use scalar workgroup reductions with one fp32 atomic add per covered weight per workgroup;
-- hidden-layer 2/1/0 `dW` helpers are still scalar per sample invocation and are not the final cooperative-matrix/subgroup reduction path;
+- output-layer and hidden-layer 4/3/2/1 `dW` use scalar workgroup reductions with one fp32 atomic add per covered weight per workgroup;
+- hidden-layer 0 `dW` still uses scalar per-sample accumulation because its source activation is invocation-local encoded input, not a saved shared activation snapshot;
 - KHR runtime gradient comparison is present but remains driver-gated on the current local AMD pipeline creation path.

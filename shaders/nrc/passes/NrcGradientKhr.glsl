@@ -139,20 +139,20 @@ void NrcGradientKhrMain() {
                                      NRC_KHR_BACKPROP_SOURCE_ACT_COPY_UVEC4_BASE,
                                      dHidden3,
                                      dHidden2);
-    NrcKhrAccumulateHiddenDWeights(NRC_NN_HIDDEN_LAYER_COUNT - 3u,
-                                   NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE,
-                                   NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE,
-                                   dHidden2);
+    NrcKhrStoreSharedDPreActivations(NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE,
+                                     dHidden2);
+    NrcKhrAccumulateSharedHiddenDWeightsWorkgroup(NRC_NN_HIDDEN_LAYER_COUNT - 3u,
+                                                  NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE);
 
     float dHidden1[NRC_NN_HIDDEN_WIDTH];
     NrcKhrPropagateHiddenDActivation(NRC_NN_HIDDEN_LAYER_COUNT - 3u,
                                      NRC_KHR_BACKPROP_PREVIOUS_SOURCE_ACT_COPY_UVEC4_BASE,
                                      dHidden2,
                                      dHidden1);
-    NrcKhrAccumulateHiddenDWeights(NRC_NN_HIDDEN_LAYER_COUNT - 4u,
-                                   NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE,
-                                   NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE,
-                                   dHidden1);
+    NrcKhrStoreSharedDPreActivations(NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE,
+                                     dHidden1);
+    NrcKhrAccumulateSharedHiddenDWeightsWorkgroup(NRC_NN_HIDDEN_LAYER_COUNT - 4u,
+                                                  NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE);
 
     float dHidden0[NRC_NN_HIDDEN_WIDTH];
     NrcKhrPropagateHiddenDActivation(NRC_NN_HIDDEN_LAYER_COUNT - 4u,

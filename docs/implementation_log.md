@@ -3644,3 +3644,63 @@ and emits one fp32 atomic add per covered hidden-layer 3 weight per workgroup. T
 ### Next Step
 
 Reuse the shared-`dZ` helper for hidden-layer 2 and hidden-layer 1 once their local derivatives have been computed. Hidden-layer 0 still needs a separate source path because its source activation is the invocation-local encoded input rather than a saved shared activation snapshot.
+
+## 2026-07-09 - Milestone 55 KHR Hidden Layer 2/1 Workgroup Gradient Reduction
+
+### Implemented
+
+- Reused the shared-`dZ` helper path from Milestone 54 for hidden-layer 2 and hidden-layer 1.
+- Changed `shaders/nrc/passes/NrcGradientKhr.glsl` so:
+  - hidden-layer 2 stores ReLU-gated `dZ2` into shared scratch and accumulates `dW2` with one fp32 atomic add per weight per workgroup;
+  - hidden-layer 1 stores ReLU-gated `dZ1` into shared scratch and accumulates `dW1` with one fp32 atomic add per weight per workgroup.
+- Updated `tests/shader_compile/nrc_khr_backprop_smoke.comp` so the compile smoke test exercises the hidden-layer 2/1 shared-`dZ` paths.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+The pass now uses the shared fp32 `dZ` scratch for hidden-layer 3, 2, and 1 `dW` accumulation. For hidden-layer 2:
+
+```text
+dZ2[row] = A2[row] > 0 ? dA2[row] : 0
+dW2[row, col] = sum_samples(dZ2[row] * A1[col])
+```
+
+For hidden-layer 1:
+
+```text
+dZ1[row] = A1[row] > 0 ? dA1[row] : 0
+dW1[row, col] = sum_samples(dZ1[row] * A0[col])
+```
+
+The scratch continues to reuse only the first 2048 `uvec4` entries of `nrcKhrSharedBuffer`, which overwrites the active tile and retired A4 snapshot. The saved A3/A2/A1/A0 snapshots used as source activations remain untouched at later offsets. The local `dHidden2` and `dHidden1` arrays are still used for derivative propagation to earlier layers.
+
+### Validation
+
+- Targeted KHR shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr|nrc_shader_khr_backprop" --output-on-failure -V`
+- Targeted KHR gradient test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime test succeeded with controlled skip:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr_test" --output-on-failure -V`
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `33/33 tests passed`
+
+### Current Limitations
+
+- Output-layer and hidden-layer 4/3/2/1 `dW` reductions are scalar workgroup loops, not cooperative-matrix or subgroup reductions.
+- Hidden-layer 0 `dW` still uses scalar per-sample accumulation because its source activation is the invocation-local encoded input.
+- The current correctness path still depends on fp32 storage-buffer atomic add.
+- Runtime numerical comparison for the KHR shader still did not execute on this machine because the local AMD KHR pipeline creation path reports a controlled structured-exception skip.
+- Shared `dZ` scratch reuse is still tied to the current fixed 64-wide/128-sample shape. It is guarded for this shape, but final production reduction should revisit memory lifetime and profile-specific pressure.
+
+### Next Step
+
+Add a workgroup-reduced hidden-layer 0 path by staging the encoded input source features, or design a source reader abstraction that lets the shared-`dZ` helper reduce against either saved shared activations or invocation-local encoded activations without duplicating the entire loop.
