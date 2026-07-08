@@ -149,8 +149,8 @@ The test:
 - selects an implemented KHR training profile with `requireTraining = true`, including the current 98304-byte shared-memory requirement;
 - creates a device with KHR cooperative matrix, fp32 storage-buffer atomic add, shader float16, storage buffer 16-bit access, subgroup size control, and full compute subgroup features, and requires subgroup arithmetic support reported by subgroup properties;
 - creates the KHR gradient pipeline through `nrc::vulkan::create_profile_compute_pipeline`;
-- dispatches a 67-record train batch through `NrcGradientKhr.glsl`;
-- compares every hidden/output gradient region against `nrc::reference_backward_khr_fp16` if pipeline creation and dispatch succeed.
+- dispatches a 197-record train batch through `NrcGradientKhr.glsl`, spanning two 128-wide workgroups with a partial final workgroup;
+- compares every hidden/output gradient region against the selected CPU oracle if pipeline creation and dispatch succeed, including coopmat `dW` oracles that keep per-workgroup/per-subgroup fp16 partials before fp32 gradient accumulation.
 
 Current local result:
 

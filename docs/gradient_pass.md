@@ -44,7 +44,7 @@ The luminance denominator is treated as the current prediction scale, matching V
 
 `tests/vulkan_gradient_scalar_test.cpp` dispatches the scalar gradient pass on Vulkan when `VK_EXT_shader_atomic_float` and `shaderBufferFloat32AtomicAdd` are available. The test uploads packed fp16 weights, train records, and queue state, then compares the full fp32 gradient buffer against `nrc::reference_backward`.
 
-`tests/vulkan_gradient_khr_test.cpp` selects a KHR cooperative-matrix training profile when cooperative matrices, fp32 storage-buffer atomic add, subgroup arithmetic, and the KHR training shared-memory requirement are available. If pipeline creation succeeds, it dispatches `NrcGradientKhr.glsl` over a 67-record one-workgroup batch and compares all hidden-layer and output-layer gradient regions against the matching CPU oracle. On the current local AMD driver, KHR training profile selection reports a controlled `SKIP:` because no implemented training profile satisfies the current 98304-byte shared-memory requirement.
+`tests/vulkan_gradient_khr_test.cpp` selects a KHR cooperative-matrix training profile when cooperative matrices, fp32 storage-buffer atomic add, subgroup arithmetic, and the KHR training shared-memory requirement are available. If pipeline creation succeeds, it dispatches `NrcGradientKhr.glsl` over a 197-record batch spanning two 128-wide workgroups with a partial final workgroup, then compares all hidden-layer and output-layer gradient regions against the matching CPU oracle. On the current local AMD driver, KHR training profile selection reports a controlled `SKIP:` because no implemented training profile satisfies the current 98304-byte shared-memory requirement.
 
 KHR shader compile tests also cover experimental cooperative-matrix `dW` variants for the output layer, every hidden layer, and an all-`dW` combined mode across SG32, SG16, and M8/SG32 profiles.
 
@@ -107,7 +107,7 @@ Experimental KHR final-hidden cooperative-matrix reduction:
 - `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW=1` switches only hidden layer 4 `dW` to this helper.
 - The helper follows the host-side tile-streaming layout plan and keeps all temporary storage inside the active tile, preserving saved activation snapshots for SG32, SG16, and M8/SG32 profiles.
 - `nrc_vulkan_gradient_khr_coopmat_final_hidden_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors fp16 `dPre` row-block staging and per-subgroup fp16 final-hidden partial storage.
-- The 67-record test batch spans multiple subgroup sample ranges for both SG16 and SG32, so the coopmat oracles now model the shader's cross-subgroup partial reduction instead of only subgroup 0.
+- The 197-record test batch spans multiple subgroup sample ranges for both SG16 and SG32 across a full workgroup and a partial final workgroup, so the coopmat oracles now model the shader's per-workgroup subgroup partial reduction before fp32 gradient accumulation.
 - The local test currently reaches a controlled profile-selection skip before dispatch because the available device does not satisfy the 98304-byte KHR training shared-memory requirement.
 
 Experimental KHR hidden-layer-3 cooperative-matrix reduction:
@@ -144,7 +144,7 @@ Experimental KHR all-`dW` cooperative-matrix reduction:
 - `NRC_KHR_USE_COOPMAT_ALL_DW=1` switches output-layer `dW` and every hidden-layer `dW` to the cooperative-matrix helpers in one shader variant.
 - Individually defined region switches still take precedence, so integrations can keep using targeted A/B variants.
 - `nrc_vulkan_gradient_khr_coopmat_all_dw_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that combines the output and hidden-layer coopmat expectations into one full gradient buffer.
-- The all-`dW` oracle mirrors the same per-region fp16 staging and per-subgroup fp16 partial storage as the single-region oracles.
+- The all-`dW` oracle mirrors the same per-region fp16 staging and per-workgroup/per-subgroup fp16 partial storage as the single-region oracles.
 - The default KHR gradient pass still uses subgroup arithmetic until runtime numerical validation succeeds on a driver that can create the KHR gradient pipeline.
 
 Current limitations:

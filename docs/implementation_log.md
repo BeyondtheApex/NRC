@@ -5046,3 +5046,88 @@ default:                 KHR groundwork oracle
 ### Next Step
 
 Add multi-workgroup KHR gradient oracle coverage, or start porting KHR `dA` propagation toward cooperative-matrix form so the training path moves closer to VkNRC's fully fused shape.
+
+## 2026-07-09 - Milestone 75 Multi-Workgroup KHR Coopmat Gradient Oracle
+
+### Implemented
+
+- Increased `tests/vulkan_gradient_khr_test.cpp` from a 67-record single-workgroup KHR gradient batch to a 197-record batch.
+- The new batch shape spans:
+  - one full 128-wide workgroup;
+  - one partial final workgroup;
+  - multiple SG32 subgroup ranges in both workgroups;
+  - multiple SG16 subgroup ranges in both workgroups.
+- Added static coverage guards so the KHR gradient test batch must:
+  - exceed one KHR gradient workgroup;
+  - include a partial final workgroup;
+  - fit inside one NRC train batch.
+- Added shared CPU-oracle helpers for:
+  - KHR coopmat subgroup-count validation;
+  - sample-to-workgroup mapping;
+  - sample-to-local-subgroup mapping;
+  - storing `[workgroup][subgroup][weight]` fp16-rounded partials back into the expected gradient region.
+- Updated every optional KHR coopmat `dW` oracle to model per-workgroup subgroup partials:
+  - output layer;
+  - final hidden layer;
+  - hidden layer 3;
+  - hidden layer 2;
+  - hidden layer 1;
+  - hidden layer 0;
+  - all-`dW`.
+- The oracle now mirrors the shader's workgroup-local reduction shape more closely:
+  - accumulate one fp32 partial per local subgroup;
+  - fp16-round each subgroup partial;
+  - sum subgroup partials inside the workgroup;
+  - accumulate each workgroup's contribution into the global fp32 gradient region.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/vulkan_dispatch_harness.md`
+
+### Behavior
+
+The KHR gradient runtime test still has eight modes:
+
+```text
+default:                 KHR groundwork oracle
+--coopmat-output:        output-layer fp16 coopmat dW oracle
+--coopmat-final-hidden:  hidden layer 4 fp16 coopmat dW oracle
+--coopmat-hidden3:       hidden layer 3 fp16 coopmat dW oracle
+--coopmat-hidden2:       hidden layer 2 fp16 coopmat dW oracle
+--coopmat-hidden1:       hidden layer 1 fp16 coopmat dW oracle
+--coopmat-hidden0:       hidden layer 0 fp16 coopmat dW oracle
+--coopmat-all-dw:        output and all hidden dW regions use fp16 coopmat oracles
+```
+
+The shader dispatch path already computed group count from `trainCount` and the selected profile workgroup size. This milestone changes the expected-value model so the runtime comparison is ready for more than one workgroup when a local device can create and run the KHR training pipeline.
+
+### Validation
+
+- Diff whitespace check succeeded:
+  - `git diff --check`
+- Targeted KHR gradient runtime test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr" --output-on-failure -V`
+- Targeted KHR gradient runtime result:
+  - `8/8 tests passed`
+- Current local KHR training skip result for all eight runtime modes remains:
+  - `SKIP: no Vulkan device supports an implemented NRC KHR cooperative matrix training profile`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `61/61 tests passed`
+
+### Current Limitations
+
+- The multi-workgroup KHR coopmat runtime comparison is wired, but the current local device still does not satisfy the 98304-byte KHR training shared-memory profile gate. The numerical GPU-vs-CPU comparison therefore has not executed locally.
+- The default KHR gradient path still uses subgroup arithmetic for output and every hidden-layer `dW`.
+- KHR `dA` propagation still uses scalar arrays rather than cooperative matrices.
+- The coopmat `dW` modes still use one fp32 atomic add per output/hidden weight per workgroup after reducing fp16 subgroup partials.
+- The CPU oracle code is intentionally explicit but now has repeated hidden-layer backpropagation blocks. It is a candidate for a future helper refactor once the shader behavior stabilizes.
+
+### Next Step
+
+Refactor the duplicated KHR coopmat oracle backpropagation code into shared helpers, or start porting KHR `dA` propagation toward cooperative-matrix form so the training path moves closer to VkNRC's fully fused shape.
