@@ -8,6 +8,8 @@ shaders/nrc/common/NrcTypes.glsl
 shaders/nrc/common/NrcEncoding.glsl
 shaders/nrc/common/NrcQueue.glsl
 shaders/nrc/passes/NrcQueueOps.glsl
+shaders/nrc/passes/NrcTrainPrepare.glsl
+shaders/nrc/passes/NrcOptimize.glsl
 ```
 
 ## Records
@@ -36,6 +38,21 @@ struct NrcTrainRecord {
     float factorB;
     PackedNrcInput packedInput;
 };
+
+struct NrcOptimizerState {
+    uint step;
+    float beta1T;
+    float beta2T;
+    float alphaT;
+    float alphaTMinus1;
+};
+
+struct NrcOptimizerEntry {
+    float moment1;
+    float moment2;
+    float weight;
+    float emaWeight;
+};
 ```
 
 Expected sizes under the matching C++ ABI:
@@ -44,6 +61,8 @@ Expected sizes under the matching C++ ABI:
 PackedNrcInput  16 bytes
 NrcEvalRecord   20 bytes
 NrcTrainRecord  40 bytes
+NrcOptimizerState 20 bytes
+NrcOptimizerEntry 16 bytes
 NrcQueueState   20 bytes
 ```
 
@@ -66,4 +85,4 @@ Renderers remain responsible for constructing `NrcUnpackedInput` from their own 
 
 ## Compile Smoke Test
 
-`tests/shader_compile/nrc_common_smoke.comp` includes the common headers and compiles them with `glslc`. `tests/shader_compile/nrc_queue_ops_dispatch.comp` compiles the queue reservation pass. These catch GLSL syntax and portability issues before real passes depend on the headers.
+`tests/shader_compile/nrc_common_smoke.comp` includes the common headers and compiles them with `glslc`. Queue, train-prepare, optimizer, scalar inference, and backend wrappers compile the shader-header passes. These catch GLSL syntax and portability issues before real integrations depend on the headers.

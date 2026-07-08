@@ -68,3 +68,18 @@ gradientsBytes               82688
 singleTrainBatchRecordBytes  655360
 allTrainBatchRecordBytes     2621440
 ```
+
+## Optimizer Constants
+
+Training support follows VkNRC's optimizer defaults:
+
+```text
+lossScale             1.0
+adamBeta1             0.9
+adamBeta2             0.999
+emaAlpha              0.99
+optimizerLearningRate 0.002
+optimizerEpsilon      1e-8
+```
+
+The reusable shader passes select the active train batch through push constants and read the count from `NRCQueueState.trainCounts[batch]`.

@@ -18,6 +18,12 @@ inline constexpr std::uint32_t kTrainBatchCount = 4;
 
 inline constexpr std::uint32_t kDefaultWorkgroupSize = 128;
 inline constexpr float kDefaultTrainProbability = 0.03f;
+inline constexpr float kLossScale = 1.0f;
+inline constexpr float kAdamBeta1 = 0.9f;
+inline constexpr float kAdamBeta2 = 0.999f;
+inline constexpr float kEmaAlpha = 0.99f;
+inline constexpr float kOptimizerLearningRate = 0.002f;
+inline constexpr float kOptimizerEpsilon = 1.0e-8f;
 
 inline constexpr std::uint32_t weight_count() {
     return kNnHiddenWidth * kNnHiddenWidth * kNnHiddenLayerCount +
@@ -30,6 +36,10 @@ inline constexpr std::uint32_t hidden_layer_weight_count() {
 
 inline constexpr std::uint32_t output_layer_weight_count() {
     return kNnHiddenWidth * kNnOutputWidth;
+}
+
+inline constexpr std::uint32_t weight_uvec4_count() {
+    return weight_count() / kFp16PerUvec4;
 }
 
 } // namespace nrc

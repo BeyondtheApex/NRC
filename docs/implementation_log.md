@@ -1273,3 +1273,85 @@ Vulkan ray query can replace the sample-local triangle loop later without changi
 ### Next Step
 
 Add either a tiny visual output path or start the scalar gradient/backpropagation pass. The visual path would make integration regressions easier to inspect; the gradient pass would move the core NRC algorithm closer to VkNRC coverage.
+
+## 2026-07-08 - Milestone 17 Training Prepare and Optimizer Foundation
+
+### Implemented
+
+- Added host optimizer API:
+  - `include/nrc/nrc_optimizer.hpp`
+  - `src/nrc_optimizer.cpp`
+- Added optimizer constants to:
+  - `include/nrc/nrc_constants.hpp`
+  - `shaders/nrc/common/NrcConstants.glsl`
+- Added shader ABI structs:
+  - `NrcOptimizerState`
+  - `NrcOptimizerEntry`
+- Added shader-header passes:
+  - `shaders/nrc/passes/NrcTrainPrepare.glsl`
+  - `shaders/nrc/passes/NrcOptimize.glsl`
+- Added tests:
+  - `tests/optimizer_test.cpp`
+  - `tests/shader_compile/nrc_train_prepare_dispatch.comp`
+  - `tests/shader_compile/nrc_optimize_dispatch.comp`
+- Updated documentation:
+  - `docs/training_optimizer.md`
+  - `docs/profile_and_layout.md`
+  - `docs/project_structure.md`
+
+### VkNRC Behavior Preserved
+
+The new optimizer foundation follows VkNRC's `nrc_train_prepare.comp` and `nrc_optimize.comp` behavior:
+
+- clamp train count to `NRC_TRAIN_BATCH_SIZE`;
+- advance optimizer state only for non-empty batches;
+- update `step`, `beta1T`, `beta2T`, `alphaTMinus1`, and `alphaT`;
+- divide gradients by `trainCount * lossScale`;
+- treat NaN/Inf gradients as zero;
+- apply Adam with:
+  - `beta1 = 0.9`;
+  - `beta2 = 0.999`;
+  - learning rate `0.002`;
+  - epsilon `1e-8`;
+- update EMA with alpha `0.99`;
+- write packed fp16 weights and optionally packed fp16 use-weights.
+
+### Deliberate ABI Difference
+
+VkNRC uses one train-count buffer per batch. This repository currently uses a compact queue-state buffer:
+
+```text
+uint evalCount
+uint trainCounts[4]
+```
+
+The prepare and optimizer shader headers therefore select the active batch through push constants and read `trainCounts[batch]`. This keeps the current queue ABI suitable for MCVR-style integration while retaining VkNRC's optimizer math.
+
+### Validation
+
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `19/19 tests passed`
+
+New validation coverage:
+
+- `nrc_optimizer_test` checks CPU optimizer initialization, batch clamp, zero-batch no-op behavior, state advancement, Adam first-step math, non-finite gradient handling, and first-step EMA use-weight behavior.
+- `nrc_shader_train_prepare_compile` compiles the train-prepare shader header through a dispatch wrapper.
+- `nrc_shader_optimize_compile` compiles the optimizer shader header without `useWeights`.
+- `nrc_shader_optimize_use_weights_compile` compiles the optimizer shader header with `NRC_OPTIMIZE_WRITE_USE_WEIGHTS=1`.
+
+### Current Limitations
+
+- The optimizer pass consumes externally supplied gradients. No scalar GPU gradient/backpropagation pass has been implemented yet.
+- Optimizer GPU dispatch is compile-validated at this milestone, not numerically validated through a full Vulkan training dispatch.
+- KHR/NV cooperative-matrix gradient paths are not implemented yet.
+- The sample still does not run a training update; it only produces train records and runs scalar inference resolve.
+
+### Next Step
+
+Add a scalar gradient/backpropagation reference path that consumes `NrcTrainRecord` batches and produces the gradient buffer expected by the optimizer. Once that exists, add a Vulkan training dispatch test that runs prepare -> gradient -> optimize and compares updated weights against the CPU reference.

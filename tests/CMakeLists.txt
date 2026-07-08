@@ -19,6 +19,13 @@ target_link_libraries(nrc_weights_test PRIVATE nrc_core)
 
 add_test(NAME nrc_weights_test COMMAND nrc_weights_test)
 
+add_executable(nrc_optimizer_test
+    optimizer_test.cpp)
+
+target_link_libraries(nrc_optimizer_test PRIVATE nrc_core)
+
+add_test(NAME nrc_optimizer_test COMMAND nrc_optimizer_test)
+
 if(TARGET nrc_vulkan)
     add_executable(nrc_vulkan_capabilities_test
         vulkan_capabilities_test.cpp)
@@ -61,6 +68,28 @@ if(NRC_GLSLC)
             "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_queue_ops_dispatch.comp"
             "-o"
             "${CMAKE_CURRENT_BINARY_DIR}/nrc_queue_ops_smoke.spv")
+    add_test(NAME nrc_shader_train_prepare_compile
+        COMMAND "${NRC_GLSLC}"
+            "--target-env=vulkan1.1"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_train_prepare_dispatch.comp"
+            "-o"
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_train_prepare_smoke.spv")
+    add_test(NAME nrc_shader_optimize_compile
+        COMMAND "${NRC_GLSLC}"
+            "--target-env=vulkan1.1"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_optimize_dispatch.comp"
+            "-o"
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_optimize_smoke.spv")
+    add_test(NAME nrc_shader_optimize_use_weights_compile
+        COMMAND "${NRC_GLSLC}"
+            "--target-env=vulkan1.1"
+            "-DNRC_OPTIMIZE_WRITE_USE_WEIGHTS=1"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_optimize_dispatch.comp"
+            "-o"
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_optimize_use_weights_smoke.spv")
     add_test(NAME nrc_shader_khr_sg32_compile
         COMMAND "${NRC_GLSLC}"
             "--target-env=vulkan1.3"

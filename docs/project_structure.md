@@ -25,7 +25,7 @@ tests/
   ABI, profile selection, shader compilation, queue behavior, NN reference tests, and GPU dispatch validation.
 
 docs/
-  Implementation log, design notes, integration guide, and milestone results.
+  Implementation log, design notes, integration guide, training notes, and milestone results.
 ```
 
 Downstream projects should be able to use only `include/nrc`, `shaders/nrc`, and optionally `runtime/vulkan`.

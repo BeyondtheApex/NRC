@@ -25,6 +25,21 @@ struct NrcTrainRecord {
     PackedNrcInput packedInput;
 };
 
+struct NrcOptimizerState {
+    uint step;
+    float beta1T;
+    float beta2T;
+    float alphaT;
+    float alphaTMinus1;
+};
+
+struct NrcOptimizerEntry {
+    float moment1;
+    float moment2;
+    float weight;
+    float emaWeight;
+};
+
 #define NRC_EVAL_INVALID_DST 0xffffffffu
 #define NRC_EVAL_DST_SCREEN 0u
 #define NRC_EVAL_DST_TRAIN 1u

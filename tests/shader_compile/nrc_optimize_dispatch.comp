@@ -1,0 +1,11 @@
+#version 460
+
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : enable
+
+#include "nrc/passes/NrcOptimize.glsl"
+
+layout(local_size_x = NRC_OPTIMIZE_WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    NrcOptimizeMain();
+}
