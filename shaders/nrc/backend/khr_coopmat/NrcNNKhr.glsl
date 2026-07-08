@@ -115,6 +115,9 @@
 #define NRC_KHR_HIDDEN_DW_SOURCE_COOPMAT_ELEMENT(COL_BLOCK, SAMPLE_BLOCK) \
     ((COL_BLOCK) * (NRC_KHR_COOPMAT_N / NRC_FP16_PER_UVEC4) + \
      (SAMPLE_BLOCK) * NRC_KHR_COOPMAT_K * NRC_KHR_MAT64_COOPMAT_STRIDE)
+#define NRC_KHR_DA_WEIGHT_COOPMAT_ELEMENT(COL_BLOCK, ROW_BLOCK) \
+    ((COL_BLOCK) * (NRC_KHR_COOPMAT_M / NRC_FP16_PER_UVEC4) + \
+     (ROW_BLOCK) * NRC_KHR_COOPMAT_K * NRC_KHR_MAT64_COOPMAT_STRIDE)
 #define NRC_KHR_HIDDEN_DW_PARTIAL_TILE_UVEC4_COUNT \
     ((NRC_KHR_COOPMAT_M * NRC_KHR_COOPMAT_N) / NRC_FP16_PER_UVEC4)
 #define NRC_KHR_HIDDEN_DW_PARTIAL_SHARED_UVEC4_COUNT \
@@ -592,6 +595,92 @@ void NrcKhrPropagateHiddenDActivation(uint layer,
         }
         dSourceActivation[col] = value;
     }
+}
+
+void NrcKhrStageHiddenDPreFp16(uint activationBaseOffset,
+                               float dActivation[NRC_NN_HIDDEN_WIDTH]) {
+    uint sampleIndex = gl_LocalInvocationID.x;
+    uint sampleBase = sampleIndex * NRC_ENCODED_INPUT_UVEC4_COUNT;
+    for (uint block = 0u; block < NRC_ENCODED_INPUT_UVEC4_COUNT; ++block) {
+        uvec4 packed = uvec4(0u);
+        for (uint pair = 0u; pair < (NRC_FP16_PER_UVEC4 / 2u); ++pair) {
+            uint feature = block * NRC_FP16_PER_UVEC4 + pair * 2u;
+            float activation0 = NrcKhrReadBackpropActivationFrom(activationBaseOffset,
+                                                                 sampleIndex,
+                                                                 feature + 0u);
+            float activation1 = NrcKhrReadBackpropActivationFrom(activationBaseOffset,
+                                                                 sampleIndex,
+                                                                 feature + 1u);
+            float dPre0 = activation0 > 0.0 ? dActivation[feature + 0u] : 0.0;
+            float dPre1 = activation1 > 0.0 ? dActivation[feature + 1u] : 0.0;
+            packed[pair] = packHalf2x16(vec2(dPre0, dPre1));
+        }
+        nrcKhrSharedBuffer[sampleBase + block] = packed;
+    }
+    barrier();
+}
+
+void NrcKhrPropagateHiddenDActivationCoopmat(
+    uint layer,
+    uint activationBaseOffset,
+    float dActivation[NRC_NN_HIDDEN_WIDTH],
+    out float dSourceActivation[NRC_NN_HIDDEN_WIDTH]) {
+    NrcKhrStageHiddenDPreFp16(activationBaseOffset, dActivation);
+
+    uint layerWeightBase = NrcKhrLayerWeightUvec4Offset(layer);
+    for (uint colBlock = 0u; colBlock < NRC_KHR_COOPMAT_M_BLOCKS; ++colBlock) {
+        coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_N, gl_MatrixUseAccumulator>
+            dSourceCoopmats[NRC_KHR_SUBGROUP_ACT_COOPMAT_Y];
+        for (uint y = 0u; y < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++y) {
+            dSourceCoopmats[y] =
+                coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_N, gl_MatrixUseAccumulator>(0);
+        }
+
+        for (uint rowBlock = 0u; rowBlock < NRC_KHR_COOPMAT_K_BLOCKS; ++rowBlock) {
+            coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_K, gl_MatrixUseA>
+                weightTransposeCoopmat;
+            coopMatLoad(weightTransposeCoopmat,
+                        nrcKhrWeights,
+                        layerWeightBase +
+                            NRC_KHR_DA_WEIGHT_COOPMAT_ELEMENT(colBlock, rowBlock),
+                        NRC_KHR_MAT64_COOPMAT_STRIDE,
+                        gl_CooperativeMatrixLayoutColumnMajor);
+
+            for (uint y = 0u; y < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++y) {
+                uint workgroupY = gl_SubgroupID * NRC_KHR_SUBGROUP_ACT_COOPMAT_Y + y;
+                coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_K, NRC_KHR_COOPMAT_N, gl_MatrixUseB>
+                    dPreCoopmat;
+                coopMatLoad(dPreCoopmat,
+                            nrcKhrSharedBuffer,
+                            NRC_KHR_ACT_COOPMAT_ELEMENT(rowBlock, workgroupY),
+                            NRC_KHR_MAT64_COOPMAT_STRIDE,
+                            NRC_KHR_ACT_COOPMAT_MAJOR);
+                dSourceCoopmats[y] =
+                    coopMatMulAdd(weightTransposeCoopmat,
+                                  dPreCoopmat,
+                                  dSourceCoopmats[y]);
+            }
+        }
+
+        barrier();
+        for (uint y = 0u; y < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++y) {
+            uint workgroupY = gl_SubgroupID * NRC_KHR_SUBGROUP_ACT_COOPMAT_Y + y;
+            coopMatStore(dSourceCoopmats[y],
+                         nrcKhrSharedBuffer,
+                         activationBaseOffset +
+                             NRC_KHR_ACC_COOPMAT_ELEMENT(colBlock, workgroupY),
+                         NRC_KHR_MAT64_COOPMAT_STRIDE,
+                         NRC_KHR_ACT_COOPMAT_MAJOR);
+        }
+        barrier();
+    }
+
+    uint sampleIndex = gl_LocalInvocationID.x;
+    for (uint col = 0u; col < NRC_NN_HIDDEN_WIDTH; ++col) {
+        dSourceActivation[col] =
+            NrcKhrReadBackpropActivationFrom(activationBaseOffset, sampleIndex, col);
+    }
+    barrier();
 }
 
 void NrcKhrAccumulateHiddenDWeights(uint layer,

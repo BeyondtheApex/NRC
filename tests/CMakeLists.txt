@@ -199,6 +199,34 @@ if(NRC_GLSLC)
             "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_khr_dispatch.comp"
             "-o"
             "${CMAKE_CURRENT_BINARY_DIR}/nrc_gradient_khr_coopmat_final_hidden_m8_sg32_smoke.spv")
+    add_test(NAME nrc_shader_gradient_khr_coopmat_final_hidden_da_sg32_compile
+        COMMAND "${NRC_GLSLC}"
+            "--target-env=vulkan1.3"
+            "-DNRC_KHR_SUBGROUP_SIZE=32"
+            "-DNRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_khr_dispatch.comp"
+            "-o"
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_gradient_khr_coopmat_final_hidden_da_sg32_smoke.spv")
+    add_test(NAME nrc_shader_gradient_khr_coopmat_final_hidden_da_sg16_compile
+        COMMAND "${NRC_GLSLC}"
+            "--target-env=vulkan1.3"
+            "-DNRC_KHR_SUBGROUP_SIZE=16"
+            "-DNRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_khr_dispatch.comp"
+            "-o"
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_gradient_khr_coopmat_final_hidden_da_sg16_smoke.spv")
+    add_test(NAME nrc_shader_gradient_khr_coopmat_final_hidden_da_m8_sg32_compile
+        COMMAND "${NRC_GLSLC}"
+            "--target-env=vulkan1.3"
+            "-DNRC_KHR_SUBGROUP_SIZE=32"
+            "-DNRC_KHR_COOPMAT_M=8"
+            "-DNRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_khr_dispatch.comp"
+            "-o"
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_gradient_khr_coopmat_final_hidden_da_m8_sg32_smoke.spv")
     add_test(NAME nrc_shader_gradient_khr_coopmat_hidden3_sg32_compile
         COMMAND "${NRC_GLSLC}"
             "--target-env=vulkan1.3"
@@ -751,6 +779,76 @@ if(NRC_GLSLC)
                 "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DISPATCH_SG16_SPV}"
                 "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DISPATCH_M8_SG32_SPV}")
 
+        set(NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_SG32_SPV
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_gradient_khr_coopmat_final_hidden_da_dispatch_sg32.spv")
+        add_custom_command(
+            OUTPUT "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_SG32_SPV}"
+            COMMAND "${NRC_GLSLC}"
+                "--target-env=vulkan1.3"
+                "-DNRC_KHR_SUBGROUP_SIZE=32"
+                "-DNRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1"
+                "-I${PROJECT_SOURCE_DIR}/shaders"
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_khr_dispatch.comp"
+                "-o"
+                "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_SG32_SPV}"
+            DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_khr_dispatch.comp"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/passes/NrcGradientKhr.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcEncoding.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcTypes.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcConstants.glsl"
+            VERBATIM)
+
+        set(NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_SG16_SPV
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_gradient_khr_coopmat_final_hidden_da_dispatch_sg16.spv")
+        add_custom_command(
+            OUTPUT "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_SG16_SPV}"
+            COMMAND "${NRC_GLSLC}"
+                "--target-env=vulkan1.3"
+                "-DNRC_KHR_SUBGROUP_SIZE=16"
+                "-DNRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1"
+                "-I${PROJECT_SOURCE_DIR}/shaders"
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_khr_dispatch.comp"
+                "-o"
+                "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_SG16_SPV}"
+            DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_khr_dispatch.comp"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/passes/NrcGradientKhr.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcEncoding.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcTypes.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcConstants.glsl"
+            VERBATIM)
+
+        set(NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_M8_SG32_SPV
+            "${CMAKE_CURRENT_BINARY_DIR}/nrc_gradient_khr_coopmat_final_hidden_da_dispatch_m8_sg32.spv")
+        add_custom_command(
+            OUTPUT "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_M8_SG32_SPV}"
+            COMMAND "${NRC_GLSLC}"
+                "--target-env=vulkan1.3"
+                "-DNRC_KHR_SUBGROUP_SIZE=32"
+                "-DNRC_KHR_COOPMAT_M=8"
+                "-DNRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1"
+                "-I${PROJECT_SOURCE_DIR}/shaders"
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_khr_dispatch.comp"
+                "-o"
+                "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_M8_SG32_SPV}"
+            DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/shader_compile/nrc_gradient_khr_dispatch.comp"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/passes/NrcGradientKhr.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcEncoding.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcTypes.glsl"
+                "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcConstants.glsl"
+            VERBATIM)
+
+        add_custom_target(nrc_gradient_khr_coopmat_final_hidden_da_dispatch_shaders
+            DEPENDS
+                "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_SG32_SPV}"
+                "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_SG16_SPV}"
+                "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_M8_SG32_SPV}")
+
         set(NRC_GRADIENT_KHR_COOPMAT_HIDDEN3_DISPATCH_SG32_SPV
             "${CMAKE_CURRENT_BINARY_DIR}/nrc_gradient_khr_coopmat_hidden3_dispatch_sg32.spv")
         add_custom_command(
@@ -1108,6 +1206,7 @@ if(NRC_GLSLC)
             nrc_gradient_khr_dispatch_shaders
             nrc_gradient_khr_coopmat_output_dispatch_shaders
             nrc_gradient_khr_coopmat_final_hidden_dispatch_shaders
+            nrc_gradient_khr_coopmat_final_hidden_da_dispatch_shaders
             nrc_gradient_khr_coopmat_hidden3_dispatch_shaders
             nrc_gradient_khr_coopmat_hidden2_dispatch_shaders
             nrc_gradient_khr_coopmat_hidden1_dispatch_shaders
@@ -1130,6 +1229,12 @@ if(NRC_GLSLC)
                 "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DISPATCH_SG16_SPV}"
                 "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DISPATCH_M8_SG32_SPV}"
                 "--coopmat-final-hidden")
+        add_test(NAME nrc_vulkan_gradient_khr_coopmat_final_hidden_da_test
+            COMMAND nrc_vulkan_gradient_khr_test
+                "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_SG32_SPV}"
+                "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_SG16_SPV}"
+                "${NRC_GRADIENT_KHR_COOPMAT_FINAL_HIDDEN_DA_DISPATCH_M8_SG32_SPV}"
+                "--coopmat-final-hidden-da")
         add_test(NAME nrc_vulkan_gradient_khr_coopmat_hidden3_test
             COMMAND nrc_vulkan_gradient_khr_test
                 "${NRC_GRADIENT_KHR_COOPMAT_HIDDEN3_DISPATCH_SG32_SPV}"
