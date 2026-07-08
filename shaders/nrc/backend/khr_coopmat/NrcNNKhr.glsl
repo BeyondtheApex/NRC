@@ -6,6 +6,7 @@
 #extension GL_KHR_shader_subgroup_basic : require
 #extension GL_KHR_memory_scope_semantics : require
 #ifdef NRC_NN_BACKPROPAGATION
+#extension GL_KHR_shader_subgroup_arithmetic : require
 #extension GL_EXT_shader_atomic_float : require
 #endif
 
@@ -397,6 +398,36 @@ void NrcKhrAccumulateOutputDWeightsWorkgroup(float dOutput[NRC_NN_OUTPUT_WIDTH])
             value += sampleDOutput * activation;
         }
         NrcKhrGradientAtomicAdd(outputOffset + row * NRC_NN_HIDDEN_WIDTH + col, value);
+    }
+    barrier();
+}
+
+void NrcKhrAccumulateOutputDWeightsSubgroup(float dOutput[NRC_NN_OUTPUT_WIDTH]) {
+    uint sampleIndex = gl_LocalInvocationID.x;
+    nrcKhrSharedBuffer[sampleIndex] = uvec4(floatBitsToUint(dOutput[0]),
+                                            floatBitsToUint(dOutput[1]),
+                                            floatBitsToUint(dOutput[2]),
+                                            0u);
+    barrier();
+
+    uint outputOffset = NrcKhrLayerWeightFloatOffset(NRC_NN_HIDDEN_LAYER_COUNT);
+    for (uint weight = gl_SubgroupID;
+         weight < NRC_NN_OUTPUT_WIDTH * NRC_NN_HIDDEN_WIDTH;
+         weight += NRC_KHR_SUBGROUP_COUNT) {
+        uint row = weight / NRC_NN_HIDDEN_WIDTH;
+        uint col = weight - row * NRC_NN_HIDDEN_WIDTH;
+        float partial = 0.0;
+        for (uint sampleIndexInGroup = gl_SubgroupInvocationID;
+             sampleIndexInGroup < NRC_KHR_WORKGROUP_SIZE;
+             sampleIndexInGroup += NRC_KHR_SUBGROUP_SIZE) {
+            float sampleDOutput = uintBitsToFloat(nrcKhrSharedBuffer[sampleIndexInGroup][row]);
+            float activation = NrcKhrReadBackpropActivation(sampleIndexInGroup, col);
+            partial += sampleDOutput * activation;
+        }
+        float value = subgroupAdd(partial);
+        if (subgroupElect()) {
+            NrcKhrGradientAtomicAdd(outputOffset + row * NRC_NN_HIDDEN_WIDTH + col, value);
+        }
     }
     barrier();
 }

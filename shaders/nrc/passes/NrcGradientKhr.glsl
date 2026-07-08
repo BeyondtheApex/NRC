@@ -116,7 +116,7 @@ void NrcGradientKhrMain() {
     if (validTrainRecord) {
         NrcKhrOutputDerivative(prediction, target, dOutput);
     }
-    NrcKhrAccumulateOutputDWeightsWorkgroup(dOutput);
+    NrcKhrAccumulateOutputDWeightsSubgroup(dOutput);
 
     float dHidden4[NRC_NN_HIDDEN_WIDTH];
     NrcKhrPropagateOutputDActivation(dOutput, dHidden4);

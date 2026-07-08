@@ -3759,3 +3759,57 @@ With this milestone, every hidden/output `dW` region in the KHR gradient groundw
 ### Next Step
 
 Start replacing scalar workgroup loops with subgroup or cooperative-matrix reduction while keeping the same full hidden/output coverage and `nrc::reference_backward_khr_fp16` as the invariant oracle. A practical next step is an output-layer subgroup reduction path because it has only three output rows and already has the smallest source-activation footprint.
+
+## 2026-07-09 - Milestone 57 KHR Output Subgroup Gradient Reduction
+
+### Implemented
+
+- Enabled `GL_KHR_shader_subgroup_arithmetic` for KHR backpropagation in `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl`.
+- Added `NrcKhrAccumulateOutputDWeightsSubgroup`, a subgroup-arithmetic output-layer `dW` reduction helper.
+- Changed `shaders/nrc/passes/NrcGradientKhr.glsl` so the KHR gradient pass uses the subgroup output helper.
+- Updated `tests/shader_compile/nrc_khr_backprop_smoke.comp` so the backprop compile smoke test exercises the subgroup output helper.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+The output-layer helper still stages each invocation's 3-value `dOutput` in shared memory. Work assignment changed from one invocation looping over all 128 samples for a weight to one subgroup cooperating on a weight:
+
+```text
+for weight = gl_SubgroupID; weight < outputWeightCount; weight += subgroupCount:
+    each lane accumulates samples lane, lane + subgroupSize, ...
+    value = subgroupAdd(partial)
+    subgroupElect lane emits one fp32 atomic add
+```
+
+This keeps the previous one-atomic-per-output-weight-per-workgroup behavior while replacing the serial per-weight sample loop with subgroup arithmetic. The helper remains compatible with the SG32, SG16, and M8/SG32 shader variants because the sample stride uses the selected `NRC_KHR_SUBGROUP_SIZE` profile macro.
+
+### Validation
+
+- Targeted KHR shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr|nrc_shader_khr_backprop" --output-on-failure -V`
+- Targeted KHR gradient test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime test succeeded with controlled skip:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr_test" --output-on-failure -V`
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `33/33 tests passed`
+
+### Current Limitations
+
+- Output-layer `dW` now uses subgroup arithmetic, but it is not a cooperative-matrix reduction.
+- Hidden-layer 4/3/2/1/0 `dW` still use scalar workgroup reduction loops.
+- The current correctness path still depends on fp32 storage-buffer atomic add.
+- Runtime numerical comparison for the KHR shader still did not execute on this machine because the local AMD KHR pipeline creation path reports a controlled structured-exception skip.
+- The helper assumes required subgroup size control keeps runtime subgroup size aligned with `NRC_KHR_SUBGROUP_SIZE`, as already required by the selected KHR profile and pipeline creation path.
+
+### Next Step
+
+Apply the same subgroup-cooperative idea to a hidden-layer region, likely hidden-layer 4 first. The hidden-layer case needs a source activation snapshot and a shared `dZ` source, so it should be introduced one layer at a time while keeping the full-layer `nrc::reference_backward_khr_fp16` oracle unchanged.
