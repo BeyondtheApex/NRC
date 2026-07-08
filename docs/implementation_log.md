@@ -3871,3 +3871,59 @@ This keeps the same one-atomic-per-hidden4-weight-per-workgroup behavior as the 
 ### Next Step
 
 Move the shared-`dZ` hidden-layer helper to subgroup arithmetic for hidden-layer 3, then reuse the same helper shape for hidden-layer 2/1/0 if the scratch lifetime and source staging remain valid.
+
+## 2026-07-09 - Milestone 59 KHR Shared Hidden Subgroup Gradient Reduction
+
+### Implemented
+
+- Added `NrcKhrAccumulateSharedHiddenDWeightsSubgroup` to `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl`.
+- Changed `shaders/nrc/passes/NrcGradientKhr.glsl` so hidden-layer 3/2/1/0 `dW` use the shared hidden subgroup helper.
+- Updated `tests/shader_compile/nrc_khr_backprop_smoke.comp` so the backprop compile smoke test exercises hidden-layer 3/2/1/0 through the subgroup helper.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+The shared hidden helper keeps the existing shared fp32 `dZ` scratch and source activation staging strategy, but changes the sample reduction from one invocation looping over the whole workgroup to subgroup arithmetic:
+
+```text
+for weight = gl_SubgroupID; weight < hiddenWeightCount; weight += subgroupCount:
+    row = weight / hiddenWidth
+    col = weight % hiddenWidth
+    each lane accumulates samples lane, lane + subgroupSize, ...
+    partial += sharedDZ[row] * sourceActivation[col]
+    value = subgroupAdd(partial)
+    subgroupElect lane emits one fp32 atomic add
+```
+
+This helper covers hidden-layer 3/2/1 from saved source activation snapshots and hidden-layer 0 after the encoded input is staged into the retired A0 snapshot region. With this milestone, every hidden/output `dW` region in the KHR gradient groundwork path uses subgroup arithmetic while preserving the same row-major fp32 gradient layout.
+
+### Validation
+
+- Targeted KHR shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr|nrc_shader_khr_backprop" --output-on-failure -V`
+- Targeted KHR gradient test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime test succeeded with controlled skip:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr_test" --output-on-failure -V`
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `33/33 tests passed`
+
+### Current Limitations
+
+- All hidden/output `dW` regions now use subgroup arithmetic, but they are not cooperative-matrix reductions.
+- The current correctness path still depends on fp32 storage-buffer atomic add.
+- Runtime numerical comparison for the KHR shader still did not execute on this machine because the local AMD KHR pipeline creation path reports a controlled structured-exception skip.
+- The subgroup helpers assume required subgroup size control keeps runtime subgroup size aligned with `NRC_KHR_SUBGROUP_SIZE`, as already required by the selected KHR profile and pipeline creation path.
+- Shared scratch reuse is still tied to the current fixed 64-wide/128-sample shape and fixed 5-hidden-layer backprop ordering. It is guarded for this shape, but final production reduction should revisit memory lifetime and profile-specific pressure.
+
+### Next Step
+
+Start designing the cooperative-matrix reduction step or introduce a validation path that can run the KHR gradient numerically on a driver that creates the pipeline successfully. The shader now has full hidden/output subgroup-gradient coverage, so the next meaningful algorithmic improvement is cooperative-matrix accumulation rather than another scalar/subgroup loop reshuffle.

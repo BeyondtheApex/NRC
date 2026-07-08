@@ -618,6 +618,32 @@ void NrcKhrAccumulateSharedHiddenDWeightsWorkgroup(uint layer,
     barrier();
 }
 
+void NrcKhrAccumulateSharedHiddenDWeightsSubgroup(uint layer,
+                                                  uint sourceBaseOffset) {
+    uint layerOffset = NrcKhrLayerWeightFloatOffset(layer);
+    for (uint weight = gl_SubgroupID;
+         weight < NRC_NN_HIDDEN_WIDTH * NRC_NN_HIDDEN_WIDTH;
+         weight += NRC_KHR_SUBGROUP_COUNT) {
+        uint row = weight / NRC_NN_HIDDEN_WIDTH;
+        uint col = weight - row * NRC_NN_HIDDEN_WIDTH;
+        float partial = 0.0;
+        for (uint sampleIndexInGroup = gl_SubgroupInvocationID;
+             sampleIndexInGroup < NRC_KHR_WORKGROUP_SIZE;
+             sampleIndexInGroup += NRC_KHR_SUBGROUP_SIZE) {
+            float dPreActivation = NrcKhrReadSharedDPreActivation(sampleIndexInGroup, row);
+            float srcActivation = NrcKhrReadBackpropActivationFrom(sourceBaseOffset,
+                                                                   sampleIndexInGroup,
+                                                                   col);
+            partial += dPreActivation * srcActivation;
+        }
+        float value = subgroupAdd(partial);
+        if (subgroupElect()) {
+            NrcKhrGradientAtomicAdd(layerOffset + row * NRC_NN_HIDDEN_WIDTH + col, value);
+        }
+    }
+    barrier();
+}
+
 void NrcKhrStoreSharedEncodedInput(uint baseOffset,
                                    uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT]) {
     uint sampleBase = baseOffset +
