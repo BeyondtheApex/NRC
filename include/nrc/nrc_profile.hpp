@@ -67,6 +67,7 @@ struct Profile {
     std::uint32_t requiredSubgroupSize = 0;
     std::uint32_t workgroupSize = 0;
     bool production = false;
+    bool implemented = false;
 };
 
 std::span<const Profile> profiles();

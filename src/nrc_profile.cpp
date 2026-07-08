@@ -17,6 +17,7 @@ constexpr std::array<Profile, 4> kProfiles = {{
         32,
         128,
         true,
+        true,
     },
     {
         ProfileId::KhrFp16M16N16K16Sg16Wg128,
@@ -27,6 +28,7 @@ constexpr std::array<Profile, 4> kProfiles = {{
         16,
         16,
         128,
+        true,
         true,
     },
     {
@@ -39,6 +41,7 @@ constexpr std::array<Profile, 4> kProfiles = {{
         32,
         128,
         true,
+        false,
     },
     {
         ProfileId::ScalarReferenceWg64,
@@ -50,6 +53,7 @@ constexpr std::array<Profile, 4> kProfiles = {{
         0,
         64,
         false,
+        true,
     },
 }};
 
@@ -98,10 +102,14 @@ bool supports_profile(const DeviceCapabilitiesView &capabilities,
                       const ProfileRequirements &requirements,
                       const Profile &profile) {
     if (profile.backend == BackendKind::ScalarReference) {
-        return requirements.allowReferenceBackend;
+        return profile.implemented && requirements.allowReferenceBackend;
     }
 
     if (profile.backend != BackendKind::KhrCooperativeMatrix) {
+        return false;
+    }
+
+    if (!profile.implemented) {
         return false;
     }
 

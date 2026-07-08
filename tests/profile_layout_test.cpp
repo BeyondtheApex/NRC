@@ -99,6 +99,32 @@ int main() {
                       nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128,
                   "inference-only profile can skip float atomic add");
 
+    const std::array<nrc::CooperativeMatrixCapability, 1> mat8 = {{
+        {
+            8,
+            16,
+            16,
+            nrc::ComponentType::Float16,
+            nrc::ComponentType::Float16,
+            nrc::ComponentType::Float16,
+            nrc::ComponentType::Float16,
+            nrc::MatrixScope::Subgroup,
+            true,
+        },
+    }};
+    const nrc::DeviceCapabilitiesView capsM8Only{
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        sg32,
+        mat8,
+    };
+    ok &= require(nrc::choose_profile(capsM8Only) == nrc::ProfileId::None,
+                  "unimplemented M8 profile is not selected yet");
+
     const nrc::DeviceCapabilitiesView emptyCaps{};
     ok &= require(nrc::choose_profile(emptyCaps) == nrc::ProfileId::None,
                   "no silent fallback by default");

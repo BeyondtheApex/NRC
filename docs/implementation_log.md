@@ -390,3 +390,53 @@ Start Milestone 5 by adding weight initialization/packing utilities and a determ
 ### Next Step
 
 Start Milestone 6 by adding a minimal compute dispatch harness for the scalar shader or by implementing the first KHR cooperative matrix inference shader scaffold against the same packed weight layout.
+
+## 2026-07-08 - Milestone 6 KHR Cooperative Matrix Inference Scaffold
+
+### Implemented
+
+- Added KHR cooperative matrix inference backend scaffold:
+  - `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl`
+- Added KHR shader compile smoke test:
+  - `tests/shader_compile/nrc_khr_smoke.comp`
+- Registered shader compile tests for:
+  - `NRC_KHR_SUBGROUP_SIZE=32`
+  - `NRC_KHR_SUBGROUP_SIZE=16`
+- Added profile `implemented` flag so profile selection only returns backends that have an implemented shader path.
+- Marked `KHR_FP16_M8N16K16_SG32_WG128` as planned but not currently implemented.
+- Added profile test coverage to ensure an M8-only device is not selected until that backend exists.
+
+### Backend Behavior
+
+- The KHR backend currently implements forward inference for the VkNRC-compatible topology:
+  - 64 encoded fp16 inputs.
+  - 5 hidden 64-wide ReLU layers.
+  - 3 output values.
+- It reads packed fp16 `uvec4` weights using the Milestone 5 layout.
+- It uses `coopmat<float16_t, gl_ScopeSubgroup, 16, 16, ...>` and supports compile-time subgroup sizes 16 and 32.
+- It follows VkNRC's output-layer behavior by loading only the 3x64 output rows and zero-filling the remaining rows of the 16x64 cooperative matrix tile.
+
+### Validation
+
+- Full Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `8/8 tests passed`.
+- KHR smoke tests compile with:
+  - `--target-env=vulkan1.3`
+  - `-DNRC_KHR_SUBGROUP_SIZE=32`
+  - `-DNRC_KHR_SUBGROUP_SIZE=16`
+
+### Current Limitations
+
+- KHR backend is compile-validated only. It has not yet been dispatched on a GPU.
+- No numerical comparison exists yet between CPU reference, scalar shader, and KHR shader outputs.
+- Only 16x16x16 cooperative matrix profiles are implemented. The M8 profile remains planned and intentionally disabled in profile selection.
+- No gradient/backpropagation KHR backend exists yet.
+- No inference pass consumes `NrcEvalRecord` queues yet.
+
+### Next Step
+
+Start Milestone 7 by building a minimal Vulkan compute dispatch test harness. The first target should dispatch the scalar backend with deterministic packed weights and compare against `nrc::reference_forward`; after that, reuse the harness for KHR backend validation on devices that support the selected profile.
