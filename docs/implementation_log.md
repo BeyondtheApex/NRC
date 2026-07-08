@@ -2744,3 +2744,53 @@ The sample still owns shader file loading, pipeline layouts, descriptor sets, co
 ### Next Step
 
 Migrate the sample path tracer descriptor layout/update paths onto `create_descriptor_set_layout`, `update_storage_buffer_descriptors`, and `update_storage_image_descriptors`, then migrate its image barrier recording onto `cmd_pipeline_barrier`.
+
+## 2026-07-09 - Milestone 40 Sample Descriptor Helper Adoption
+
+### Implemented
+
+- Refactored `sample/path_tracer/sample.cpp` descriptor set layout creation to use `nrc::vulkan::create_descriptor_set_layout`.
+- Added small sample-local wrappers around:
+  - `nrc::vulkan::update_storage_buffer_descriptors`
+  - `nrc::vulkan::update_storage_image_descriptors`
+- Refactored all sample descriptor update paths onto those helpers:
+  - producer set;
+  - scalar inference set;
+  - train prepare set;
+  - scalar gradient set;
+  - optimize set.
+- Kept descriptor binding numbers and descriptor set ownership unchanged.
+- Updated `docs/sample_path_tracer.md` to reflect current sample descriptor helper usage.
+
+### Behavior
+
+This milestone does not change descriptor pools, descriptor set allocation, binding numbers, shader ABI, dispatch order, resource ownership, sample output, or validation expectations.
+
+The sample still owns descriptor pools and descriptor sets. The NRC helper layer now only removes repeated layout/write boilerplate and records invalid helper inputs consistently through `VulkanValidationStep`.
+
+### Validation
+
+- Targeted sample build succeeded:
+  - `cmake --build build --config Debug --target nrc_reference_path_tracer`
+- Targeted verbose sample smoke test succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_sample_reference_path_tracer_smoke" --output-on-failure -V`
+- Sample smoke output included:
+  - `NRC reference path tracer minimal integration passed: 17 eval records, scalar inference resolve, and one scalar training update.`
+  - `Wrote sample image: G:/cpp/radiance/NRC/build/sample/path_tracer/nrc_reference_path_tracer.ppm`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `25/25 tests passed`
+
+### Current Limitations
+
+- The sample path tracer still owns local memory/image barrier boilerplate.
+- Buffer/image copy helpers are still local to scalar inference and the sample.
+- Descriptor pool allocation remains host-owned, by design.
+- KHR cooperative-matrix training remains missing.
+
+### Next Step
+
+Migrate the sample path tracer memory/image barrier recording onto `cmd_memory_barrier`, `color_image_barrier`, and `cmd_pipeline_barrier`.

@@ -4,6 +4,7 @@
 #include "nrc/nrc_records.hpp"
 #include "nrc/nrc_reference_nn.hpp"
 #include "nrc/nrc_weights.hpp"
+#include "nrc/vulkan/nrc_vulkan_descriptors.hpp"
 #include "nrc/vulkan/nrc_vulkan_pipeline.hpp"
 #include "nrc/vulkan/nrc_vulkan_shader.hpp"
 #include "sample_config.hpp"
@@ -1057,7 +1058,7 @@ private:
     }
 
     void create_producer_pipeline(const char *producerSpirv) {
-        std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+        std::array<nrc::vulkan::VulkanDescriptorBinding, 4> bindings{};
         for (std::uint32_t i = 0; i < bindings.size(); ++i) {
             bindings[i].binding = i;
             bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -1076,7 +1077,7 @@ private:
     }
 
     void create_inference_pipeline(const char *inferenceSpirv) {
-        std::array<VkDescriptorSetLayoutBinding, 7> bindings{};
+        std::array<nrc::vulkan::VulkanDescriptorBinding, 7> bindings{};
         for (std::uint32_t i = 0; i < bindings.size(); ++i) {
             bindings[i].binding = i;
             bindings[i].descriptorCount = 1;
@@ -1091,7 +1092,7 @@ private:
     }
 
     void create_train_prepare_pipeline(const char *trainPrepareSpirv) {
-        std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+        std::array<nrc::vulkan::VulkanDescriptorBinding, 3> bindings{};
         for (std::uint32_t i = 0; i < bindings.size(); ++i) {
             bindings[i].binding = i;
             bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -1110,7 +1111,7 @@ private:
     }
 
     void create_gradient_pipeline(const char *gradientSpirv) {
-        std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
+        std::array<nrc::vulkan::VulkanDescriptorBinding, 5> bindings{};
         for (std::uint32_t i = 0; i < bindings.size(); ++i) {
             bindings[i].binding = i;
             bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -1129,7 +1130,7 @@ private:
     }
 
     void create_optimize_pipeline(const char *optimizeSpirv) {
-        std::array<VkDescriptorSetLayoutBinding, 6> bindings{};
+        std::array<nrc::vulkan::VulkanDescriptorBinding, 6> bindings{};
         for (std::uint32_t i = 0; i < bindings.size(); ++i) {
             bindings[i].binding = i;
             bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -1148,15 +1149,15 @@ private:
     }
 
     template <std::size_t N>
-    VkDescriptorSetLayout create_set_layout(const std::array<VkDescriptorSetLayoutBinding, N> &bindings) {
-        VkDescriptorSetLayoutCreateInfo createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        createInfo.bindingCount = static_cast<std::uint32_t>(bindings.size());
-        createInfo.pBindings = bindings.data();
-
-        VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-        check_vk(vkCreateDescriptorSetLayout(device_, &createInfo, nullptr, &layout), "vkCreateDescriptorSetLayout");
-        return layout;
+    VkDescriptorSetLayout create_set_layout(
+        const std::array<nrc::vulkan::VulkanDescriptorBinding, N> &bindings) {
+        nrc::vulkan::VulkanDescriptorSetLayoutCreateInfo createInfo{};
+        createInfo.device = device_;
+        createInfo.bindings = bindings;
+        const nrc::vulkan::VulkanDescriptorSetLayoutCreateResult result =
+            nrc::vulkan::create_descriptor_set_layout(createInfo);
+        check_vk(result.validation.vkResult, "vkCreateDescriptorSetLayout");
+        return result.layout;
     }
 
     VkPipelineLayout create_pipeline_layout(VkDescriptorSetLayout setLayout,
@@ -1342,27 +1343,44 @@ private:
         return descriptorSet;
     }
 
+    template <std::size_t N>
+    void update_storage_buffer_set(
+        VkDescriptorSet set,
+        const std::array<nrc::vulkan::VulkanStorageBufferDescriptorWrite, N> &writes) const {
+        nrc::vulkan::VulkanStorageBufferDescriptorUpdate update{};
+        update.device = device_;
+        update.descriptorSet = set;
+        update.buffers = writes;
+        const nrc::vulkan::VulkanValidationStep validation =
+            nrc::vulkan::update_storage_buffer_descriptors(update);
+        check_vk(validation.vkResult, "vkUpdateDescriptorSets(storage buffers)");
+    }
+
+    template <std::size_t N>
+    void update_storage_image_set(
+        VkDescriptorSet set,
+        const std::array<nrc::vulkan::VulkanStorageImageDescriptorWrite, N> &writes) const {
+        nrc::vulkan::VulkanStorageImageDescriptorUpdate update{};
+        update.device = device_;
+        update.descriptorSet = set;
+        update.images = writes;
+        const nrc::vulkan::VulkanValidationStep validation =
+            nrc::vulkan::update_storage_image_descriptors(update);
+        check_vk(validation.vkResult, "vkUpdateDescriptorSets(storage images)");
+    }
+
     void update_producer_set(VkDescriptorSet set,
                              const Buffer &queueState,
                              const Buffer &evalRecords,
                              const Buffer &trainRecords,
                              const Buffer &sceneBuffer) const {
-        std::array<VkDescriptorBufferInfo, 4> infos{};
-        infos[0] = {queueState.buffer, 0, queueState.size};
-        infos[1] = {evalRecords.buffer, 0, evalRecords.size};
-        infos[2] = {trainRecords.buffer, 0, trainRecords.size};
-        infos[3] = {sceneBuffer.buffer, 0, sceneBuffer.size};
-
-        std::array<VkWriteDescriptorSet, 4> writes{};
-        for (std::uint32_t i = 0; i < writes.size(); ++i) {
-            writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[i].dstSet = set;
-            writes[i].dstBinding = i;
-            writes[i].descriptorCount = 1;
-            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            writes[i].pBufferInfo = &infos[i];
-        }
-        vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        const std::array<nrc::vulkan::VulkanStorageBufferDescriptorWrite, 4> writes = {{
+            {0, queueState.buffer, 0, queueState.size},
+            {1, evalRecords.buffer, 0, evalRecords.size},
+            {2, trainRecords.buffer, 0, trainRecords.size},
+            {3, sceneBuffer.buffer, 0, sceneBuffer.size},
+        }};
+        update_storage_buffer_set(set, writes);
     }
 
     void update_inference_set(VkDescriptorSet set,
@@ -1373,69 +1391,32 @@ private:
                               const Image &factorImage,
                               const Buffer &trainRecords,
                               const Buffer &sceneBuffer) const {
-        std::array<VkDescriptorBufferInfo, 5> bufferInfos{};
-        bufferInfos[0] = {weights.buffer, 0, weights.size};
-        bufferInfos[1] = {evalRecords.buffer, 0, evalRecords.size};
-        bufferInfos[2] = {queueState.buffer, 0, queueState.size};
-        bufferInfos[3] = {trainRecords.buffer, 0, trainRecords.size};
-        bufferInfos[4] = {sceneBuffer.buffer, 0, sceneBuffer.size};
+        const std::array<nrc::vulkan::VulkanStorageBufferDescriptorWrite, 5> bufferWrites = {{
+            {0, weights.buffer, 0, weights.size},
+            {1, evalRecords.buffer, 0, evalRecords.size},
+            {2, queueState.buffer, 0, queueState.size},
+            {5, trainRecords.buffer, 0, trainRecords.size},
+            {6, sceneBuffer.buffer, 0, sceneBuffer.size},
+        }};
+        update_storage_buffer_set(set, bufferWrites);
 
-        std::array<VkDescriptorImageInfo, 2> imageInfos{};
-        imageInfos[0].imageView = biasImage.view;
-        imageInfos[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        imageInfos[1].imageView = factorImage.view;
-        imageInfos[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-        std::array<VkWriteDescriptorSet, 7> writes{};
-        for (auto &write : writes) {
-            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            write.dstSet = set;
-            write.descriptorCount = 1;
-        }
-        writes[0].dstBinding = 0;
-        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[0].pBufferInfo = &bufferInfos[0];
-        writes[1].dstBinding = 1;
-        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[1].pBufferInfo = &bufferInfos[1];
-        writes[2].dstBinding = 2;
-        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[2].pBufferInfo = &bufferInfos[2];
-        writes[3].dstBinding = 3;
-        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[3].pImageInfo = &imageInfos[0];
-        writes[4].dstBinding = 4;
-        writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writes[4].pImageInfo = &imageInfos[1];
-        writes[5].dstBinding = 5;
-        writes[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[5].pBufferInfo = &bufferInfos[3];
-        writes[6].dstBinding = 6;
-        writes[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[6].pBufferInfo = &bufferInfos[4];
-
-        vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        const std::array<nrc::vulkan::VulkanStorageImageDescriptorWrite, 2> imageWrites = {{
+            {3, biasImage.view, VK_IMAGE_LAYOUT_GENERAL},
+            {4, factorImage.view, VK_IMAGE_LAYOUT_GENERAL},
+        }};
+        update_storage_image_set(set, imageWrites);
     }
 
     void update_train_prepare_set(VkDescriptorSet set,
                                   const Buffer &queueState,
                                   const Buffer &indirectBuffer,
                                   const Buffer &optimizerState) const {
-        std::array<VkDescriptorBufferInfo, 3> infos{};
-        infos[0] = {queueState.buffer, 0, queueState.size};
-        infos[1] = {indirectBuffer.buffer, 0, indirectBuffer.size};
-        infos[2] = {optimizerState.buffer, 0, optimizerState.size};
-
-        std::array<VkWriteDescriptorSet, 3> writes{};
-        for (std::uint32_t i = 0; i < writes.size(); ++i) {
-            writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[i].dstSet = set;
-            writes[i].dstBinding = i;
-            writes[i].descriptorCount = 1;
-            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            writes[i].pBufferInfo = &infos[i];
-        }
-        vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        const std::array<nrc::vulkan::VulkanStorageBufferDescriptorWrite, 3> writes = {{
+            {0, queueState.buffer, 0, queueState.size},
+            {1, indirectBuffer.buffer, 0, indirectBuffer.size},
+            {2, optimizerState.buffer, 0, optimizerState.size},
+        }};
+        update_storage_buffer_set(set, writes);
     }
 
     void update_gradient_set(VkDescriptorSet set,
@@ -1444,23 +1425,14 @@ private:
                              const Buffer &weights,
                              const Buffer &gradients,
                              const Buffer &sceneBuffer) const {
-        std::array<VkDescriptorBufferInfo, 5> infos{};
-        infos[0] = {trainRecords.buffer, 0, trainRecords.size};
-        infos[1] = {queueState.buffer, 0, queueState.size};
-        infos[2] = {weights.buffer, 0, weights.size};
-        infos[3] = {gradients.buffer, 0, gradients.size};
-        infos[4] = {sceneBuffer.buffer, 0, sceneBuffer.size};
-
-        std::array<VkWriteDescriptorSet, 5> writes{};
-        for (std::uint32_t i = 0; i < writes.size(); ++i) {
-            writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[i].dstSet = set;
-            writes[i].dstBinding = i;
-            writes[i].descriptorCount = 1;
-            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            writes[i].pBufferInfo = &infos[i];
-        }
-        vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        const std::array<nrc::vulkan::VulkanStorageBufferDescriptorWrite, 5> writes = {{
+            {0, trainRecords.buffer, 0, trainRecords.size},
+            {1, queueState.buffer, 0, queueState.size},
+            {2, weights.buffer, 0, weights.size},
+            {3, gradients.buffer, 0, gradients.size},
+            {4, sceneBuffer.buffer, 0, sceneBuffer.size},
+        }};
+        update_storage_buffer_set(set, writes);
     }
 
     void update_optimize_set(VkDescriptorSet set,
@@ -1470,24 +1442,15 @@ private:
                              const Buffer &optimizerEntries,
                              const Buffer &queueState,
                              const Buffer &optimizerState) const {
-        std::array<VkDescriptorBufferInfo, 6> infos{};
-        infos[0] = {weights.buffer, 0, weights.size};
-        infos[1] = {useWeights.buffer, 0, useWeights.size};
-        infos[2] = {gradients.buffer, 0, gradients.size};
-        infos[3] = {optimizerEntries.buffer, 0, optimizerEntries.size};
-        infos[4] = {queueState.buffer, 0, queueState.size};
-        infos[5] = {optimizerState.buffer, 0, optimizerState.size};
-
-        std::array<VkWriteDescriptorSet, 6> writes{};
-        for (std::uint32_t i = 0; i < writes.size(); ++i) {
-            writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[i].dstSet = set;
-            writes[i].dstBinding = i;
-            writes[i].descriptorCount = 1;
-            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            writes[i].pBufferInfo = &infos[i];
-        }
-        vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        const std::array<nrc::vulkan::VulkanStorageBufferDescriptorWrite, 6> writes = {{
+            {0, weights.buffer, 0, weights.size},
+            {1, useWeights.buffer, 0, useWeights.size},
+            {2, gradients.buffer, 0, gradients.size},
+            {3, optimizerEntries.buffer, 0, optimizerEntries.size},
+            {4, queueState.buffer, 0, queueState.size},
+            {5, optimizerState.buffer, 0, optimizerState.size},
+        }};
+        update_storage_buffer_set(set, writes);
     }
 
     VkCommandBuffer allocate_command_buffer() const {
