@@ -28,6 +28,15 @@ struct NrcSampleSceneTriangle {
     NrcSampleSceneVertex v2;
 };
 
+struct NrcSampleSurface {
+    vec3 position;
+    vec2 scatteredDir;
+    vec3 normal;
+    float roughness;
+    vec3 diffuse;
+    vec3 specular;
+};
+
 layout(std430, set = NRC_SAMPLE_SCENE_SET, binding = NRC_SAMPLE_SCENE_BINDING) readonly buffer NrcSampleSceneBuffer {
     NrcSampleSceneTriangle nrcSampleSceneTriangles[];
 };
@@ -59,7 +68,7 @@ PackedNrcInput NrcSampleMakePackedInputFromPixel(uvec2 pixel, uvec2 extent) {
     return NrcSamplePackHit(primitiveId, primitiveId, barycentric2, scatteredDir);
 }
 
-NrcUnpackedInput NrcSampleUnpackPackedInput(PackedNrcInput packedInput) {
+NrcSampleSurface NrcSampleLoadSurface(PackedNrcInput packedInput) {
     uint primitiveId = min(packedInput.primitiveId, NRC_SAMPLE_SCENE_TRIANGLE_COUNT - 1u);
     vec2 barycentric2 = unpackUnorm2x16(packedInput.barycentric2x16U);
     vec2 scatteredDir = unpackUnorm2x16(packedInput.scatteredDir2x16U);
@@ -86,13 +95,36 @@ NrcUnpackedInput NrcSampleUnpackPackedInput(PackedNrcInput packedInput) {
     float normalLength = length(normalRaw);
     vec3 normal = normalLength > 0.0001 ? normalRaw / normalLength : vec3(0.0, 0.0, 1.0);
 
+    NrcSampleSurface surface;
+    surface.position = position.xyz;
+    surface.scatteredDir = scatteredDir;
+    surface.normal = normal;
+    surface.roughness = clamp(normalRoughness.w, 0.0, 1.0);
+    surface.diffuse = clamp(diffuse.rgb, vec3(0.0), vec3(1.0));
+    surface.specular = clamp(specular.rgb, vec3(0.0), vec3(1.0));
+    return surface;
+}
+
+void NrcSampleDirectLightingPayload(PackedNrcInput packedInput, out vec3 bias, out vec3 factor) {
+    NrcSampleSurface surface = NrcSampleLoadSurface(packedInput);
+    vec3 lightDir = vec3(0.0, 0.0, 1.0);
+    vec3 lightColor = vec3(1.4, 1.1, 0.9);
+    float nDotL = max(dot(surface.normal, lightDir), 0.0);
+
+    bias = surface.diffuse * lightColor * nDotL;
+    factor = max(surface.diffuse + surface.specular * (1.0 - surface.roughness), vec3(0.05));
+}
+
+NrcUnpackedInput NrcSampleUnpackPackedInput(PackedNrcInput packedInput) {
+    NrcSampleSurface surface = NrcSampleLoadSurface(packedInput);
+
     NrcUnpackedInput unpackedInput;
-    unpackedInput.position = position.xyz;
-    unpackedInput.scatteredDir = scatteredDir;
-    unpackedInput.normal = NrcSphericalEncode(normal);
-    unpackedInput.roughness = clamp(normalRoughness.w, 0.0, 1.0);
-    unpackedInput.diffuse = clamp(diffuse.rgb, vec3(0.0), vec3(1.0));
-    unpackedInput.specular = clamp(specular.rgb, vec3(0.0), vec3(1.0));
+    unpackedInput.position = surface.position;
+    unpackedInput.scatteredDir = surface.scatteredDir;
+    unpackedInput.normal = NrcSphericalEncode(surface.normal);
+    unpackedInput.roughness = surface.roughness;
+    unpackedInput.diffuse = surface.diffuse;
+    unpackedInput.specular = surface.specular;
     return unpackedInput;
 }
 

@@ -35,6 +35,12 @@ struct Vec2 {
     float y = 0.0f;
 };
 
+struct Vec3 {
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+};
+
 struct Vec4 {
     float x = 0.0f;
     float y = 0.0f;
@@ -53,6 +59,11 @@ struct SampleSceneTriangle {
     SampleSceneVertex v0;
     SampleSceneVertex v1;
     SampleSceneVertex v2;
+};
+
+struct ExpectedTrainPayload {
+    Vec3 bias;
+    Vec3 factor;
 };
 
 static_assert(sizeof(SampleSceneVertex) == 64);
@@ -194,6 +205,72 @@ nrc::PackedNrcInput expected_packed_input(std::uint32_t x, std::uint32_t y) {
     packedInput.barycentric2x16U = pack_unorm2x16(baryX, baryY);
     packedInput.scatteredDir2x16U = pack_unorm2x16(scatteredX, scatteredY);
     return packedInput;
+}
+
+Vec2 unpack_unorm2x16(std::uint32_t packedValue) {
+    constexpr float kInvUnorm16 = 1.0f / 65535.0f;
+    return {
+        static_cast<float>(packedValue & 0xffffu) * kInvUnorm16,
+        static_cast<float>((packedValue >> 16u) & 0xffffu) * kInvUnorm16,
+    };
+}
+
+Vec4 mix_vec4(Vec4 v0, Vec4 v1, Vec4 v2, Vec2 barycentric2) {
+    const float w1 = barycentric2.x;
+    const float w2 = barycentric2.y;
+    const float w0 = 1.0f - w1 - w2;
+    return {
+        v0.x * w0 + v1.x * w1 + v2.x * w2,
+        v0.y * w0 + v1.y * w1 + v2.y * w2,
+        v0.z * w0 + v1.z * w1 + v2.z * w2,
+        v0.w * w0 + v1.w * w1 + v2.w * w2,
+    };
+}
+
+Vec3 normalize_vec3(Vec3 value) {
+    const float length = std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
+    if (length <= 0.0001f) {
+        return {0.0f, 0.0f, 1.0f};
+    }
+    return {value.x / length, value.y / length, value.z / length};
+}
+
+ExpectedTrainPayload expected_train_payload(const nrc::PackedNrcInput &packedInput) {
+    const std::array<SampleSceneTriangle, kSceneTriangleCount> sceneTriangles = make_sample_scene();
+    const std::uint32_t primitiveId = std::min(packedInput.primitiveId, kSceneTriangleCount - 1u);
+    const SampleSceneTriangle &triangle = sceneTriangles[primitiveId];
+    const Vec2 barycentric2 = unpack_unorm2x16(packedInput.barycentric2x16U);
+
+    const Vec4 normalRoughness = mix_vec4(triangle.v0.normalRoughness,
+                                          triangle.v1.normalRoughness,
+                                          triangle.v2.normalRoughness,
+                                          barycentric2);
+    const Vec4 diffuse = mix_vec4(triangle.v0.diffuse,
+                                  triangle.v1.diffuse,
+                                  triangle.v2.diffuse,
+                                  barycentric2);
+    const Vec4 specular = mix_vec4(triangle.v0.specular,
+                                   triangle.v1.specular,
+                                   triangle.v2.specular,
+                                   barycentric2);
+
+    const Vec3 normal = normalize_vec3({normalRoughness.x, normalRoughness.y, normalRoughness.z});
+    const float nDotL = std::max(normal.z, 0.0f);
+    const float roughness = std::clamp(normalRoughness.w, 0.0f, 1.0f);
+    const float specularScale = 1.0f - roughness;
+
+    ExpectedTrainPayload payload{};
+    payload.bias = {
+        diffuse.x * 1.4f * nDotL,
+        diffuse.y * 1.1f * nDotL,
+        diffuse.z * 0.9f * nDotL,
+    };
+    payload.factor = {
+        std::max(diffuse.x + specular.x * specularScale, 0.05f),
+        std::max(diffuse.y + specular.y * specularScale, 0.05f),
+        std::max(diffuse.z + specular.z * specularScale, 0.05f),
+    };
+    return payload;
 }
 
 bool same_packed_input(const nrc::PackedNrcInput &lhs, const nrc::PackedNrcInput &rhs) {
@@ -1281,25 +1358,29 @@ private:
         }
 
         for (std::uint32_t i = 0; i < kTrainRecordCount; ++i) {
-            const float expectedBiasR = 0.5f + 2.0f * 0.25f;
-            const float expectedBiasG = 1.0f + 3.0f * 0.5f;
-            const float expectedBiasB = 1.5f + 4.0f * 0.75f;
+            const nrc::PackedNrcInput expectedInput = expected_packed_input(0u, 0u);
+            const ExpectedTrainPayload expectedPayload = expected_train_payload(expectedInput);
+            const float expectedBiasR = expectedPayload.bias.x + expectedPayload.factor.x * 0.25f;
+            const float expectedBiasG = expectedPayload.bias.y + expectedPayload.factor.y * 0.5f;
+            const float expectedBiasB = expectedPayload.bias.z + expectedPayload.factor.z * 0.75f;
             if (!near(trainRecords[i].biasR, expectedBiasR) ||
                 !near(trainRecords[i].biasG, expectedBiasG) ||
                 !near(trainRecords[i].biasB, expectedBiasB) ||
-                !near(trainRecords[i].factorR, 2.0f) ||
-                !near(trainRecords[i].factorG, 3.0f) ||
-                !near(trainRecords[i].factorB, 4.0f)) {
+                !near(trainRecords[i].factorR, expectedPayload.factor.x) ||
+                !near(trainRecords[i].factorG, expectedPayload.factor.y) ||
+                !near(trainRecords[i].factorB, expectedPayload.factor.z)) {
                 std::cerr << "FAIL: train record " << i
                           << " expected bias (" << expectedBiasR << ", " << expectedBiasG << ", "
-                          << expectedBiasB << ") factor (2, 3, 4) got bias ("
+                          << expectedBiasB << ") factor ("
+                          << expectedPayload.factor.x << ", "
+                          << expectedPayload.factor.y << ", "
+                          << expectedPayload.factor.z << ") got bias ("
                           << trainRecords[i].biasR << ", " << trainRecords[i].biasG << ", "
                           << trainRecords[i].biasB << ") factor ("
                           << trainRecords[i].factorR << ", " << trainRecords[i].factorG << ", "
                           << trainRecords[i].factorB << ")\n";
                 ok = false;
             }
-            const nrc::PackedNrcInput expectedInput = expected_packed_input(0u, 0u);
             if (!same_packed_input(trainRecords[i].packedInput, expectedInput)) {
                 report_packed_input_mismatch("train record",
                                              expectedInput,
@@ -1337,7 +1418,7 @@ int main() {
 
         std::cout << "NRC reference path tracer minimal integration passed: "
                   << kEvalCapacity << " eval records, scalar inference screen/train resolve." << std::endl;
-        std::cout << "This milestone uses a scene-backed hit/input path; full ray tracing is pending." << std::endl;
+        std::cout << "This milestone uses scene-backed hits and direct-lighting train payloads; full ray tracing is pending." << std::endl;
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
         std::cerr << "NRC reference path tracer sample failed: " << error.what() << std::endl;

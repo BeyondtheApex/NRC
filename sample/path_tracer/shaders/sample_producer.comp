@@ -47,12 +47,14 @@ void main() {
                                    nrcSampleProducerConstants.trainRecordCount,
                                    firstTrainIndex,
                                    reservedTrainCount)) {
-            NrcTrainRecord trainRecord = NrcMakeTrainRecord(vec3(0.5, 1.0, 1.5),
-                                                            vec3(2.0, 3.0, 4.0),
-                                                            NrcSamplePackedInput(uvec2(0u, 0u)));
+            PackedNrcInput trainInput = NrcSamplePackedInput(uvec2(0u, 0u));
+            vec3 trainBias;
+            vec3 trainFactor;
+            NrcSampleDirectLightingPayload(trainInput, trainBias, trainFactor);
+            NrcTrainRecord trainRecord = NrcMakeTrainRecord(trainBias, trainFactor, trainInput);
             NrcStoreTrainRecords(0u, firstTrainIndex, reservedTrainCount, trainRecord);
             if (reservedTrainCount != 0u) {
-                NrcPushEvalRecord(NrcMakeEvalTrain(NrcSamplePackedInput(uvec2(0u, 0u)),
+                NrcPushEvalRecord(NrcMakeEvalTrain(trainInput,
                                                    0u,
                                                    firstTrainIndex,
                                                    firstTrainIndex + reservedTrainCount - 1u),

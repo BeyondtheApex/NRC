@@ -1120,3 +1120,79 @@ It now additionally verifies:
 ### Next Step
 
 Add a simple path tracing or direct-lighting stage so train-record bias/factor values come from actual sampled scene transport rather than constants. After that, use those records as the validation target for scalar gradient and optimizer passes.
+
+## 2026-07-08 - Milestone 15 Direct-Lighting Train Payloads
+
+### Implemented
+
+- Extended sample scene shader:
+  - `sample/path_tracer/shaders/sample_scene.glsl`
+- Updated sample producer shader:
+  - `sample/path_tracer/shaders/sample_producer.comp`
+- Updated sample host validation:
+  - `sample/path_tracer/sample.cpp`
+- Updated sample documentation:
+  - `docs/sample_path_tracer.md`
+
+### Runtime Behavior
+
+Train records no longer use constant bias/factor values. The producer now:
+
+1. creates the same scene-backed `PackedNrcInput` for the sample training hit;
+2. unpacks it through the sample scene buffer;
+3. evaluates a deterministic direct-lighting payload;
+4. stores train records with:
+   - `bias = diffuse * lightColor * max(dot(normal, lightDir), 0)`;
+   - `factor = max(diffuse + specular * (1 - roughness), 0.05)`;
+5. emits the train eval record targeting the reserved batch 0 train records.
+
+The scalar inference pass still resolves train records as:
+
+```text
+bias = directLightingBias + directLightingFactor * prediction
+```
+
+### Integration Boundary
+
+The direct-lighting function is intentionally sample-local. The reusable NRC pass still only consumes:
+
+- `PackedNrcInput`;
+- renderer-provided `NrcUnpackPackedInput`;
+- standard eval/train queues.
+
+This keeps the library boundary suitable for MCVR-style integration while making the reference sample less synthetic.
+
+### Validated Behavior
+
+The host now mirrors the shader-side direct-lighting math and validates:
+
+- screen eval payloads still match scene-backed packed inputs;
+- train eval payload still matches the sample training hit;
+- train records preserve the expected packed input payload;
+- train-record factors match the CPU direct-lighting reference;
+- train-record bias fields equal `directLightingBias + directLightingFactor * vec3(0.25, 0.5, 0.75)` after scalar inference.
+
+### Validation
+
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Manual sample run succeeded:
+  - `build/sample/path_tracer/Debug/nrc_reference_path_tracer.exe`
+- Manual sample output:
+  - `NRC reference path tracer minimal integration passed: 17 eval records, scalar inference screen/train resolve.`
+  - `This milestone uses scene-backed hits and direct-lighting train payloads; full ray tracing is pending.`
+- Test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `15/15 tests passed`
+
+### Current Limitations
+
+- The lighting model is deterministic direct lighting, not ray-query or multi-bounce path tracing.
+- No acceleration structure, ray query, BRDF sampling, scene loading, or visual output artifact exists yet.
+- KHR cooperative matrix inference is not used in the sample because KHR pipeline creation remains driver-gated on the current AMD machine.
+- No gradient/backpropagation or optimizer pass is connected yet.
+
+### Next Step
+
+Add a ray-query or simple path tracing stage so the sample can generate train records from actual traced paths rather than direct-lighting helper math.

@@ -45,7 +45,7 @@ It records one command buffer:
 4. Dispatch `sample_inference_scalar.comp`.
 5. Copy the resolved screen image back to the CPU and read back train records.
 
-The producer emits one screen eval record for every `4x4` pixel. It also reserves two train records in batch 0 and emits one train eval record targeting those records.
+The producer emits one screen eval record for every `4x4` pixel. It also reserves two train records in batch 0 and emits one train eval record targeting those records. Train-record bias and factor values come from a deterministic direct-lighting payload over the sample scene hit.
 
 `sample_scene.glsl` maps each pixel to a simple triangle hit, packs `primitiveId`, instance id, barycentrics, and scattered direction into `PackedNrcInput`, then unpacks the same payload into `NrcUnpackedInput` for `NrcInferenceScalar.glsl`.
 
@@ -64,7 +64,8 @@ The host verifies:
 - every screen and train eval payload matches the CPU reference `PackedNrcInput` generated from the sample scene hit rule;
 - both train records preserve the expected packed scene input payload;
 - every screen pixel was resolved as `bias + factor * prediction`;
-- both train record bias values were resolved as `bias + factor * prediction`;
+- both train record bias values were resolved as `directLightingBias + directLightingFactor * prediction`;
+- both train record factor values match the CPU reference direct-lighting payload;
 - output alpha is zero, matching the inference pass contract.
 
 ## Build and Test
@@ -84,7 +85,7 @@ nrc_sample_reference_path_tracer_smoke
 
 - This is a scene-backed integration skeleton, not a real path tracer.
 - No acceleration structure, ray query, material system, BRDF sampling, or scene loading exists yet.
-- Training records are synthetic and not yet generated from real path-tracing samples.
+- Training records use deterministic direct lighting, not real multi-bounce path-traced samples.
 - KHR cooperative matrix inference is not used because KHR pipeline creation is driver-gated on the current AMD machine.
 - No gradient/backpropagation or optimizer pass is connected yet.
 
@@ -92,7 +93,7 @@ nrc_sample_reference_path_tracer_smoke
 
 The next sample milestones should add:
 
-- direct lighting or simple path tracing;
+- a ray query or simple path tracing stage;
 - train-record production from actual sampled paths;
 - scalar gradient and optimizer once those passes exist;
 - visual output artifacts for inspection.
