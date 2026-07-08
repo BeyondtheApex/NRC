@@ -1743,3 +1743,65 @@ The host verifier mirrors the sample scene path and training math:
 ### Next Step
 
 Turn the single sample update into a small iterative training loop with repeated frame-like steps and then add a visual output artifact. In parallel, continue toward the KHR cooperative-matrix training backend so the reusable implementation can move beyond the scalar correctness path.
+
+## 2026-07-09 - Milestone 23 Sample Visual Output Artifact
+
+### Implemented
+
+- Added deterministic sample output path to generated config:
+  - `NRC_SAMPLE_OUTPUT_PPM`
+  - `build/sample/path_tracer/nrc_reference_path_tracer.ppm`
+- Extended `sample/path_tracer/sample.cpp` to:
+  - tone-map the resolved `4x4` screen readback;
+  - write a binary PPM image;
+  - re-read and byte-compare the written file against the readback-derived bytes;
+  - validate the image has visible non-uniform pixel data.
+- Updated documentation:
+  - `docs/sample_path_tracer.md`
+  - `docs/project_structure.md`
+
+### Behavior
+
+The reference sample now leaves behind an inspectable visual artifact after its integration smoke run. The image is intentionally tiny because the sample is still a deterministic integration harness:
+
+```text
+P6
+4 4
+255
+```
+
+The PPM payload is generated from the scalar-inference-resolved screen image after a simple Reinhard tone map and gamma transform. The artifact is written under the CMake binary directory so CTest's working directory does not affect where the file lands.
+
+### Validation
+
+- Configure command succeeded:
+  - `cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DNRC_BUILD_SAMPLE_PATH_TRACER=ON -DNRC_BUILD_TESTS=ON -DNRC_BUILD_VULKAN_RUNTIME=ON`
+- Targeted sample build succeeded:
+  - `cmake --build build --config Debug --target nrc_reference_path_tracer`
+- Manual sample run succeeded:
+  - `build/sample/path_tracer/Debug/nrc_reference_path_tracer.exe`
+- Manual sample output:
+  - `NRC reference path tracer minimal integration passed: 17 eval records, scalar inference resolve, and one scalar training update.`
+  - `Wrote sample image: G:/cpp/radiance/NRC/build/sample/path_tracer/nrc_reference_path_tracer.ppm`
+  - `This milestone uses primary-ray traced hits and direct-lighting train payloads; full ray tracing is pending.`
+- External artifact check:
+  - `build/sample/path_tracer/nrc_reference_path_tracer.ppm`
+  - size: `59` bytes;
+  - header bytes decode to `P6`, `4 4`, `255`.
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `24/24 tests passed`
+
+### Current Limitations
+
+- The visual output is a `4x4` smoke artifact, not a useful rendered image for quality inspection yet.
+- The sample still uses a local primary-ray triangle loop and deterministic direct lighting.
+- The sample still runs only one scalar training update.
+- KHR cooperative-matrix training is still missing.
+
+### Next Step
+
+Grow the sample from a single-frame smoke artifact into a small iterative reference run with a larger output image. The next useful sample milestone should either repeat train/infer/update over several frame-like iterations or replace the local triangle loop with a more realistic ray-query/path-tracing stage.

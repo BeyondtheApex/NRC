@@ -10,7 +10,8 @@ The current sample is a minimal Vulkan integration skeleton with a tiny primary-
 4. Scalar inference.
 5. Screen and train-record resolve.
 6. Scalar training update.
-7. Readback validation.
+7. Visual output write.
+8. Readback and artifact validation.
 
 ## Current Files
 
@@ -45,6 +46,8 @@ The sample creates:
 - a `4x4` `rgba32f` bias/factor-R image;
 - a `4x4` `rg32f` factor-GB image;
 - a readback buffer.
+- a binary PPM output image:
+  - `build/sample/path_tracer/nrc_reference_path_tracer.ppm`
 
 It records one command buffer:
 
@@ -56,6 +59,7 @@ It records one command buffer:
 6. Dispatch `sample_gradient_scalar.comp` through the prepare pass's indirect command.
 7. Dispatch `sample_optimize.comp`.
 8. Copy the resolved screen image back to the CPU and read back train records, gradients, optimizer entries, and packed weights.
+9. Write a tone-mapped binary PPM image from the resolved screen readback.
 
 The producer traces one primary ray for every `4x4` pixel, emits a screen eval record for each hit, reserves two train records in batch 0, and emits one train eval record targeting those records. Train-record bias and factor values come from a deterministic direct-lighting payload over the traced sample scene hit.
 
@@ -83,13 +87,14 @@ The host verifies:
 - scalar gradient matches the CPU reference over the sample scene unpacking path;
 - optimizer entries match the CPU Adam/EMA reference;
 - packed weights and packed use-weights match the CPU reference and at least one packed weight changes.
+- the PPM output exists, matches the readback-derived bytes, has the expected `P6 4 4 255` header, and contains visible non-uniform pixels.
 
 ## Build and Test
 
 The sample builds when:
 
 - `nrc_vulkan` is available;
-- `glslc` is available.
+- `glslc` is available;
 - `VK_EXT_shader_atomic_float` / `shaderBufferFloat32AtomicAdd` is available for the scalar gradient pass.
 
 CTest runs:
@@ -113,4 +118,4 @@ The next sample milestones should add:
 - replacing the sample-local triangle loop with Vulkan ray query or a fuller path tracing stage;
 - train-record production from multi-bounce sampled paths;
 - iterative per-frame training instead of a single validated update;
-- visual output artifacts for inspection.
+- a larger inspection output once the sample moves beyond the `4x4` smoke image.

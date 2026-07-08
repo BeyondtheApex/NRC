@@ -518,6 +518,77 @@ bool close_enough(float lhs, float rhs, float absolute = 5.0e-3f, float relative
     return std::fabs(lhs - rhs) <= tolerance;
 }
 
+std::uint8_t encode_visual_channel(float value) {
+    const float positive = std::max(value, 0.0f);
+    const float mapped = positive / (1.0f + positive);
+    const float gammaCorrected = std::pow(mapped, 1.0f / 2.2f);
+    return static_cast<std::uint8_t>(std::round(std::clamp(gammaCorrected, 0.0f, 1.0f) * 255.0f));
+}
+
+std::vector<std::uint8_t> make_ppm_bytes(const std::vector<Vec4> &pixels) {
+    const std::string header = "P6\n" + std::to_string(kWidth) + " " + std::to_string(kHeight) + "\n255\n";
+    std::vector<std::uint8_t> bytes(header.begin(), header.end());
+    bytes.reserve(header.size() + pixels.size() * 3u);
+    for (const Vec4 &pixel : pixels) {
+        bytes.push_back(encode_visual_channel(pixel.x));
+        bytes.push_back(encode_visual_channel(pixel.y));
+        bytes.push_back(encode_visual_channel(pixel.z));
+    }
+    return bytes;
+}
+
+void write_ppm_file(const char *path, const std::vector<Vec4> &pixels) {
+    const std::vector<std::uint8_t> bytes = make_ppm_bytes(pixels);
+    std::ofstream file(path, std::ios::binary);
+    if (!file) {
+        throw std::runtime_error(std::string("failed to open sample output image: ") + path);
+    }
+    file.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    if (!file) {
+        throw std::runtime_error(std::string("failed to write sample output image: ") + path);
+    }
+}
+
+bool verify_ppm_file(const char *path, const std::vector<Vec4> &pixels) {
+    const std::vector<std::uint8_t> expected = make_ppm_bytes(pixels);
+
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) {
+        std::cerr << "FAIL: sample output image was not written: " << path << '\n';
+        return false;
+    }
+
+    const std::streamsize size = file.tellg();
+    if (size != static_cast<std::streamsize>(expected.size())) {
+        std::cerr << "FAIL: sample output image size expected " << expected.size()
+                  << " got " << size << '\n';
+        return false;
+    }
+
+    std::vector<std::uint8_t> actual(expected.size());
+    file.seekg(0, std::ios::beg);
+    file.read(reinterpret_cast<char *>(actual.data()), static_cast<std::streamsize>(actual.size()));
+    if (!file || actual != expected) {
+        std::cerr << "FAIL: sample output image bytes do not match readback pixels\n";
+        return false;
+    }
+
+    const std::string header = "P6\n" + std::to_string(kWidth) + " " + std::to_string(kHeight) + "\n255\n";
+    const auto pixelBegin = actual.begin() + static_cast<std::vector<std::uint8_t>::difference_type>(header.size());
+    const bool hasVisiblePixel = std::any_of(pixelBegin, actual.end(), [](std::uint8_t value) {
+        return value != 0u;
+    });
+    const bool isNonUniform = std::adjacent_find(pixelBegin, actual.end(), [](std::uint8_t lhs, std::uint8_t rhs) {
+        return lhs != rhs;
+    }) != actual.end();
+    if (!hasVisiblePixel || !isNonUniform) {
+        std::cerr << "FAIL: sample output image does not contain a visible non-uniform result\n";
+        return false;
+    }
+
+    return true;
+}
+
 class MinimalIntegrationSample {
 public:
     MinimalIntegrationSample(const char *producerSpirv,
@@ -733,6 +804,9 @@ public:
                  finalBiasFactorR.data(),
                  static_cast<VkDeviceSize>(finalBiasFactorR.size() * sizeof(Vec4)));
 
+        write_ppm_file(NRC_SAMPLE_OUTPUT_PPM, finalBiasFactorR);
+        const bool visualOutputOk = verify_ppm_file(NRC_SAMPLE_OUTPUT_PPM, finalBiasFactorR);
+
         return verify(finalQueueState,
                       finalEvalRecords,
                       finalTrainRecords,
@@ -747,7 +821,8 @@ public:
                                finalGradients,
                                finalOptimizerEntries,
                                finalWeights,
-                               finalUseWeights);
+                               finalUseWeights) &&
+               visualOutputOk;
     }
 
 private:
@@ -2149,6 +2224,7 @@ int main() {
 
         std::cout << "NRC reference path tracer minimal integration passed: "
                   << kEvalCapacity << " eval records, scalar inference resolve, and one scalar training update." << std::endl;
+        std::cout << "Wrote sample image: " << NRC_SAMPLE_OUTPUT_PPM << std::endl;
         std::cout << "This milestone uses primary-ray traced hits and direct-lighting train payloads; full ray tracing is pending." << std::endl;
         return EXIT_SUCCESS;
     } catch (const SkipTest &skip) {
