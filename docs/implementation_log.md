@@ -3478,3 +3478,48 @@ This gives the next KHR reduction work a better anchor: shader changes can conti
 ### Next Step
 
 Use `nrc::reference_backward_khr_fp16` as the invariant oracle while introducing cooperative-matrix/subgroup gradient reductions. Start with one weight region, likely the output layer, and prove that the reduced shader path preserves the full hidden/output gradient layout before extending the reduction strategy through all hidden layers.
+
+## 2026-07-09 - Milestone 52 KHR Output Workgroup Gradient Reduction
+
+### Implemented
+
+- Added `NrcKhrAccumulateOutputDWeightsWorkgroup` to `shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl`.
+- Changed `shaders/nrc/passes/NrcGradientKhr.glsl` to use the workgroup output-layer `dW` helper.
+- Updated `tests/shader_compile/nrc_khr_backprop_smoke.comp` so the backprop compile smoke test exercises the same helper as the pass.
+- Updated:
+  - `docs/gradient_pass.md`
+  - `docs/khr_coopmat_backend.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+The output-layer `dW` path now stores each invocation's 3-value output derivative in shared memory, then lets the workgroup reduce every output weight across `NRC_KHR_WORKGROUP_SIZE` samples before issuing one fp32 atomic add per output weight per workgroup.
+
+This preserves the current row-major fp32 gradient layout and keeps the hidden-layer `dW` path unchanged. Hidden layers still use scalar per-sample accumulation, so this is the first reduction step rather than the final cooperative-matrix/subgroup gradient path.
+
+### Validation
+
+- Targeted KHR shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr|nrc_shader_khr_backprop" --output-on-failure -V`
+- Targeted KHR gradient test build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test`
+- Targeted KHR gradient runtime test succeeded with controlled skip:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr_test" --output-on-failure -V`
+  - `SKIP: vkCreateComputePipelines raised a structured exception for the KHR gradient shader`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Test result:
+  - `33/33 tests passed`
+
+### Current Limitations
+
+- Output-layer `dW` reduction is a scalar workgroup loop, not a cooperative-matrix or subgroup reduction.
+- Hidden-layer `dW` helpers still use scalar per-sample accumulation.
+- The current correctness path still depends on fp32 storage-buffer atomic add.
+- Runtime numerical comparison for the KHR shader still did not execute on this machine because the local AMD KHR pipeline creation path reports a controlled structured-exception skip.
+
+### Next Step
+
+Use the same `nrc::reference_backward_khr_fp16` oracle while replacing more scalar accumulation with subgroup or cooperative-matrix reduction, starting with a tighter output-layer reduction strategy or the first hidden-layer region.
