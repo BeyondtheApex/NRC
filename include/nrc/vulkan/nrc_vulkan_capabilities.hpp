@@ -76,8 +76,11 @@ struct VulkanTrainingProfilePlan {
     TrainingProfileSelection selection;
     TrainingShaderCompileConfig shaderCompile;
     VulkanProfileValidationReport validation;
+    TrainingProfileSelection fallbackSourceSelection;
+    VulkanProfileValidationReport fallbackSourceValidation;
     bool selected = false;
     bool usable = false;
+    bool usedRuntimeFallback = false;
 };
 
 const char *vulkan_validation_step_status_name(VulkanValidationStepStatus status);
@@ -105,5 +108,11 @@ VulkanTrainingProfilePlan make_vulkan_training_profile_plan(
     const VulkanDeviceCapabilities &capabilities,
     const TrainingProfileSelectionOptions &selectionOptions = {},
     const VulkanProfileValidationRequirements &validationRequirements = {});
+
+VulkanTrainingProfilePlan make_vulkan_training_profile_plan_with_runtime_fallback(
+    const VulkanDeviceCapabilities &capabilities,
+    const TrainingProfileSelectionOptions &selectionOptions = {},
+    const VulkanProfileValidationRequirements &khrValidationRequirements = {},
+    const VulkanProfileValidationRequirements &scalarValidationRequirements = {});
 
 } // namespace nrc::vulkan

@@ -6014,3 +6014,70 @@ That records the current local reason for scalar fallback directly in the sample
 ### Next Step
 
 Use the diagnostic plan output to make the sample or a reusable helper record shader-module and pipeline-creation validation stages when a KHR training candidate exists, while preserving scalar training as the correctness anchor on devices that cannot run the KHR path locally.
+
+## 2026-07-09 - Milestone 87 Runtime Fallback Training Plan
+
+### Implemented
+
+- Extended `nrc::vulkan::VulkanTrainingProfilePlan` with explicit fallback provenance:
+  - `fallbackSourceSelection`
+  - `fallbackSourceValidation`
+  - `usedRuntimeFallback`
+- Added `nrc::vulkan::make_vulkan_training_profile_plan_with_runtime_fallback`.
+- Preserved the existing `make_vulkan_training_profile_plan` behavior:
+  - it still returns the initially selected KHR plan as selected but unusable when required runtime validation has not passed.
+- The new runtime-fallback helper only constructs scalar fallback when all of the following are true:
+  - a KHR training implementation was selected;
+  - required KHR validation made that plan unusable;
+  - `TrainingProfileSelectionOptions::allowScalarReferenceFallback` is true;
+  - the scalar reference profile can be selected.
+- When runtime fallback is used, the returned plan describes the selected scalar profile while preserving the rejected KHR selection and validation report in the fallback-source fields.
+- Scalar fallback validation remains explicit:
+  - if the caller requires scalar shader-module or pipeline validation and does not provide it, the fallback plan is selected but not usable.
+- Extended `nrc_vulkan_capabilities_test` to cover:
+  - KHR runtime validation pass keeps the KHR plan selected;
+  - failed KHR pipeline validation falls back to scalar when allowed;
+  - fallback provenance preserves the rejected KHR implementation, validation status, and `VkResult`;
+  - required-but-missing scalar validation blocks fallback usability.
+- Updated current documentation:
+  - `docs/vulkan_capability_query.md`
+  - `docs/vulkan_dispatch_harness.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+The plan contract now separates three cases that matter for real integrations:
+
+```text
+KHR capability rejected       -> optional capability-level scalar fallback
+KHR capability accepted       -> KHR plan selected
+KHR runtime validation failed -> optional runtime scalar fallback with KHR failure preserved
+```
+
+This is useful for renderer integration because a device may report the required KHR cooperative-matrix shape and subgroup support but still fail shader module, pipeline, dispatch, or numerical validation. An integration can now keep that failure visible while using an explicit scalar/reference path for testing or bring-up.
+
+### Validation
+
+- Targeted Vulkan capability build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_capabilities_test`
+- Targeted Vulkan capability test succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_capabilities_test" --output-on-failure -V`
+- Targeted result:
+  - `1/1 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `85/85 tests passed`
+
+### Current Limitations
+
+- The fallback helper does not create shader modules, pipelines, descriptors, resources, or dispatches. It only consumes validation stage results supplied by the host renderer or tests.
+- Runtime fallback is intentionally scalar/reference only; there is no second KHR profile retry policy yet.
+- The sample path tracer still calls the plain plan helper because it does not attempt a KHR training shader/pipeline yet.
+- KHR training numerical validation is still locally blocked by the 98304-byte shared-memory profile gate.
+
+### Next Step
+
+Thread actual shader-module and pipeline creation attempts into the training plan where a KHR training candidate exists. The nearest useful path is either a reusable KHR training pipeline validation helper or a sample-side optional KHR validation probe that records failures through the new runtime-fallback plan without changing the active scalar execution path.

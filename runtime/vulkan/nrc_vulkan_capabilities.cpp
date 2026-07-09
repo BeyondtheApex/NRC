@@ -352,4 +352,40 @@ VulkanTrainingProfilePlan make_vulkan_training_profile_plan(
     return plan;
 }
 
+VulkanTrainingProfilePlan make_vulkan_training_profile_plan_with_runtime_fallback(
+    const VulkanDeviceCapabilities &capabilities,
+    const TrainingProfileSelectionOptions &selectionOptions,
+    const VulkanProfileValidationRequirements &khrValidationRequirements,
+    const VulkanProfileValidationRequirements &scalarValidationRequirements) {
+    VulkanTrainingProfilePlan primaryPlan =
+        make_vulkan_training_profile_plan(capabilities,
+                                          selectionOptions,
+                                          khrValidationRequirements);
+
+    if (primaryPlan.usable ||
+        !selectionOptions.allowScalarReferenceFallback ||
+        primaryPlan.selection.implementation == TrainingImplementationKind::ScalarReference ||
+        primaryPlan.selection.implementation == TrainingImplementationKind::None) {
+        return primaryPlan;
+    }
+
+    TrainingProfileSelectionOptions fallbackOptions = selectionOptions;
+    fallbackOptions.enableExperimentalAllCoopmat = false;
+    fallbackOptions.allowKhrGroundwork = false;
+    fallbackOptions.allowScalarReferenceFallback = true;
+
+    VulkanTrainingProfilePlan fallbackPlan =
+        make_vulkan_training_profile_plan(capabilities,
+                                          fallbackOptions,
+                                          scalarValidationRequirements);
+    if (fallbackPlan.selection.implementation != TrainingImplementationKind::ScalarReference) {
+        return primaryPlan;
+    }
+
+    fallbackPlan.usedRuntimeFallback = true;
+    fallbackPlan.fallbackSourceSelection = primaryPlan.selection;
+    fallbackPlan.fallbackSourceValidation = primaryPlan.validation;
+    return fallbackPlan;
+}
+
 } // namespace nrc::vulkan

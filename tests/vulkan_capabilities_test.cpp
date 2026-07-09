@@ -322,6 +322,76 @@ int main() {
                           nrc::vulkan::VulkanProfileValidationStatus::PipelineCreationNotRun,
                       "Vulkan training plan preserves missing pipeline validation status");
 
+        nrc::TrainingProfileSelectionOptions allowRuntimeFallback{};
+        allowRuntimeFallback.allowScalarReferenceFallback = true;
+
+        nrc::vulkan::VulkanProfileValidationRequirements passedKhrPipeline{};
+        passedKhrPipeline.requirePipelineCreation = true;
+        passedKhrPipeline.pipelineCreation.status = nrc::vulkan::VulkanValidationStepStatus::Passed;
+        const nrc::vulkan::VulkanTrainingProfilePlan passedRuntimePlan =
+            nrc::vulkan::make_vulkan_training_profile_plan_with_runtime_fallback(
+                validCapabilities,
+                allowRuntimeFallback,
+                passedKhrPipeline);
+        ok &= require(passedRuntimePlan.selected,
+                      "Vulkan runtime-fallback plan selects KHR profile when runtime validation passes");
+        ok &= require(passedRuntimePlan.usable,
+                      "Vulkan runtime-fallback plan stays usable when KHR validation passes");
+        ok &= require(!passedRuntimePlan.usedRuntimeFallback,
+                      "Vulkan runtime-fallback plan does not fallback after passed KHR validation");
+        ok &= require(passedRuntimePlan.selection.implementation ==
+                          nrc::TrainingImplementationKind::KhrGroundwork,
+                      "Vulkan runtime-fallback plan preserves KHR implementation after passed validation");
+
+        nrc::vulkan::VulkanProfileValidationRequirements failedKhrPipeline{};
+        failedKhrPipeline.requirePipelineCreation = true;
+        failedKhrPipeline.pipelineCreation.status = nrc::vulkan::VulkanValidationStepStatus::Failed;
+        failedKhrPipeline.pipelineCreation.vkResult = VK_ERROR_INITIALIZATION_FAILED;
+        const nrc::vulkan::VulkanTrainingProfilePlan runtimeFallbackPlan =
+            nrc::vulkan::make_vulkan_training_profile_plan_with_runtime_fallback(
+                validCapabilities,
+                allowRuntimeFallback,
+                failedKhrPipeline);
+        ok &= require(runtimeFallbackPlan.selected,
+                      "Vulkan runtime-fallback plan selects scalar after failed KHR validation");
+        ok &= require(runtimeFallbackPlan.usable,
+                      "Vulkan runtime-fallback scalar plan is usable without scalar runtime requirements");
+        ok &= require(runtimeFallbackPlan.usedRuntimeFallback,
+                      "Vulkan runtime-fallback plan records runtime fallback use");
+        ok &= require(runtimeFallbackPlan.selection.implementation ==
+                          nrc::TrainingImplementationKind::ScalarReference,
+                      "Vulkan runtime-fallback plan records scalar fallback implementation");
+        ok &= require(runtimeFallbackPlan.validation.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::Supported,
+                      "Vulkan runtime-fallback plan validates selected scalar profile");
+        ok &= require(runtimeFallbackPlan.fallbackSourceSelection.implementation ==
+                          nrc::TrainingImplementationKind::KhrGroundwork,
+                      "Vulkan runtime-fallback plan preserves rejected KHR implementation");
+        ok &= require(runtimeFallbackPlan.fallbackSourceValidation.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::PipelineCreationFailed,
+                      "Vulkan runtime-fallback plan preserves rejected KHR validation status");
+        ok &= require(runtimeFallbackPlan.fallbackSourceValidation.pipelineCreation.vkResult ==
+                          VK_ERROR_INITIALIZATION_FAILED,
+                      "Vulkan runtime-fallback plan preserves rejected KHR VkResult");
+
+        nrc::vulkan::VulkanProfileValidationRequirements missingScalarShaderModule{};
+        missingScalarShaderModule.requireShaderModuleCreation = true;
+        const nrc::vulkan::VulkanTrainingProfilePlan unusableScalarFallbackPlan =
+            nrc::vulkan::make_vulkan_training_profile_plan_with_runtime_fallback(
+                validCapabilities,
+                allowRuntimeFallback,
+                failedKhrPipeline,
+                missingScalarShaderModule);
+        ok &= require(unusableScalarFallbackPlan.selected,
+                      "Vulkan runtime-fallback plan still selects scalar when scalar validation is required");
+        ok &= require(!unusableScalarFallbackPlan.usable,
+                      "Vulkan runtime-fallback plan is not usable when scalar validation has not run");
+        ok &= require(unusableScalarFallbackPlan.usedRuntimeFallback,
+                      "Vulkan runtime-fallback plan records fallback even when scalar validation blocks usability");
+        ok &= require(unusableScalarFallbackPlan.validation.status ==
+                          nrc::vulkan::VulkanProfileValidationStatus::ShaderModuleCreationNotRun,
+                      "Vulkan runtime-fallback plan preserves scalar validation status");
+
         nrc::vulkan::VulkanProfileValidationRequirements requireShaderModule{};
         requireShaderModule.requireShaderModuleCreation = true;
         const nrc::vulkan::VulkanProfileValidationReport missingShaderModule =

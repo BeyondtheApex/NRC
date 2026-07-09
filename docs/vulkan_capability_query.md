@@ -137,6 +137,32 @@ nrc::vulkan::VulkanTrainingProfilePlan plan =
 
 `plan.shaderCompile` is the integration-facing shader plan. For KHR profiles it carries the selected workgroup size, subgroup size, cooperative matrix shape, full-subgroup requirement, and all-coopmat switches. `plan.usable` is true only when a training profile was selected, the shader compile config is valid, and the requested Vulkan validation stages are usable.
 
+If an integration wants explicit scalar fallback after a KHR shader module, pipeline, or numerical validation failure, use `make_vulkan_training_profile_plan_with_runtime_fallback`:
+
+```cpp
+nrc::TrainingProfileSelectionOptions options{};
+options.allowScalarReferenceFallback = true;
+
+nrc::vulkan::VulkanProfileValidationRequirements khrValidation{};
+khrValidation.requirePipelineCreation = true;
+khrValidation.pipelineCreation = khrPipelineResult.validation;
+
+nrc::vulkan::VulkanTrainingProfilePlan plan =
+    nrc::vulkan::make_vulkan_training_profile_plan_with_runtime_fallback(
+        caps,
+        options,
+        khrValidation);
+```
+
+This helper preserves the plain `make_vulkan_training_profile_plan` behavior unless all of the following are true:
+
+- a KHR training implementation was selected;
+- required KHR validation made that plan unusable;
+- `allowScalarReferenceFallback` is true;
+- the scalar reference profile can be selected.
+
+When runtime fallback is used, `plan.usedRuntimeFallback` is true, `plan.selection` describes the selected scalar plan, and `plan.fallbackSourceSelection` plus `plan.fallbackSourceValidation` preserve the rejected KHR plan. This keeps fallback explicit in logs instead of silently erasing the failed KHR shader or pipeline result.
+
 For integration logs, use:
 
 - `nrc::training_implementation_kind_name(plan.selection.implementation)`
@@ -144,6 +170,7 @@ For integration logs, use:
 - `nrc::profile_support_status_name(plan.selection.khrProfileSupport.status)`
 - `nrc::vulkan::vulkan_profile_validation_status_name(plan.validation.status)`
 - `nrc::vulkan::vulkan_validation_step_status_name(plan.validation.pipelineCreation.status)`
+- `nrc::vulkan::vulkan_profile_validation_status_name(plan.fallbackSourceValidation.status)` when `plan.usedRuntimeFallback` is true.
 
 The helpers return stable ASCII enum tokens such as `KhrGroundwork`, `SelectedScalarReference`, `MissingSharedMemory`, and `PipelineCreationFailed`.
 
