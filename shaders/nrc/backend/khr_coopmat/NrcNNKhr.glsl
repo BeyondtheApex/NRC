@@ -228,18 +228,18 @@ void NrcKhrLoadOutputWeights(uint layer) {
     barrier();
 }
 
-void NrcKhrForwardHiddenRelu() {
+void NrcKhrForwardLayer(bool applyRelu, uint rowBlockLimit, bool reloadActivations) {
     coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_N, gl_MatrixUseAccumulator>
         dst[NRC_KHR_SUBGROUP_ACT_COOPMAT_Y][NRC_KHR_COOPMAT_M_BLOCKS];
 
     for (uint y = 0u; y < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++y) {
-        for (uint rowBlock = 0u; rowBlock < NRC_KHR_COOPMAT_M_BLOCKS; ++rowBlock) {
+        for (uint rowBlock = 0u; rowBlock < rowBlockLimit; ++rowBlock) {
             dst[y][rowBlock] =
                 coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_N, gl_MatrixUseAccumulator>(0);
         }
     }
 
-    for (uint rowBlock = 0u; rowBlock < NRC_KHR_COOPMAT_M_BLOCKS; ++rowBlock) {
+    for (uint rowBlock = 0u; rowBlock < rowBlockLimit; ++rowBlock) {
         for (uint kBlock = 0u; kBlock < NRC_KHR_COOPMAT_K_BLOCKS; ++kBlock) {
             coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_K, gl_MatrixUseA> weightCoopmat;
             coopMatLoad(weightCoopmat,
@@ -260,9 +260,11 @@ void NrcKhrForwardHiddenRelu() {
 
     for (uint y = 0u; y < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++y) {
         uint workgroupY = gl_SubgroupID * NRC_KHR_SUBGROUP_ACT_COOPMAT_Y + y;
-        for (uint rowBlock = 0u; rowBlock < NRC_KHR_COOPMAT_M_BLOCKS; ++rowBlock) {
-            for (uint element = 0u; element < NRC_KHR_ACC_COMPONENT_COUNT; ++element) {
-                dst[y][rowBlock][element] = max(dst[y][rowBlock][element], float16_t(0));
+        for (uint rowBlock = 0u; rowBlock < rowBlockLimit; ++rowBlock) {
+            if (applyRelu) {
+                for (uint element = 0u; element < NRC_KHR_ACC_COMPONENT_COUNT; ++element) {
+                    dst[y][rowBlock][element] = max(dst[y][rowBlock][element], float16_t(0));
+                }
             }
             coopMatStore(dst[y][rowBlock],
                          nrcKhrSharedBuffer,
@@ -272,41 +274,17 @@ void NrcKhrForwardHiddenRelu() {
         }
     }
     barrier();
-    NrcKhrLoadActivationsFromShared();
+    if (reloadActivations) {
+        NrcKhrLoadActivationsFromShared();
+    }
+}
+
+void NrcKhrForwardHiddenRelu() {
+    NrcKhrForwardLayer(true, NRC_KHR_COOPMAT_M_BLOCKS, true);
 }
 
 void NrcKhrForwardOutputStore() {
-    coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_N, gl_MatrixUseAccumulator>
-        dst[NRC_KHR_SUBGROUP_ACT_COOPMAT_Y];
-
-    for (uint y = 0u; y < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++y) {
-        dst[y] =
-            coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_N, gl_MatrixUseAccumulator>(0);
-    }
-
-    for (uint kBlock = 0u; kBlock < NRC_KHR_COOPMAT_K_BLOCKS; ++kBlock) {
-        coopmat<float16_t, gl_ScopeSubgroup, NRC_KHR_COOPMAT_M, NRC_KHR_COOPMAT_K, gl_MatrixUseA> weightCoopmat;
-        coopMatLoad(weightCoopmat,
-                    nrcKhrSharedBuffer,
-                    NRC_KHR_WEIGHT_COOPMAT_ELEMENT(kBlock, 0u),
-                    NRC_KHR_MAT64_COOPMAT_STRIDE,
-                    NRC_KHR_WEIGHT_COOPMAT_MAJOR);
-
-        for (uint y = 0u; y < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++y) {
-            dst[y] = coopMatMulAdd(weightCoopmat, nrcKhrActCoopmats[y][kBlock], dst[y]);
-        }
-    }
-    barrier();
-
-    for (uint y = 0u; y < NRC_KHR_SUBGROUP_ACT_COOPMAT_Y; ++y) {
-        uint workgroupY = gl_SubgroupID * NRC_KHR_SUBGROUP_ACT_COOPMAT_Y + y;
-        coopMatStore(dst[y],
-                     nrcKhrSharedBuffer,
-                     NRC_KHR_ACC_COOPMAT_ELEMENT(0u, workgroupY),
-                     NRC_KHR_MAT64_COOPMAT_STRIDE,
-                     NRC_KHR_ACT_COOPMAT_MAJOR);
-    }
-    barrier();
+    NrcKhrForwardLayer(false, 1u, false);
 }
 
 vec3 NrcKhrReadInvocationOutput() {

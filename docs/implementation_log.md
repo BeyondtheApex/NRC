@@ -6137,3 +6137,68 @@ The assets are compile-validation only. They do not change command recording, de
 ### Next Step
 
 Add a sample-side KHR training validation probe that maps `TrainingShaderCompileConfig` to the compiled sample KHR SPIR-V assets, attempts shader-module and profile pipeline creation when KHR training is selected, and feeds the validation result into `make_vulkan_training_profile_plan_with_runtime_fallback` without dispatching KHR training yet.
+
+## 2026-07-09 - Milestone 89 AMD KHR Inference Pipeline Crash Workaround
+
+### Investigation
+
+- Reproduced the local AMD crash on the full KHR inference dispatch:
+  - shader module creation succeeded;
+  - `vkCreateComputePipelines` raised a Windows structured exception;
+  - the test previously converted that into a controlled skip.
+- Built a matrix of temporary output-stage probes against the local AMD Radeon RX 9070 XT driver:
+  - minimal `GL_KHR_cooperative_matrix` shaders compiled into pipelines successfully;
+  - simple `coopMatLoad`, `coopMatMulAdd`, and `coopMatStore` shaders succeeded;
+  - hidden-layer-shaped KHR forward code succeeded;
+  - `NrcKhrLoadOutputWeights()` alone succeeded;
+  - the original narrow output-stage function triggered the structured exception;
+  - output-stage variants that merely changed store major, split the output-weight load branch, or touched accumulator elements still triggered the exception;
+  - directly reusing the hidden-layer-shaped forward function avoided the exception.
+- The crash is therefore not a general KHR cooperative-matrix allocation problem and not the shared-memory-capacity issue. It is a driver compiler bug triggered by the standalone narrow output-layer coopmat function shape.
+
+### Implemented
+
+- Replaced the separate hidden/output forward implementations with one shared KHR layer helper:
+  - `NrcKhrForwardLayer(bool applyRelu, uint rowBlockLimit, bool reloadActivations)`
+- Kept the public shader helper names used by existing passes:
+  - `NrcKhrForwardHiddenRelu()` now calls the shared helper with full row blocks, ReLU enabled, and activation reload enabled.
+  - `NrcKhrForwardOutputStore()` now calls the same helper with one row block, ReLU disabled, and activation reload disabled.
+- The output path remains cooperative-matrix based:
+  - no scalar final-layer fallback was introduced;
+  - output math still uses only row block 0;
+  - output activation remains linear, matching the CPU reference path.
+
+### Behavior
+
+The workaround deliberately makes the output stage share the same driver-visible function shape as the hidden stage while keeping output-stage semantics:
+
+```text
+hidden layer -> full row blocks, ReLU, reload activations
+output layer -> row block 0 only, no ReLU, no activation reload
+```
+
+This avoids the AMD pipeline compiler structured exception without changing the NRC output values in the dispatch test. It also avoids the heavier full-output-tile workaround that would have required extra row-block work or output-weight padding.
+
+### Validation
+
+- Targeted real KHR dispatch shader build succeeded:
+  - `cmake --build build --config Debug --target nrc_khr_dispatch_shaders nrc_vulkan_khr_dispatch_test`
+- Targeted KHR dispatch execution succeeded on the local AMD device:
+  - `nrc_vulkan_khr_dispatch_test build/tests/nrc_khr_dispatch_sg32.spv build/tests/nrc_khr_dispatch_sg16.spv build/tests/nrc_khr_dispatch_m8_sg32.spv`
+- The test now passes instead of skipping on the AMD structured exception path.
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `85/85 tests passed`
+
+### Current Limitations
+
+- This validates correctness and pipeline creation, not GPU timing. The helper introduces uniform parameters into the shared forward-layer function; the driver is expected to inline or optimize them, but this still needs profiling in a real renderer.
+- The underlying AMD compiler crash remains a driver issue. The workaround avoids the trigger; it does not prove that all equivalent KHR output-layer rewrites are safe.
+- KHR training numerical validation remains locally blocked by the 98304-byte shared-memory profile gate.
+
+### Next Step
+
+Add a small permanent driver-regression note or test hook around `nrc_vulkan_khr_dispatch_test` so future shader refactors do not accidentally reintroduce the AMD output-stage pipeline compiler crash.
