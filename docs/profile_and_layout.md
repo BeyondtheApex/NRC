@@ -24,8 +24,7 @@ Profile selection proves that a backend is a valid candidate for the reported ca
 The default policy is deliberately conservative:
 
 - choose a supported KHR cooperative-matrix training profile when one satisfies the capability, subgroup, matrix-shape, atomic-float, subgroup-arithmetic, and shared-memory requirements;
-- select `TrainingImplementationKind::KhrGroundwork`, which keeps the default KHR gradient shader behavior;
-- keep the experimental all-coopmat training switches disabled;
+- select `TrainingImplementationKind::KhrRecompute`, which enables activation recompute and the full cooperative-matrix `dW+dA` training branch;
 - do not silently fall back to scalar reference training.
 
 The returned `TrainingProfileSelection` records:
@@ -33,6 +32,7 @@ The returned `TrainingProfileSelection` records:
 - selected implementation kind:
   - `KhrGroundwork`
   - `KhrAllCoopmat`
+  - `KhrRecompute`
   - `ScalarReference`
 - selected `ProfileId`, profile name, and `ProfileShaderConfig`;
 - the decisive KHR support report;
@@ -44,6 +44,7 @@ The returned `TrainingProfileSelection` records:
 ```text
 NRC_KHR_USE_COOPMAT_ALL_DW=1
 NRC_KHR_USE_COOPMAT_ALL_DA=1
+NRC_KHR_RECOMPUTE_BACKPROP=1
 ```
 
 `nrc::make_training_shader_compile_config(selection)` converts a selected training profile into a compact compile-time plan:
@@ -55,11 +56,12 @@ NRC_KHR_USE_COOPMAT_ALL_DA=1
 - cooperative matrix `M`, `N`, and `K`;
 - subgroup-size-control/full-subgroup requirements;
 - subgroup arithmetic requirement for training;
-- all-coopmat `dW` and `dA` switches.
+- all-coopmat `dW` and `dA` switches;
+- recompute backpropagation switch.
 
 The compile config is invalid when no training profile is selected. For scalar reference fallback, the config records the scalar shader header and workgroup size while leaving KHR subgroup and matrix dimensions at zero.
 
-`TrainingProfileSelectionOptions::enableExperimentalAllCoopmat = true` selects `KhrAllCoopmat` when the same KHR training profile is supported. This is intentionally opt-in until all-coopmat runtime numerical validation has passed on a device that can create and dispatch the training pipeline.
+`TrainingProfileSelectionOptions::enableKhrRecompute = true` is the default and selects `KhrRecompute` when the 32768-byte recompute shared-memory contract is supported. `TrainingProfileSelectionOptions::enableExperimentalAllCoopmat = true` selects legacy `KhrAllCoopmat` only when recompute is disabled and the 98304-byte legacy layout is supported.
 
 `TrainingProfileSelectionOptions::allowScalarReferenceFallback = true` allows `ScalarReference` when no allowed KHR training implementation can be selected. This is intended for tests, diagnostics, and bring-up paths. Production integrations should treat scalar fallback as an explicit debug/reference choice.
 
@@ -89,7 +91,7 @@ Stable diagnostic-name helpers are available for host logging:
 - `nrc::training_implementation_kind_name`
 - `nrc::training_profile_selection_status_name`
 
-They return ASCII tokens matching the public enum labels, such as `KhrGroundwork`, `ScalarReference`, and `MissingSharedMemory`.
+They return ASCII tokens matching the public enum labels, such as `KhrRecompute`, `ScalarReference`, and `MissingSharedMemory`.
 
 These diagnostics are capability-level only. They do not prove that a Vulkan device can create the selected shader pipeline or that numerical validation has passed.
 
@@ -117,7 +119,7 @@ NRC_KHR_COOPMAT_K
 
 This keeps profile selection and shader compilation synchronized as more matrix sizes are added.
 
-`nrc::compute_khr_shader_shared_memory_layout(config)` mirrors the KHR shader's shared-memory constants for a selected `ProfileShaderConfig`. It reports the current 98304-byte KHR backprop shared allocation, saved activation snapshot offsets, dPre/output scratch regions, and hidden dW partial-storage constraints. See `docs/khr_shared_memory_layout.md`.
+`nrc::compute_khr_shader_shared_memory_layout(config)` mirrors the KHR shader's shared-memory constants for a selected `ProfileShaderConfig`. It reports both the legacy 98304-byte KHR backprop shared allocation and the 32768-byte recompute allocation, saved activation snapshot offsets, dPre/output scratch regions, and hidden dW partial-storage constraints. See `docs/khr_shared_memory_layout.md`.
 
 The layout model also records a hidden-layer cooperative-matrix `dW` tile-streaming plan. The plan keeps one row block of fp16 `dPre` and one MxN partial tile per subgroup inside the active tile, preserving all saved activation snapshots for SG32, SG16, and M8/SG32 profiles.
 
@@ -136,9 +138,9 @@ Production KHR profiles require:
 - Matching subgroup size.
 - Matching FP16 subgroup cooperative matrix shape.
 - Float32 buffer atomic add when training is required.
-- `maxComputeSharedMemorySize` large enough for the KHR backprop shared-memory layout when training is required.
+- `maxComputeSharedMemorySize` large enough for the selected KHR backprop shared-memory layout when training is required.
 
-The current KHR training layout requires 98304 bytes of compute shared memory. This requirement is skipped when callers choose with `ProfileRequirements::requireTraining = false`, because the inference shader does not use the backprop shared allocation.
+The default recompute KHR training layout requires 32768 bytes of compute shared memory. Legacy non-recompute KHR training requires 98304 bytes. This requirement is skipped when callers choose with `ProfileRequirements::requireTraining = false`, because the inference shader does not use the backprop shared allocation.
 
 ## VkNRC-Compatible Layout
 

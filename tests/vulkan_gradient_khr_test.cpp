@@ -721,7 +721,9 @@ class VulkanKhrGradientRunner {
 public:
     VulkanKhrGradientRunner(const char *sg32SpirvPath,
                             const char *sg16SpirvPath,
-                            const char *m8Sg32SpirvPath) {
+                            const char *m8Sg32SpirvPath,
+                            bool useRecomputeBackprop = false)
+        : useRecomputeBackprop_(useRecomputeBackprop) {
         create_instance();
         pick_physical_device();
         create_device();
@@ -915,6 +917,7 @@ private:
         nrc::ProfileRequirements requirements{};
         requirements.requireTraining = true;
         requirements.allowReferenceBackend = false;
+        requirements.requireRecomputeTraining = useRecomputeBackprop_;
 
         for (VkPhysicalDevice device : devices) {
             VkPhysicalDeviceProperties properties{};
@@ -1075,6 +1078,7 @@ private:
         nrc::ProfileRequirements profileRequirements{};
         profileRequirements.requireTraining = true;
         profileRequirements.allowReferenceBackend = false;
+        profileRequirements.requireRecomputeTraining = useRecomputeBackprop_;
 
         nrc::vulkan::VulkanShaderModuleCreateInfo shaderCreateInfo{};
         shaderCreateInfo.device = device_;
@@ -1285,6 +1289,7 @@ private:
     std::uint32_t queueFamilyIndex_ = 0;
     const nrc::Profile *selectedProfile_ = nullptr;
     nrc::vulkan::VulkanDeviceCapabilities selectedCapabilities_{};
+    bool useRecomputeBackprop_ = false;
     PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR getCooperativeMatrixProperties_ = nullptr;
     VkDescriptorSetLayout descriptorSetLayout_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
@@ -1292,8 +1297,14 @@ private:
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
 };
 
-bool close_enough(float lhs, float rhs) {
-    const float tolerance = 1.0e-1f + 1.0e-1f * std::max(std::fabs(lhs), std::fabs(rhs));
+constexpr float kDefaultGradientAbsoluteTolerance = 1.0e-1f;
+constexpr float kFullCoopmatChainAbsoluteTolerance = 8.0e-1f;
+
+bool close_enough(float lhs,
+                  float rhs,
+                  float absoluteTolerance = kDefaultGradientAbsoluteTolerance) {
+    const float tolerance = absoluteTolerance +
+                            1.0e-1f * std::max(std::fabs(lhs), std::fabs(rhs));
     return std::fabs(lhs - rhs) <= tolerance;
 }
 
@@ -1329,6 +1340,8 @@ int main(int argc, char **argv) {
         argc == 5 && std::strcmp(argv[4], "--coopmat-all-dw") == 0;
     const bool useCoopmatAll =
         argc == 5 && std::strcmp(argv[4], "--coopmat-all") == 0;
+    const bool useRecompute =
+        argc == 5 && std::strcmp(argv[4], "--recompute") == 0;
     const bool useCoopmatFinalHiddenDActivation =
         argc == 5 && std::strcmp(argv[4], "--coopmat-final-hidden-da") == 0;
     const bool useCoopmatHidden3DActivation =
@@ -1341,10 +1354,11 @@ int main(int argc, char **argv) {
         argc == 5 && std::strcmp(argv[4], "--coopmat-all-da") == 0;
     if (argc != 4 && !useCoopmatOutput && !useCoopmatFinalHidden && !useCoopmatHidden3 &&
         !useCoopmatHidden2 && !useCoopmatHidden1 && !useCoopmatHidden0 &&
-        !useCoopmatAllDWeights && !useCoopmatAll && !useCoopmatFinalHiddenDActivation &&
+        !useCoopmatAllDWeights && !useCoopmatAll && !useRecompute &&
+        !useCoopmatFinalHiddenDActivation &&
         !useCoopmatHidden3DActivation && !useCoopmatHidden2DActivation &&
         !useCoopmatHidden1DActivation && !useCoopmatAllDActivation) {
-        std::cerr << "usage: nrc_vulkan_gradient_khr_test <sg32.spv> <sg16.spv> <m8_sg32.spv> [--coopmat-output|--coopmat-final-hidden|--coopmat-hidden3|--coopmat-hidden2|--coopmat-hidden1|--coopmat-hidden0|--coopmat-all-dw|--coopmat-final-hidden-da|--coopmat-hidden3-da|--coopmat-hidden2-da|--coopmat-hidden1-da|--coopmat-all-da|--coopmat-all]\n";
+        std::cerr << "usage: nrc_vulkan_gradient_khr_test <sg32.spv> <sg16.spv> <m8_sg32.spv> [--coopmat-output|--coopmat-final-hidden|--coopmat-hidden3|--coopmat-hidden2|--coopmat-hidden1|--coopmat-hidden0|--coopmat-all-dw|--coopmat-final-hidden-da|--coopmat-hidden3-da|--coopmat-hidden2-da|--coopmat-hidden1-da|--coopmat-all-da|--coopmat-all|--recompute]\n";
         return EXIT_FAILURE;
     }
 
@@ -1394,7 +1408,7 @@ int main(int argc, char **argv) {
                 make_expected_khr_all_coopmat_gradients(gpuVisibleWeights, trainRecords, 16u);
             expectedCoopmatSg32 =
                 make_expected_khr_all_coopmat_gradients(gpuVisibleWeights, trainRecords, 32u);
-        } else if (useCoopmatAll) {
+        } else if (useCoopmatAll || useRecompute) {
             expectedCoopmatSg16 =
                 make_expected_khr_all_dw_all_da_coopmat_gradients(gpuVisibleWeights, trainRecords, 16u);
             expectedCoopmatSg32 =
@@ -1515,7 +1529,7 @@ int main(int argc, char **argv) {
                 }
             }
         }
-        if (useCoopmatAll) {
+        if (useCoopmatAll || useRecompute) {
             if (!all_finite(expectedCoopmatSg16) || !all_finite(expectedCoopmatSg32)) {
                 throw std::runtime_error("KHR all-coopmat expected gradients contain non-finite values");
             }
@@ -1595,9 +1609,10 @@ int main(int argc, char **argv) {
         nrc::NrcQueueState queueState{};
         queueState.trainCounts[0] = kTrainCount;
 
-        VulkanKhrGradientRunner runner(argv[1], argv[2], argv[3]);
+        VulkanKhrGradientRunner runner(argv[1], argv[2], argv[3], useRecompute);
         if (useCoopmatOutput || useCoopmatFinalHidden || useCoopmatHidden3 || useCoopmatHidden2 ||
-            useCoopmatHidden1 || useCoopmatHidden0 || useCoopmatAllDWeights || useCoopmatAll) {
+            useCoopmatHidden1 || useCoopmatHidden0 || useCoopmatAllDWeights || useCoopmatAll ||
+            useRecompute) {
             const std::uint32_t selectedSubgroupSize = runner.selected_subgroup_size();
             if (selectedSubgroupSize == 16u) {
                 expectedGradients = expectedCoopmatSg16;
@@ -1623,7 +1638,14 @@ int main(int argc, char **argv) {
             const bool outputWeight =
                 i >= outputOffset && i < outputOffset + nrc::output_layer_weight_count();
             const float expected = coveredHiddenWeight || outputWeight ? expectedGradients[i] : 0.0f;
-            if (!close_enough(actualGradients[i], expected)) {
+            // The full KHR fp16 cooperative-matrix dW+dA chain is compared
+            // against a CPU oracle that cannot exactly model every vendor's
+            // fp16 matrix accumulation and ReLU-boundary behavior.
+            const float absoluteTolerance =
+                (useCoopmatAll || useRecompute)
+                    ? kFullCoopmatChainAbsoluteTolerance
+                    : kDefaultGradientAbsoluteTolerance;
+            if (!close_enough(actualGradients[i], expected, absoluteTolerance)) {
                 if (mismatchCount < 16u) {
                     std::cerr << "FAIL: gradient " << i
                               << " expected " << expected

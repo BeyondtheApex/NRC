@@ -36,7 +36,7 @@ The active activation tile is:
 1024 uvec4 * 16 bytes = 16384 bytes
 ```
 
-Backpropagation keeps six activation-sized regions:
+The legacy backpropagation layout keeps six activation-sized regions:
 
 ```text
 active tile                              [0,    1024)
@@ -47,13 +47,41 @@ earlier source snapshot                  [4096, 5120)
 oldest source snapshot                   [5120, 6144)
 ```
 
-The current KHR backprop shader therefore allocates:
+The legacy KHR backprop shader therefore allocates:
 
 ```text
 6144 uvec4 = 98304 bytes
 ```
 
-Vulkan capability query reports `maxComputeSharedMemorySize`, and KHR training profile support checks this value against the layout's `sharedBytes`. Inference-only profile selection skips this training-only backprop allocation.
+Vulkan capability query reports `maxComputeSharedMemorySize`, and KHR training profile support checks this value against the selected training implementation's shared-memory contract. Inference-only profile selection skips this training-only backprop allocation.
+
+## Recompute Training Layout
+
+`NRC_KHR_RECOMPUTE_BACKPROP=1` uses activation recompute instead of keeping every hidden activation snapshot resident. The shared allocation is:
+
+```text
+active tile  [0,    1024)
+source tile  [1024, 2048)
+
+2048 uvec4 = 32768 bytes
+```
+
+The active tile holds the current recomputed hidden activation until a helper stages fp16 `dPre` or per-tile partials into it. The source tile holds the source activation for the layer currently being reduced, then is reused as the fp16 `dA` output tile after that layer's `dW` has consumed the source activation.
+
+The recompute branch forces the full cooperative-matrix path:
+
+```text
+NRC_KHR_USE_COOPMAT_ALL_DW=1
+NRC_KHR_USE_COOPMAT_ALL_DA=1
+```
+
+This is not a scalar fallback and does not spill activations to global memory. It trades extra forward recompute work for a stable 32 KiB shared-memory upper bound. The host layout helper reports this through:
+
+```cpp
+required_training_shared_memory_bytes(profile, true) == 32768
+```
+
+Legacy training remains available for explicit experiments by disabling recompute in the training selection options; that path still requires 98304 bytes.
 
 ## Scratch Regions
 
@@ -130,7 +158,7 @@ All of these fit within the 1024-uvec4 active tile and end before the first acti
 
 The tradeoff is that the shader will need to stream/reduce tiles rather than keep full-layer partials resident in shared memory. This is the intended next implementation shape unless runtime profiling proves a larger profile-gated shared-memory layout is worthwhile.
 
-`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` is the first shader helper using this plan. It is compile-validated for every hidden-layer `dW` region, for the all-`dW` combined mode, and for the all-coopmat mode through explicit KHR gradient switches, with matching runtime validation entries and test-side CPU oracles; it is not yet the default gradient path.
+`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` is the shader helper using this plan. It is compile-validated for every hidden-layer `dW` region, for the all-`dW` combined mode, for the all-coopmat mode, and for the recompute training branch. In recompute mode it operates from a packed local activation copy plus the source tile so the active tile can be reused for row-block `dPre` and partial-tile scratch.
 
 ## Hidden dA Cooperative-Matrix Scratch
 
@@ -162,4 +190,4 @@ hidden1 -> hidden0:      NRC_KHR_BACKPROP_EARLIER_SOURCE_ACT_COPY_UVEC4_BASE
 
 This is safe for the currently wired propagation points because the corresponding hidden-layer `dW` accumulation has already consumed that layer's activation snapshot before the source derivative is produced.
 
-This path does not increase the 6144-uvec4 / 98304-byte KHR training shared-memory requirement. Every individual hidden-to-hidden `dA` propagation step now has an explicit switch using this reuse pattern, and `NRC_KHR_USE_COOPMAT_ALL_DA=1` chains all four steps together. Combining `NRC_KHR_USE_COOPMAT_ALL_DW=1` with `NRC_KHR_USE_COOPMAT_ALL_DA=1` also stays within the same layout because the `dW` helpers and `dA` helper reuse the active tile at different points in the backpropagation sequence. The all-`dA` and all-coopmat modes have compile/runtime-test wiring and CPU oracles for chained fp16 staging, but local GPU numerical execution still depends on a device satisfying the KHR training shared-memory gate.
+This path does not increase the legacy 6144-uvec4 / 98304-byte KHR training shared-memory requirement. Every individual hidden-to-hidden `dA` propagation step now has an explicit switch using this reuse pattern, and `NRC_KHR_USE_COOPMAT_ALL_DA=1` chains all four steps together. Combining `NRC_KHR_USE_COOPMAT_ALL_DW=1` with `NRC_KHR_USE_COOPMAT_ALL_DA=1` also stays within the same layout because the `dW` helpers and `dA` helper reuse the active tile at different points in the backpropagation sequence. The recompute branch uses the same `dA` helper but writes source derivatives into the 32 KiB source tile, avoiding the legacy activation-snapshot gate.

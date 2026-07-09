@@ -73,6 +73,16 @@
 #define NRC_KHR_USE_COOPMAT_HIDDEN1_DA NRC_KHR_USE_COOPMAT_ALL_DA
 #endif
 
+#ifndef NRC_KHR_RECOMPUTE_BACKPROP
+#define NRC_KHR_RECOMPUTE_BACKPROP 0
+#endif
+
+#if NRC_KHR_RECOMPUTE_BACKPROP
+#if !NRC_KHR_USE_COOPMAT_ALL_DW || !NRC_KHR_USE_COOPMAT_ALL_DA
+#error NRC_KHR_RECOMPUTE_BACKPROP requires NRC_KHR_USE_COOPMAT_ALL_DW=1 and NRC_KHR_USE_COOPMAT_ALL_DA=1.
+#endif
+#endif
+
 #ifndef NRC_NN_SET
 #define NRC_NN_SET NRC_GRADIENT_SET
 #endif
@@ -130,6 +140,116 @@ void NrcGradientKhrMain() {
         }
     }
 
+#if NRC_KHR_RECOMPUTE_BACKPROP
+    vec3 prediction;
+    NrcKhrForward(encoded, prediction);
+
+    float dOutput[NRC_NN_OUTPUT_WIDTH];
+    for (uint i = 0u; i < NRC_NN_OUTPUT_WIDTH; ++i) {
+        dOutput[i] = 0.0;
+    }
+    if (validTrainRecord) {
+        NrcKhrOutputDerivative(prediction, target, dOutput);
+    }
+
+    NrcKhrRecomputeHiddenActivationToSource(
+        encoded,
+        NRC_NN_HIDDEN_LAYER_COUNT - 1u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE);
+    NrcKhrAccumulateOutputDWeightsCoopmat(dOutput);
+
+    float dHidden4[NRC_NN_HIDDEN_WIDTH];
+    NrcKhrPropagateOutputDActivation(dOutput, dHidden4);
+
+    uvec4 activationScratch[NRC_ENCODED_INPUT_UVEC4_COUNT];
+
+    NrcKhrRecomputeHiddenActivationWithSource(
+        encoded,
+        NRC_NN_HIDDEN_LAYER_COUNT - 1u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE);
+    NrcKhrLoadBackpropActivationToLocalPacked(0u, activationScratch);
+    NrcKhrAccumulateHiddenDWeightsCoopmatTileStreamingFromPackedLocal(
+        NRC_NN_HIDDEN_LAYER_COUNT - 1u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE,
+        activationScratch,
+        dHidden4);
+
+    float dHidden3[NRC_NN_HIDDEN_WIDTH];
+    NrcKhrPropagateHiddenDActivationCoopmatFromPackedLocal(
+        NRC_NN_HIDDEN_LAYER_COUNT - 1u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE,
+        activationScratch,
+        dHidden4,
+        dHidden3);
+
+    NrcKhrRecomputeHiddenActivationWithSource(
+        encoded,
+        NRC_NN_HIDDEN_LAYER_COUNT - 2u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE);
+    NrcKhrLoadBackpropActivationToLocalPacked(0u, activationScratch);
+    NrcKhrAccumulateHiddenDWeightsCoopmatTileStreamingFromPackedLocal(
+        NRC_NN_HIDDEN_LAYER_COUNT - 2u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE,
+        activationScratch,
+        dHidden3);
+
+    float dHidden2[NRC_NN_HIDDEN_WIDTH];
+    NrcKhrPropagateHiddenDActivationCoopmatFromPackedLocal(
+        NRC_NN_HIDDEN_LAYER_COUNT - 2u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE,
+        activationScratch,
+        dHidden3,
+        dHidden2);
+
+    NrcKhrRecomputeHiddenActivationWithSource(
+        encoded,
+        NRC_NN_HIDDEN_LAYER_COUNT - 3u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE);
+    NrcKhrLoadBackpropActivationToLocalPacked(0u, activationScratch);
+    NrcKhrAccumulateHiddenDWeightsCoopmatTileStreamingFromPackedLocal(
+        NRC_NN_HIDDEN_LAYER_COUNT - 3u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE,
+        activationScratch,
+        dHidden2);
+
+    float dHidden1[NRC_NN_HIDDEN_WIDTH];
+    NrcKhrPropagateHiddenDActivationCoopmatFromPackedLocal(
+        NRC_NN_HIDDEN_LAYER_COUNT - 3u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE,
+        activationScratch,
+        dHidden2,
+        dHidden1);
+
+    NrcKhrRecomputeHiddenActivationWithSource(
+        encoded,
+        NRC_NN_HIDDEN_LAYER_COUNT - 4u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE);
+    NrcKhrLoadBackpropActivationToLocalPacked(0u, activationScratch);
+    NrcKhrAccumulateHiddenDWeightsCoopmatTileStreamingFromPackedLocal(
+        NRC_NN_HIDDEN_LAYER_COUNT - 4u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE,
+        activationScratch,
+        dHidden1);
+
+    float dHidden0[NRC_NN_HIDDEN_WIDTH];
+    NrcKhrPropagateHiddenDActivationCoopmatFromPackedLocal(
+        NRC_NN_HIDDEN_LAYER_COUNT - 4u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE,
+        activationScratch,
+        dHidden1,
+        dHidden0);
+
+    NrcKhrRecomputeHiddenActivationWithSource(
+        encoded,
+        0u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE);
+    NrcKhrLoadBackpropActivationToLocalPacked(0u, activationScratch);
+    NrcKhrAccumulateHiddenDWeightsCoopmatTileStreamingFromPackedLocal(
+        0u,
+        NRC_KHR_RECOMPUTE_SOURCE_ACT_COPY_UVEC4_BASE,
+        activationScratch,
+        dHidden0);
+#else
     NrcKhrLoadInput(encoded);
     for (uint layer = 0u; layer < NRC_NN_HIDDEN_LAYER_COUNT - 4u; ++layer) {
         NrcKhrLoadHiddenWeights(layer);
@@ -286,6 +406,7 @@ void NrcGradientKhrMain() {
                                   encoded);
     NrcKhrAccumulateSharedHiddenDWeightsSubgroup(0u,
                                                  NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE);
+#endif
 #endif
 }
 

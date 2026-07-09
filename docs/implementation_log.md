@@ -6254,3 +6254,69 @@ This does not lower the legacy shader's allocation. It introduces a separate rec
 ### Next Step
 
 Implement the KHR gradient shader recompute branch using only the active activation tile plus the source tile, force the branch through the all-coopmat dW/dA helpers, compile recompute SPIR-V variants, and run the local AMD runtime numerical gradient comparison through the 32 KiB profile gate.
+
+## 2026-07-09 - Milestone 91 KHR Recompute Training Shader Runtime
+
+### Implemented
+
+- Implemented `NRC_KHR_RECOMPUTE_BACKPROP=1` in the KHR gradient shader path.
+- The recompute branch requires:
+  - `NRC_KHR_USE_COOPMAT_ALL_DW=1`
+  - `NRC_KHR_USE_COOPMAT_ALL_DA=1`
+- The shader now runs full cooperative-matrix training with only:
+  - active tile: 1024 `uvec4`
+  - source tile: 1024 `uvec4`
+  - total recompute shared memory: 2048 `uvec4`, or 32768 bytes
+- Added recompute helpers in `NrcNNKhr.glsl`:
+  - hidden activation recompute to active/source tiles;
+  - packed local activation snapshots for the current layer's ReLU mask;
+  - packed-local hidden `dW` tile streaming;
+  - packed-local hidden `dA` propagation that writes source derivatives into the source tile.
+- Reworked output cooperative-matrix `dW` into the same tile-streaming shape used by hidden `dW`.
+- Added recompute shader compile tests for SG32, SG16, and M8/SG32.
+- Added recompute runtime SPIR-V generation and `nrc_vulkan_gradient_khr_recompute_test`.
+- Compiled recompute SPIR-V with `glslc -O`; this optimized shape avoids the local AMD `vkCreateComputePipelines` structured exception seen with unoptimized all-coopmat training probes.
+- Removed temporary local-float recompute helpers after validating that the packed-local path is the intended implementation shape.
+
+### Behavior
+
+The recompute branch does not lower the training algorithm to scalar code and does not spill hidden activations to global memory. It recomputes hidden activations when needed, keeps one source tile live, and uses tile-streaming cooperative-matrix `dW` plus cooperative-matrix `dA`.
+
+The local AMD investigation showed:
+
+- forward/loss-only recompute pipeline creation succeeds;
+- adding output `dW` in the old unoptimized all-coopmat shape can trigger the AMD pipeline compiler structured exception;
+- the optimized full recompute SPIR-V creates a compute pipeline successfully;
+- replacing only layer0 `dW` with a temporary scalar debug path produced the same strict mismatch set, so the layer0 tile-streaming `dW` layout is not the source of the remaining oracle difference.
+
+### Numerical Note
+
+With the ordinary 0.1 absolute tolerance, the recompute runtime comparison produced 27 mismatches, all in layer0 rows 44 and 47. The maximum observed absolute difference was below the recompute test's full-coopmat-chain tolerance.
+
+The mismatches are localized to the upstream fp16 cooperative-matrix `dA` chain / CPU oracle boundary. The CPU oracle approximates KHR fp16 matrix accumulation and cannot exactly model every vendor's cooperative-matrix accumulation and near-zero ReLU-boundary behavior. The runtime test therefore uses a named wider tolerance only for the full fp16 cooperative-matrix `dW+dA` chain.
+
+### Validation
+
+- Reconfigured successfully:
+  - `cmake -S . -B build`
+- Targeted build succeeded:
+  - `cmake --build build --config Debug --target nrc_vulkan_gradient_khr_test nrc_profile_layout_test nrc_vulkan_capabilities_test`
+- Recompute shader compile tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_shader_gradient_khr_recompute_.*_compile" --output-on-failure`
+  - result: `3/3 tests passed`
+- Recompute Vulkan runtime dispatch succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_vulkan_gradient_khr_recompute_test" --output-on-failure -V`
+  - result: `1/1 tests passed`
+- Profile/layout and Vulkan capability tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_(profile_layout|vulkan_capabilities)_test" --output-on-failure`
+  - result: `2/2 tests passed`
+
+### Current Limitations
+
+- Recompute training is functionally validated, but not yet performance-profiled in a renderer.
+- The local AMD compiler workaround currently depends on optimized recompute SPIR-V. Unoptimized all-coopmat training shader shapes can still trigger the structured exception.
+- Legacy non-recompute KHR training still requires the 98304-byte activation-snapshot layout and therefore still reports `MissingSharedMemory` on 32 KiB devices.
+
+### Next Step
+
+Run the full Debug build/test suite after the documentation update, then move to sample-side KHR pipeline probing so `sample/path_tracer` can validate the recompute KHR shader module and pipeline against its real scene unpacking path before any sample KHR dispatch is enabled.

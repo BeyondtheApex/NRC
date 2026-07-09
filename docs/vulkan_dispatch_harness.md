@@ -41,6 +41,9 @@ Milestone 7 adds the first GPU runtime validation path. The harness is intention
 - Optional KHR all-dW-coopmat gradient mode:
   - `nrc_vulkan_gradient_khr_coopmat_all_dw_test`
   - SPIR-V variants compiled with `NRC_KHR_USE_COOPMAT_ALL_DW=1`
+- KHR recompute all-coopmat gradient mode:
+  - `nrc_vulkan_gradient_khr_recompute_test`
+  - SPIR-V variants compiled with `NRC_KHR_RECOMPUTE_BACKPROP=1`, `NRC_KHR_USE_COOPMAT_ALL_DW=1`, and `NRC_KHR_USE_COOPMAT_ALL_DA=1`
 - Scalar inference test file:
   - `tests/vulkan_inference_scalar_test.cpp`
 - Scalar inference shader wrapper:
@@ -58,7 +61,7 @@ The scalar test dispatches one invocation per sample and compares the GPU result
 
 The KHR test dispatches one 128-wide workgroup tile per sample block. It first validates the selected KHR profile at device and pipeline creation time, then compares against an fp16-rounded CPU reference if the driver successfully creates and runs the pipeline.
 
-The KHR gradient test selects a KHR training profile, which additionally requires fp32 storage-buffer atomic add, subgroup arithmetic, and enough compute shared memory for the current KHR backprop layout. If the driver successfully creates the profile pipeline, it dispatches the KHR train-record gradient pass over a 197-record batch spanning two 128-wide workgroups with a partial final workgroup and compares the gradient buffer against the selected CPU oracle. The optional output-coopmat, final-hidden-coopmat, hidden-layer-3-coopmat, hidden-layer-2-coopmat, hidden-layer-1-coopmat, and hidden-layer-0-coopmat modes replace only the corresponding region in the expected gradient buffer, with expected partials rounded per subgroup within each workgroup before fp32 gradient accumulation. The optional all-dW-coopmat mode replaces every hidden/output `dW` region in the expected buffer.
+The KHR gradient test selects a KHR training profile, which additionally requires fp32 storage-buffer atomic add, subgroup arithmetic, and enough compute shared memory for the selected KHR backprop layout. If the driver successfully creates the profile pipeline, it dispatches the KHR train-record gradient pass over a 197-record batch spanning two 128-wide workgroups with a partial final workgroup and compares the gradient buffer against the selected CPU oracle. The optional output-coopmat, final-hidden-coopmat, hidden-layer-3-coopmat, hidden-layer-2-coopmat, hidden-layer-1-coopmat, and hidden-layer-0-coopmat modes replace only the corresponding region in the expected gradient buffer, with expected partials rounded per subgroup within each workgroup before fp32 gradient accumulation. The optional all-dW-coopmat mode replaces every hidden/output `dW` region in the expected buffer. The recompute mode uses the 32768-byte active-tile-plus-source-tile layout and full cooperative-matrix `dW+dA`.
 
 The scalar inference test dispatches `NrcInferenceScalar.glsl` against real storage images and a flat train-record buffer. It verifies queue destination decoding and `bias + factor * prediction` writes for both screen and train destinations.
 
@@ -91,7 +94,8 @@ KHR-specific behavior:
 - The KHR shader module is created through `nrc::vulkan::create_shader_module` and fed into `nrc::vulkan::evaluate_vulkan_profile_validation`.
 - The KHR pipeline is created through `nrc::vulkan::create_profile_compute_pipeline`, which applies the selected subgroup size and full compute subgroup requirements from `ProfileShaderConfig`.
 - On MSVC/Windows, the test catches structured exceptions from `vkCreateComputePipelines` and reports a controlled `SKIP:`. This is needed because the current local AMD driver advertises the profile but raises an exception while compiling the VkNRC-style KHR cooperative matrix shader.
-- The KHR gradient runtime tests use the same profile pipeline path with `ProfileRequirements::requireTraining = true`; on the current local AMD driver the default gradient path, optional output-coopmat path, optional hidden/output all-dW-coopmat paths, optional hidden-to-hidden dA-coopmat paths, all-dA-coopmat path, and all-coopmat path report a controlled profile-selection `SKIP:` because no implemented KHR training profile satisfies the current 98304-byte shared-memory requirement.
+- The legacy non-recompute KHR gradient runtime tests use the same profile pipeline path with `ProfileRequirements::requireTraining = true`; on the current local AMD driver those variants report a controlled profile-selection `SKIP:` because no implemented legacy KHR training profile satisfies the 98304-byte shared-memory requirement.
+- The recompute KHR gradient runtime test selects the 32768-byte KHR recompute profile, creates the optimized pipeline, dispatches, and compares gradients successfully on the local AMD device.
 - Reusable runtime diagnostics now live in `nrc::vulkan::evaluate_vulkan_profile_validation`, training plan aggregation lives in `nrc::vulkan::make_vulkan_training_profile_plan` and `make_vulkan_training_profile_plan_with_runtime_fallback`, shader module creation lives in `nrc::vulkan::create_shader_module`, descriptor helpers live in `nrc::vulkan::create_descriptor_set_layout`, `create_storage_buffer_descriptor_set_layout`, `update_storage_buffer_descriptors`, and `update_storage_image_descriptors`, memory barriers live in `nrc::vulkan::cmd_memory_barrier`, plain compute pipeline creation lives in `nrc::vulkan::create_compute_pipeline`, and profile-aware compute pipeline creation lives in `nrc::vulkan::create_profile_compute_pipeline`. The dispatch harness still owns shader file loading, descriptor pools/sets, dispatch, and numerical comparison.
 
 Inference-specific behavior:
@@ -114,7 +118,7 @@ Training/queue-specific behavior:
 
 The same pattern should be reused for:
 
-- KHR cooperative matrix numerical validation on devices that can create and run the selected implemented profile pipelines.
+- KHR cooperative matrix performance validation and sample integration using the recompute training profile.
 - Reference path tracer integration using the validated scalar inference pass.
 - Regression tests for future backend layout changes.
 

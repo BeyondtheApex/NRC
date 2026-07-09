@@ -44,10 +44,11 @@ selection can still be requested with `ProfileRequirements::requireTraining =
 false`.
 
 `maxComputeSharedMemorySize` is read from
-`VkPhysicalDeviceProperties::limits.maxComputeSharedMemorySize`. Current KHR
-training profiles compare it against the host-side KHR shader shared-memory
-layout. The active backprop layout requires 98304 bytes, while inference-only
-selection does not require that training allocation.
+`VkPhysicalDeviceProperties::limits.maxComputeSharedMemorySize`. KHR training
+profiles compare it against the selected host-side KHR shader shared-memory
+layout. The default recompute backprop layout requires 32768 bytes; legacy
+non-recompute training still requires 98304 bytes. Inference-only selection
+does not require either training allocation.
 
 ## Cooperative Matrix Translation
 
@@ -113,14 +114,15 @@ nrc::TrainingProfileSelection selection =
     nrc::choose_training_profile(caps.view(), options);
 ```
 
-The default selection chooses the supported KHR training shader profile but keeps the current KHR groundwork gradient behavior. Enabling `enableExperimentalAllCoopmat` selects the same KHR profile with both all-coopmat compile switches requested:
+The default selection chooses the supported KHR recompute training shader profile. It requests activation recompute plus both all-coopmat compile switches:
 
 ```text
+NRC_KHR_RECOMPUTE_BACKPROP=1
 NRC_KHR_USE_COOPMAT_ALL_DW=1
 NRC_KHR_USE_COOPMAT_ALL_DA=1
 ```
 
-The selection carries the decisive KHR `ProfileSupportReport`, so integrations can log why a device rejected KHR training, such as missing subgroup arithmetic, missing matrix shape, or insufficient `maxComputeSharedMemorySize`. Scalar fallback is available only when `allowScalarReferenceFallback` is set.
+Legacy KHR groundwork/all-coopmat selection remains available by setting `enableKhrRecompute = false`; those paths use the 98304-byte shared-memory contract. The selection carries the decisive KHR `ProfileSupportReport`, so integrations can log why a device rejected KHR training, such as missing subgroup arithmetic, missing matrix shape, or insufficient `maxComputeSharedMemorySize`. Scalar fallback is available only when `allowScalarReferenceFallback` is set.
 
 `nrc::vulkan::make_vulkan_training_profile_plan` combines the renderer-neutral selection with a shader compile config and a Vulkan validation report:
 
@@ -135,7 +137,7 @@ nrc::vulkan::VulkanTrainingProfilePlan plan =
     nrc::vulkan::make_vulkan_training_profile_plan(caps, options, validation);
 ```
 
-`plan.shaderCompile` is the integration-facing shader plan. For KHR profiles it carries the selected workgroup size, subgroup size, cooperative matrix shape, full-subgroup requirement, and all-coopmat switches. `plan.usable` is true only when a training profile was selected, the shader compile config is valid, and the requested Vulkan validation stages are usable.
+`plan.shaderCompile` is the integration-facing shader plan. For KHR profiles it carries the selected workgroup size, subgroup size, cooperative matrix shape, full-subgroup requirement, all-coopmat switches, and the recompute switch. `plan.usable` is true only when a training profile was selected, the shader compile config is valid, and the requested Vulkan validation stages are usable.
 
 If an integration wants explicit scalar fallback after a KHR shader module, pipeline, or numerical validation failure, use `make_vulkan_training_profile_plan_with_runtime_fallback`:
 
@@ -172,7 +174,7 @@ For integration logs, use:
 - `nrc::vulkan::vulkan_validation_step_status_name(plan.validation.pipelineCreation.status)`
 - `nrc::vulkan::vulkan_profile_validation_status_name(plan.fallbackSourceValidation.status)` when `plan.usedRuntimeFallback` is true.
 
-The helpers return stable ASCII enum tokens such as `KhrGroundwork`, `SelectedScalarReference`, `MissingSharedMemory`, and `PipelineCreationFailed`.
+The helpers return stable ASCII enum tokens such as `KhrRecompute`, `SelectedScalarReference`, `MissingSharedMemory`, and `PipelineCreationFailed`.
 
 ## Shader Module Helper
 

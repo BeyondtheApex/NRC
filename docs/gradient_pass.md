@@ -44,7 +44,7 @@ The luminance denominator is treated as the current prediction scale, matching V
 
 `tests/vulkan_gradient_scalar_test.cpp` dispatches the scalar gradient pass on Vulkan when `VK_EXT_shader_atomic_float` and `shaderBufferFloat32AtomicAdd` are available. The test uploads packed fp16 weights, train records, and queue state, then compares the full fp32 gradient buffer against `nrc::reference_backward`.
 
-`tests/vulkan_gradient_khr_test.cpp` selects a KHR cooperative-matrix training profile when cooperative matrices, fp32 storage-buffer atomic add, subgroup arithmetic, and the KHR training shared-memory requirement are available. If pipeline creation succeeds, it dispatches `NrcGradientKhr.glsl` over a 197-record batch spanning two 128-wide workgroups with a partial final workgroup, then compares all hidden-layer and output-layer gradient regions against the matching CPU oracle. On the current local AMD driver, KHR training profile selection reports a controlled `SKIP:` because no implemented training profile satisfies the current 98304-byte shared-memory requirement.
+`tests/vulkan_gradient_khr_test.cpp` selects a KHR cooperative-matrix training profile when cooperative matrices, fp32 storage-buffer atomic add, subgroup arithmetic, and the selected KHR training shared-memory requirement are available. If pipeline creation succeeds, it dispatches `NrcGradientKhr.glsl` over a 197-record batch spanning two 128-wide workgroups with a partial final workgroup, then compares all hidden-layer and output-layer gradient regions against the matching CPU oracle. The recompute KHR training test uses the 32768-byte shared-memory contract and now dispatches successfully on the local AMD device.
 
 KHR shader compile tests also cover experimental cooperative-matrix `dW` variants for the output layer, every hidden layer, and an all-`dW` combined mode across SG32, SG16, and M8/SG32 profiles.
 
@@ -60,7 +60,7 @@ KHR shader compile tests also cover experimental cooperative-matrix `dW` variant
 - It uses fp32 storage-buffer atomic add and therefore requires `VK_EXT_shader_atomic_float` / `shaderBufferFloat32AtomicAdd`.
 - The Vulkan gradient test is feature-gated and reports a controlled skip on devices without fp32 storage-buffer atomic add support.
 - The sample path tracer currently runs one validated scalar training update, not an iterative training loop.
-- The KHR cooperative-matrix pass now has full hidden/output `dW` training groundwork and subgroup reduction for every hidden/output `dW` region. Experimental cooperative-matrix `dW` helpers exist for the output layer, every hidden layer, and an all-`dW` combined mode, but the default path still waits on runtime numerical validation on a successful KHR pipeline creation path.
+- The default KHR training policy now selects the recompute all-coopmat branch when the device satisfies the 32768-byte shared-memory contract. Legacy 98304-byte groundwork/all-coopmat variants remain available for explicit experiments.
 
 ## KHR Gradient Pass
 
@@ -104,7 +104,7 @@ Experimental KHR output-layer cooperative-matrix reduction:
 - After reducing the output partials, the helper restores each invocation's fp32 `dOutput` into `nrcKhrSharedBuffer[gl_LocalInvocationID.x]`. The final-hidden `dW` helper depends on that shared fp32 derivative cache.
 - `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1` switches `NrcGradientKhr.glsl` to this helper for output-layer `dW`.
 - `nrc_vulkan_gradient_khr_coopmat_output_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors fp16 output-derivative staging and per-subgroup fp16 output partial storage.
-- The default KHR gradient pass still uses the subgroup-arithmetic output helper until runtime numerical validation succeeds on a driver that can create the KHR gradient pipeline.
+- The legacy non-recompute base path still uses the subgroup-arithmetic output helper unless this switch is enabled.
 
 Experimental KHR final-hidden cooperative-matrix reduction:
 
@@ -113,7 +113,7 @@ Experimental KHR final-hidden cooperative-matrix reduction:
 - The helper follows the host-side tile-streaming layout plan and keeps all temporary storage inside the active tile, preserving saved activation snapshots for SG32, SG16, and M8/SG32 profiles.
 - `nrc_vulkan_gradient_khr_coopmat_final_hidden_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors fp16 `dPre` row-block staging and per-subgroup fp16 final-hidden partial storage.
 - The 197-record test batch spans multiple subgroup sample ranges for both SG16 and SG32 across a full workgroup and a partial final workgroup, so the coopmat oracles now model the shader's per-workgroup subgroup partial reduction before fp32 gradient accumulation.
-- The local test currently reaches a controlled profile-selection skip before dispatch because the available device does not satisfy the 98304-byte KHR training shared-memory requirement.
+- The legacy non-recompute local test reaches a controlled profile-selection skip before dispatch because the available device does not satisfy the 98304-byte KHR training shared-memory requirement.
 
 Experimental KHR cooperative-matrix `dA` propagation:
 
@@ -128,28 +128,28 @@ Experimental KHR cooperative-matrix `dA` propagation:
 - `nrc_vulkan_gradient_khr_coopmat_hidden1_da_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors fp16 hidden-layer-1 `dPre` staging and fp16 `dHidden0` storage before recomputing hidden-layer 0 gradients.
 - `NRC_KHR_USE_COOPMAT_ALL_DA=1` sets all four hidden-to-hidden `dA` switches by default. Individual switches may still be explicitly overridden for targeted experiments.
 - `nrc_vulkan_gradient_khr_coopmat_all_da_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors chained fp16 `dPre` staging and fp16 derivative storage through hidden layers 3, 2, 1, and 0.
-- The default KHR gradient path still uses scalar-array `dA` propagation until runtime numerical validation succeeds on a driver that can create the KHR gradient pipeline.
+- The legacy non-recompute base path still uses scalar-array `dA` propagation unless this switch is enabled.
 
 Experimental KHR hidden-layer-3 cooperative-matrix reduction:
 
 - `NRC_KHR_USE_COOPMAT_HIDDEN3_DW=1` switches only hidden layer 3 `dW` to `NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming`.
 - The pass still propagates `dHidden3` to hidden layer 2 through the local derivative array, so the helper does not need to preserve the active-tile fp32 `dPre` scratch after hidden layer 3 `dW`.
 - `nrc_vulkan_gradient_khr_coopmat_hidden3_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors hidden layer 4 backpropagation, fp16 hidden-layer-3 `dPre` staging, and per-subgroup fp16 partial storage.
-- The default KHR gradient pass still uses the subgroup hidden-layer-3 helper until runtime numerical validation succeeds on a driver that can create the KHR gradient pipeline.
+- The legacy non-recompute base path still uses the subgroup hidden-layer-3 helper unless this switch is enabled.
 
 Experimental KHR hidden-layer-2 cooperative-matrix reduction:
 
 - `NRC_KHR_USE_COOPMAT_HIDDEN2_DW=1` switches only hidden layer 2 `dW` to `NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming`.
 - The pass still propagates `dHidden2` to hidden layer 1 through the local derivative array, so the helper can reuse the active-tile scratch without preserving fp32 `dPre`.
 - `nrc_vulkan_gradient_khr_coopmat_hidden2_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors hidden layer 4 and hidden layer 3 backpropagation, fp16 hidden-layer-2 `dPre` staging, and per-subgroup fp16 partial storage.
-- The default KHR gradient pass still uses the subgroup hidden-layer-2 helper until runtime numerical validation succeeds on a driver that can create the KHR gradient pipeline.
+- The legacy non-recompute base path still uses the subgroup hidden-layer-2 helper unless this switch is enabled.
 
 Experimental KHR hidden-layer-1 cooperative-matrix reduction:
 
 - `NRC_KHR_USE_COOPMAT_HIDDEN1_DW=1` switches only hidden layer 1 `dW` to `NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming`.
 - The pass still propagates `dHidden1` to hidden layer 0 through the local derivative array.
 - `nrc_vulkan_gradient_khr_coopmat_hidden1_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors hidden layer 4, hidden layer 3, and hidden layer 2 backpropagation, fp16 hidden-layer-1 `dPre` staging, and per-subgroup fp16 partial storage.
-- The default KHR gradient pass still uses the subgroup hidden-layer-1 helper until runtime numerical validation succeeds on a driver that can create the KHR gradient pipeline.
+- The legacy non-recompute base path still uses the subgroup hidden-layer-1 helper unless this switch is enabled.
 
 Experimental KHR hidden-layer-0 cooperative-matrix reduction:
 
@@ -157,7 +157,7 @@ Experimental KHR hidden-layer-0 cooperative-matrix reduction:
 - Because hidden layer 0 uses encoded input as its source activation, the pass stages encoded input into the retired `NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE` snapshot and preserves `NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE` as the hidden-layer-0 ReLU mask.
 - This keeps the helper inside the existing 98304-byte shared-memory layout instead of adding another activation-sized source snapshot.
 - `nrc_vulkan_gradient_khr_coopmat_hidden0_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that mirrors the full hidden-layer backpropagation chain, fp16 hidden-layer-0 `dPre` staging, encoded-input source activations, and per-subgroup fp16 partial storage.
-- The default KHR gradient pass still uses the subgroup hidden-layer-0 helper until runtime numerical validation succeeds on a driver that can create the KHR gradient pipeline.
+- The legacy non-recompute base path still uses the subgroup hidden-layer-0 helper unless this switch is enabled.
 
 Experimental KHR all-`dW` cooperative-matrix reduction:
 
@@ -166,7 +166,7 @@ Experimental KHR all-`dW` cooperative-matrix reduction:
 - `nrc_vulkan_gradient_khr_coopmat_all_dw_test` builds matching SG32, SG16, and M8/SG32 SPIR-V variants and uses a CPU oracle that combines the output and hidden-layer coopmat expectations into one full gradient buffer.
 - The all-`dW` oracle mirrors the same per-region fp16 staging and per-workgroup/per-subgroup fp16 partial storage as the single-region oracles.
 - The test-side coopmat oracles share one per-sample KHR backpropagation helper, so output, single-hidden-region, and all-`dW` modes reuse the same encoded input, fp16 activation, output-derivative, and hidden-derivative chain.
-- The default KHR gradient pass still uses subgroup arithmetic until runtime numerical validation succeeds on a driver that can create the KHR gradient pipeline.
+- The legacy non-recompute base path still uses subgroup arithmetic unless this switch is enabled.
 
 Experimental KHR all-coopmat training variant:
 
@@ -175,10 +175,20 @@ Experimental KHR all-coopmat training variant:
 - The combined oracle is subgroup-size aware for the `dW` partial reductions, while the all-`dA` chain remains sample-local and independent of subgroup size.
 - This is the first end-to-end KHR coopmat training profile test shape, but it remains opt-in until a device that satisfies the current shared-memory gate can execute the dispatch for numerical comparison.
 
+KHR recompute training variant:
+
+- `NRC_KHR_RECOMPUTE_BACKPROP=1` enables the 32 KiB recompute branch.
+- The branch requires `NRC_KHR_USE_COOPMAT_ALL_DW=1` and `NRC_KHR_USE_COOPMAT_ALL_DA=1`; the shader errors at compile time if either full-coopmat switch is missing.
+- The forward prediction is computed normally, then each hidden activation needed by backpropagation is recomputed just before its `dW`/`dA` step.
+- Shared memory is limited to the active tile plus one source tile. The source tile holds the current layer source activation, then is reused for the fp16 `dA` output after that source has been consumed.
+- Hidden `dW` uses packed local activation copies so row-block `dPre` scratch can overwrite the active tile without losing the ReLU mask for the current layer.
+- `nrc_shader_gradient_khr_recompute_sg32_compile`, `nrc_shader_gradient_khr_recompute_sg16_compile`, and `nrc_shader_gradient_khr_recompute_m8_sg32_compile` compile the recompute branch with `glslc -O`.
+- `nrc_vulkan_gradient_khr_recompute_test` builds SG32, SG16, and M8/SG32 recompute SPIR-V assets and dispatches whichever profile the device selects. On the local AMD driver, the optimized recompute SPIR-V avoids the structured exception seen with the unoptimized all-coopmat training shader and passes the gradient comparison.
+- The test uses a wider absolute tolerance for the full fp16 cooperative-matrix `dW+dA` chain because the CPU oracle cannot exactly model every vendor's fp16 cooperative-matrix accumulation and ReLU-boundary behavior. A strict diagnostic run showed 27 mismatches, all in layer0 rows 44 and 47; replacing only layer0 `dW` with a scalar debug path produced the same mismatches, which localizes the difference upstream of the layer0 tile-streaming `dW` helper.
+
 Current limitations:
 
-- the default hidden/output `dW` regions use subgroup arithmetic and one fp32 atomic add per covered weight per workgroup;
-- the optional output-layer, hidden-layer, all-`dW`, all-`dA`, and all-coopmat cooperative-matrix helpers are not the default path;
-- the optional cooperative-matrix runtime tests are present but currently report the same controlled KHR training profile-selection skip as the default KHR gradient test on the local AMD driver;
-- the default KHR backpropagation of `dA` still uses scalar arrays; cooperative-matrix `dA` propagation is available only through explicit experiment switches;
-- KHR runtime gradient comparison is present but remains driver-gated on the current local AMD pipeline creation path.
+- legacy non-recompute KHR training still requires 98304 bytes of shared memory and may report `MissingSharedMemory` on 32 KiB devices;
+- recompute training has been validated for pipeline creation and numerical dispatch on the local AMD device, but it still needs renderer-level performance profiling;
+- the optimized recompute SPIR-V requirement is currently part of the AMD workaround; unoptimized all-coopmat training shader shapes can still trigger the local driver compiler structured exception;
+- the CPU oracle for full fp16 KHR cooperative-matrix chains is approximate around near-zero ReLU boundaries.

@@ -63,10 +63,10 @@ Before recording commands, the sample builds a `nrc::vulkan::VulkanTrainingProfi
 8. Copy the resolved screen image back to the CPU and read back train records, gradients, optimizer entries, and packed weights.
 9. Write a tone-mapped binary PPM image from the resolved screen readback.
 
-The training plan is currently diagnostic/integration-facing. The sample explicitly allows scalar reference fallback, prints the selected implementation, selection status, validation status, and KHR support reason, validates that a compile config exists, and still executes the scalar training shaders. The sample also compile-validates a KHR gradient wrapper for the SG32, SG16, and M8/SG32 training profiles so a later pipeline probe can use sample-scene train-record unpacking instead of the test-only fake unpack hook. On the current local machine this reports scalar reference fallback because KHR training is blocked by the cooperative-matrix training shared-memory requirement:
+The training plan is currently diagnostic/integration-facing. The sample explicitly allows scalar reference fallback, prints the selected implementation, selection status, validation status, and KHR support reason, validates that a compile config exists, and still executes the scalar training shaders. The sample also compile-validates a KHR gradient wrapper for the SG32, SG16, and M8/SG32 training profiles so a later pipeline probe can use sample-scene train-record unpacking instead of the test-only fake unpack hook. On the current local machine the host-side plan can select KHR recompute training, while active sample execution remains scalar:
 
 ```text
-NRC training plan: implementation=ScalarReference, selection=SelectedScalarReference, profile=SCALAR_REFERENCE_WG64, validation=Supported, khr_support=MissingSharedMemory, plan usable=true, active sample execution=scalar.
+NRC training plan: implementation=KhrRecompute, selection=SelectedKhrRecompute, profile=KHR_FP16_M16N16K16_SG32_WG128, validation=Supported, khr_support=Supported, plan usable=true, active sample execution=scalar.
 ```
 
 The producer traces one primary ray for every `4x4` pixel, emits a screen eval record for each hit, reserves two train records in batch 0, and emits one train eval record targeting those records. Train-record bias and factor values come from a deterministic direct-lighting payload over the traced sample scene hit.
@@ -135,7 +135,7 @@ Memory and image barriers are recorded through `nrc::vulkan::cmd_memory_barrier`
 - Training records use deterministic direct lighting, not real multi-bounce path-traced samples.
 - Buffer/image copy helpers and resource allocation remain sample-local.
 - KHR cooperative matrix inference is not used because KHR pipeline creation is driver-gated on the current AMD machine.
-- Training plan selection is wired for integration diagnostics, but execution still uses the scalar correctness path rather than a production-performance KHR cooperative-matrix backend.
+- Training plan selection is wired for integration diagnostics, but execution still uses the scalar correctness path rather than the recompute KHR cooperative-matrix backend.
 - KHR training shader assets are compiled for the sample scene, but no KHR training pipeline probe or dispatch is active yet.
 
 ## Next Steps

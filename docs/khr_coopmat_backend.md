@@ -39,16 +39,16 @@ Implemented:
   - compile-validated experimental hidden-layer-1 cooperative-matrix `dA` propagation behind `NRC_KHR_USE_COOPMAT_HIDDEN1_DA`;
   - compile-validated experimental all-`dA` cooperative-matrix mode behind `NRC_KHR_USE_COOPMAT_ALL_DA`;
   - compile-validated experimental all-coopmat training mode behind `NRC_KHR_USE_COOPMAT_ALL_DW=1` plus `NRC_KHR_USE_COOPMAT_ALL_DA=1`;
+  - recompute all-coopmat training branch behind `NRC_KHR_RECOMPUTE_BACKPROP=1`, using only the active tile plus one source tile;
   - generic scalar hidden-layer derivative propagation helper;
-  - enlarged shared-buffer allocation for future cooperative-matrix reductions.
+  - separate 98304-byte legacy and 32768-byte recompute shared-buffer contracts.
 - `shaders/nrc/passes/NrcGradientKhr.glsl`, a train-record pass skeleton that dispatches KHR forward and accumulates every hidden/output `dW` region.
 - `nrc::reference_backward_khr_fp16`, a host-side fp16-rounded CPU oracle for the current KHR gradient path.
 
 Not implemented yet:
 
-- Default-path cooperative-matrix `dW` reduction beyond the current subgroup reductions.
-- Production-default KHR training cooperative-matrix reduction path.
-- Runtime numerical validation on a driver that can create the KHR cooperative matrix pipelines successfully.
+- Renderer-level performance profiling for the recompute training branch.
+- A non-optimized AMD driver-safe all-coopmat training shader shape; recompute runtime SPIR-V is currently compiled with `glslc -O`.
 
 ## Weight Layout
 
@@ -74,31 +74,33 @@ CTest also compiles the same three variants with `NRC_NN_BACKPROPAGATION` enable
 
 `sample/path_tracer/shaders/sample_gradient_khr.comp` also compile-validates the same three profile shader shapes using the sample scene's real `PackedNrcInput` unpack hook. These sample SPIR-V assets are not dispatched yet; they exist so a later sample-side KHR pipeline probe can validate the same integration unpacking path as the scalar sample training pass.
 
-The same dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the optional output-layer cooperative-matrix `dW` path type-checks for the currently implemented KHR profile shapes. They do not make it the default runtime path.
+The same dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the optional output-layer cooperative-matrix `dW` path type-checks for the currently implemented KHR profile shapes. They do not make it the default legacy non-recompute runtime path.
 
-The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the final-hidden cooperative-matrix tile-streaming helper type-checks in the full train-record pass. The default runtime path still uses the subgroup final-hidden helper.
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the final-hidden cooperative-matrix tile-streaming helper type-checks in the full train-record pass. The legacy non-recompute base path still uses the subgroup final-hidden helper unless this switch is enabled.
 
-The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1` for SG32, SG16, and M8/SG32. These tests prove that the final-hidden to hidden-layer-3 cooperative-matrix derivative propagation helper type-checks in the full train-record pass. The default runtime path still uses scalar-array `dA` propagation.
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1` for SG32, SG16, and M8/SG32. These tests prove that the final-hidden to hidden-layer-3 cooperative-matrix derivative propagation helper type-checks in the full train-record pass. The legacy non-recompute base path still uses scalar-array `dA` propagation unless this switch is enabled.
 
-The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN3_DA=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-3 to hidden-layer-2 cooperative-matrix derivative propagation helper type-checks in the full train-record pass. The default runtime path still uses scalar-array `dA` propagation.
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN3_DA=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-3 to hidden-layer-2 cooperative-matrix derivative propagation helper type-checks in the full train-record pass. The legacy non-recompute base path still uses scalar-array `dA` propagation unless this switch is enabled.
 
-The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN2_DA=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-2 to hidden-layer-1 cooperative-matrix derivative propagation helper type-checks in the full train-record pass. The default runtime path still uses scalar-array `dA` propagation.
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN2_DA=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-2 to hidden-layer-1 cooperative-matrix derivative propagation helper type-checks in the full train-record pass. The legacy non-recompute base path still uses scalar-array `dA` propagation unless this switch is enabled.
 
-The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN1_DA=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-1 to hidden-layer-0 cooperative-matrix derivative propagation helper type-checks in the full train-record pass. The default runtime path still uses scalar-array `dA` propagation.
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN1_DA=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-1 to hidden-layer-0 cooperative-matrix derivative propagation helper type-checks in the full train-record pass. The legacy non-recompute base path still uses scalar-array `dA` propagation unless this switch is enabled.
 
-The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_ALL_DA=1` for SG32, SG16, and M8/SG32. These tests prove that all four hidden-to-hidden cooperative-matrix derivative propagation helpers type-check together in one full train-record pass variant. The default runtime path still uses scalar-array `dA` propagation.
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_ALL_DA=1` for SG32, SG16, and M8/SG32. These tests prove that all four hidden-to-hidden cooperative-matrix derivative propagation helpers type-check together in one full train-record pass variant. The legacy non-recompute base path still uses scalar-array `dA` propagation unless this switch is enabled.
 
-The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN3_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-3 cooperative-matrix tile-streaming helper type-checks in the full train-record pass. The default runtime path still uses the subgroup hidden-layer-3 helper.
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN3_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-3 cooperative-matrix tile-streaming helper type-checks in the full train-record pass. The legacy non-recompute base path still uses the subgroup hidden-layer-3 helper unless this switch is enabled.
 
-The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN2_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-2 cooperative-matrix tile-streaming helper type-checks in the full train-record pass. The default runtime path still uses the subgroup hidden-layer-2 helper.
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN2_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-2 cooperative-matrix tile-streaming helper type-checks in the full train-record pass. The legacy non-recompute base path still uses the subgroup hidden-layer-2 helper unless this switch is enabled.
 
-The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN1_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-1 cooperative-matrix tile-streaming helper type-checks in the full train-record pass. The default runtime path still uses the subgroup hidden-layer-1 helper.
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN1_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-1 cooperative-matrix tile-streaming helper type-checks in the full train-record pass. The legacy non-recompute base path still uses the subgroup hidden-layer-1 helper unless this switch is enabled.
 
-The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN0_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-0 cooperative-matrix tile-streaming helper type-checks in the full train-record pass while staging encoded input into a retired activation snapshot. The default runtime path still uses the subgroup hidden-layer-0 helper.
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_HIDDEN0_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the hidden-layer-0 cooperative-matrix tile-streaming helper type-checks in the full train-record pass while staging encoded input into a retired activation snapshot. The legacy non-recompute base path still uses the subgroup hidden-layer-0 helper unless this switch is enabled.
 
-The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_ALL_DW=1` for SG32, SG16, and M8/SG32. These tests prove that output-layer and all hidden-layer cooperative-matrix `dW` helpers type-check together in one full train-record pass variant. The default runtime path still uses the subgroup helpers.
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_ALL_DW=1` for SG32, SG16, and M8/SG32. These tests prove that output-layer and all hidden-layer cooperative-matrix `dW` helpers type-check together in one full train-record pass variant. The legacy non-recompute base path still uses the subgroup helpers unless this switch is enabled.
 
-The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_ALL_DW=1` and `NRC_KHR_USE_COOPMAT_ALL_DA=1` for SG32, SG16, and M8/SG32. These tests prove that every implemented cooperative-matrix `dW` helper and every hidden-to-hidden cooperative-matrix `dA` helper type-check together in one full train-record pass variant. The default runtime path still uses the subgroup `dW` helpers and scalar-array `dA` propagation.
+The dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_ALL_DW=1` and `NRC_KHR_USE_COOPMAT_ALL_DA=1` for SG32, SG16, and M8/SG32. These tests prove that every implemented cooperative-matrix `dW` helper and every hidden-to-hidden cooperative-matrix `dA` helper type-check together in one full train-record pass variant. The legacy non-recompute base path still uses the subgroup `dW` helpers and scalar-array `dA` propagation unless these switches are enabled.
+
+The dispatch smoke file is also compile-tested with `NRC_KHR_RECOMPUTE_BACKPROP=1`, `NRC_KHR_USE_COOPMAT_ALL_DW=1`, and `NRC_KHR_USE_COOPMAT_ALL_DA=1` for SG32, SG16, and M8/SG32. These recompute variants are compiled with `glslc -O`, matching the runtime SPIR-V path that avoids the local AMD pipeline compiler structured exception.
 
 `tests/khr_gradient_reference_test.cpp` validates the reusable host-side KHR fp16 oracle. It proves the CPU oracle covers every hidden/output gradient region before that oracle is used by the Vulkan KHR runtime test.
 
@@ -134,19 +136,19 @@ The test-side coopmat oracles share one `KhrBackpropSample` helper that computes
 
 The optional output-coopmat helper restores the fp32 shared output derivative cache after reducing output dW. This keeps the downstream final-hidden dW helper on the same shared derivative contract as the default subgroup output path.
 
-`nrc::compute_khr_shader_shared_memory_layout` mirrors the backend's shared-memory constants on the host side. The current KHR backprop layout allocates 6144 `uvec4` values, or 98304 bytes, for the active tile, six activation-sized regions, and reduction scratch. `docs/khr_shared_memory_layout.md` records the per-profile scratch sizes and the hidden dW partial-storage constraint.
+`nrc::compute_khr_shader_shared_memory_layout` mirrors the backend's shared-memory constants on the host side. It records the legacy 6144-`uvec4` / 98304-byte snapshot layout and the recompute 2048-`uvec4` / 32768-byte layout. `docs/khr_shared_memory_layout.md` records the per-profile scratch sizes and the hidden dW partial-storage constraint.
 
-Training profile selection now requires device `maxComputeSharedMemorySize` to meet that 98304-byte allocation. Inference-only selection can still be requested without the training shared-memory requirement.
+Training profile selection now requires device `maxComputeSharedMemorySize` to meet the selected training implementation's allocation. Inference-only selection can still be requested without the training shared-memory requirement.
 
 The same layout model now records a hidden-layer cooperative-matrix `dW` tile-streaming plan. It avoids the SG16 full-layer partial overwrite hazard by using only the active tile for row-block dPre staging and one tile of partials per subgroup.
 
-`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` implements the first shader helper using that plan. It currently has compile validation and runtime validation entries for final-hidden `dW`, hidden-layer-3 `dW`, hidden-layer-2 `dW`, hidden-layer-1 `dW`, hidden-layer-0 `dW`, the all-`dW` combined mode, and the all-coopmat mode; successful dispatch still depends on hardware/driver support for the selected training profile.
+`NrcKhrAccumulateHiddenDWeightsCoopmatTileStreaming` implements the shader helper using that plan. It currently has compile validation and runtime validation entries for final-hidden `dW`, hidden-layer-3 `dW`, hidden-layer-2 `dW`, hidden-layer-1 `dW`, hidden-layer-0 `dW`, the all-`dW` combined mode, the all-coopmat mode, and recompute training; successful dispatch still depends on hardware/driver support for the selected training profile.
 
 `NrcKhrPropagateHiddenDActivationCoopmat` implements the experimental cooperative-matrix `dA` helper. It stages hidden-layer `dPre` values as fp16 in the active tile, loads hidden-layer weights through a transposed cooperative-matrix view, writes the fp16 source derivative to the retired activation snapshot whose ReLU mask has already been consumed, and reads the derivative back into the per-invocation local array. It is currently wired behind `NRC_KHR_USE_COOPMAT_FINAL_HIDDEN_DA=1`, `NRC_KHR_USE_COOPMAT_HIDDEN3_DA=1`, `NRC_KHR_USE_COOPMAT_HIDDEN2_DA=1`, `NRC_KHR_USE_COOPMAT_HIDDEN1_DA=1`, `NRC_KHR_USE_COOPMAT_ALL_DA=1`, and the all-coopmat mode.
 
-The hidden-layer-0 mode preserves the hidden-layer-0 activation snapshot at `NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE` for the ReLU mask and stages encoded input into `NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE`, which is no longer needed by that point in backpropagation. This avoids increasing the 98304-byte KHR training shared-memory requirement.
+The legacy hidden-layer-0 mode preserves the hidden-layer-0 activation snapshot at `NRC_KHR_BACKPROP_OLDEST_SOURCE_ACT_COPY_UVEC4_BASE` for the ReLU mask and stages encoded input into `NRC_KHR_BACKPROP_ACT_COPY_UVEC4_BASE`, which is no longer needed by that point in backpropagation. This avoids increasing the 98304-byte KHR training shared-memory requirement. The recompute branch instead stages the source activation in the single source tile.
 
-These tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. They do not prove runtime support, gradient correctness, or training performance.
+The compile tests prove that the GLSL syntax, cooperative matrix types, and include structure are valid for the local Vulkan SDK. Runtime support still depends on profile capability checks and pipeline creation. The recompute runtime test additionally dispatches the optimized recompute KHR training shader and compares gradients on the local device.
 
 ## Runtime Dispatch Test
 
@@ -181,7 +183,7 @@ This means capability/profile selection is necessary but not sufficient for prod
 The test:
 
 - queries real Vulkan device capabilities;
-- selects an implemented KHR training profile with `requireTraining = true`, including the current 98304-byte shared-memory requirement;
+- selects an implemented KHR training profile with `requireTraining = true`, including the selected legacy or recompute shared-memory requirement;
 - creates a device with KHR cooperative matrix, fp32 storage-buffer atomic add, shader float16, storage buffer 16-bit access, subgroup size control, and full compute subgroup features, and requires subgroup arithmetic support reported by subgroup properties;
 - creates the KHR gradient pipeline through `nrc::vulkan::create_profile_compute_pipeline`;
 - dispatches a 197-record train batch through `NrcGradientKhr.glsl`, spanning two 128-wide workgroups with a partial final workgroup;
@@ -189,10 +191,10 @@ The test:
 
 Current local result:
 
-- The default KHR gradient test, optional output-coopmat KHR gradient test, optional hidden/output all-dW-coopmat KHR gradient tests, optional hidden-to-hidden dA-coopmat KHR gradient tests, optional all-dA-coopmat KHR gradient test, and optional all-coopmat KHR gradient test all report:
-  - `SKIP: no Vulkan device supports an implemented NRC KHR cooperative matrix training profile`
-- This skip happens at profile selection because the current training profile requires the 98304-byte KHR backprop shared-memory layout.
-- The KHR inference dispatch test still uses `requireTraining = false`, so it is not blocked by the training shared-memory gate and can still reach pipeline creation on devices that report the inference profile.
+- Legacy non-recompute KHR gradient tests still report `SKIP: no Vulkan device supports an implemented NRC KHR cooperative matrix training profile` on the local 32 KiB shared-memory device because they require the 98304-byte snapshot layout.
+- `nrc_vulkan_gradient_khr_recompute_test` selects the recompute KHR profile, creates the optimized compute pipeline, dispatches the 197-record batch, and passes the gradient comparison.
+- A strict diagnostic comparison with the default 0.1 absolute tolerance produced 27 mismatches, all in layer0 rows 44 and 47. A temporary scalar layer0 `dW` debug path produced the same mismatch set, so the remaining difference is from the upstream full fp16 cooperative-matrix `dA` chain / CPU oracle boundary, not layer0 tile-streaming layout.
+- The KHR inference dispatch test uses `requireTraining = false`, so it is not blocked by either training shared-memory contract.
 
 ## Profile Selection
 
@@ -208,6 +210,6 @@ After selecting a profile, integrations should call `nrc::find_profile_shader_co
 
 Training profile selection additionally requires subgroup arithmetic support because the current KHR gradient helpers use `subgroupAdd` for hidden/output `dW` reductions, fp32 buffer atomic add for gradient accumulation, and enough compute shared memory for the current KHR backprop layout. Inference-only selection can pass `ProfileRequirements{.requireTraining = false}` and does not require subgroup arithmetic, fp32 buffer atomic add, or the training shared-memory allocation.
 
-`nrc::choose_training_profile` is the higher-level integration policy for training. By default it selects the supported KHR training profile with `TrainingImplementationKind::KhrGroundwork`, keeps the experimental all-coopmat switches off, and refuses silent scalar fallback. Setting `TrainingProfileSelectionOptions::enableExperimentalAllCoopmat = true` requests the same KHR profile with `NRC_KHR_USE_COOPMAT_ALL_DW=1` and `NRC_KHR_USE_COOPMAT_ALL_DA=1`. Setting `allowScalarReferenceFallback = true` allows an explicit debug/reference fallback when no allowed KHR training implementation can be selected.
+`nrc::choose_training_profile` is the higher-level integration policy for training. By default it selects the supported KHR recompute training profile with `TrainingImplementationKind::KhrRecompute`, requests `NRC_KHR_RECOMPUTE_BACKPROP=1`, enables all-coopmat `dW`/`dA`, and refuses silent scalar fallback. Setting `TrainingProfileSelectionOptions::enableKhrRecompute = false` keeps the legacy KHR groundwork/all-coopmat policies available for explicit experiments. Setting `allowScalarReferenceFallback = true` allows an explicit debug/reference fallback when no allowed KHR training implementation can be selected.
 
-`nrc::make_training_shader_compile_config` turns that selection into the shader-facing workgroup, subgroup, cooperative-matrix, and all-coopmat switch values. Vulkan integrations can use `nrc::vulkan::make_vulkan_training_profile_plan` to bundle the selection, compile config, and `VulkanProfileValidationReport` into one host-side plan for logging and fallback decisions.
+`nrc::make_training_shader_compile_config` turns that selection into the shader-facing workgroup, subgroup, cooperative-matrix, all-coopmat, and recompute switch values. Vulkan integrations can use `nrc::vulkan::make_vulkan_training_profile_plan` to bundle the selection, compile config, and `VulkanProfileValidationReport` into one host-side plan for logging and fallback decisions.
