@@ -174,6 +174,79 @@ ProfileSupportReport make_empty_report() {
 
 } // namespace
 
+const char *component_type_name(ComponentType type) {
+    switch (type) {
+        case ComponentType::Unknown: return "Unknown";
+        case ComponentType::Float16: return "Float16";
+        case ComponentType::Float32: return "Float32";
+    }
+    return "Unknown";
+}
+
+const char *backend_kind_name(BackendKind backend) {
+    switch (backend) {
+        case BackendKind::None: return "None";
+        case BackendKind::KhrCooperativeMatrix: return "KhrCooperativeMatrix";
+        case BackendKind::ScalarReference: return "ScalarReference";
+    }
+    return "Unknown";
+}
+
+const char *profile_id_name(ProfileId id) {
+    switch (id) {
+        case ProfileId::None: return "None";
+        case ProfileId::KhrFp16M16N16K16Sg32Wg128:
+            return "KhrFp16M16N16K16Sg32Wg128";
+        case ProfileId::KhrFp16M16N16K16Sg16Wg128:
+            return "KhrFp16M16N16K16Sg16Wg128";
+        case ProfileId::KhrFp16M8N16K16Sg32Wg128:
+            return "KhrFp16M8N16K16Sg32Wg128";
+        case ProfileId::ScalarReferenceWg64: return "ScalarReferenceWg64";
+    }
+    return "Unknown";
+}
+
+const char *profile_support_status_name(ProfileSupportStatus status) {
+    switch (status) {
+        case ProfileSupportStatus::Supported: return "Supported";
+        case ProfileSupportStatus::ProfileNotImplemented: return "ProfileNotImplemented";
+        case ProfileSupportStatus::ReferenceBackendNotAllowed: return "ReferenceBackendNotAllowed";
+        case ProfileSupportStatus::UnsupportedBackend: return "UnsupportedBackend";
+        case ProfileSupportStatus::MissingRequiredFeature: return "MissingRequiredFeature";
+        case ProfileSupportStatus::MissingTrainingAtomicFloat: return "MissingTrainingAtomicFloat";
+        case ProfileSupportStatus::MissingSubgroupArithmetic: return "MissingSubgroupArithmetic";
+        case ProfileSupportStatus::MissingSubgroupSize: return "MissingSubgroupSize";
+        case ProfileSupportStatus::MissingCooperativeMatrixShape:
+            return "MissingCooperativeMatrixShape";
+        case ProfileSupportStatus::MissingSharedMemory: return "MissingSharedMemory";
+    }
+    return "Unknown";
+}
+
+const char *training_implementation_kind_name(TrainingImplementationKind implementation) {
+    switch (implementation) {
+        case TrainingImplementationKind::None: return "None";
+        case TrainingImplementationKind::KhrGroundwork: return "KhrGroundwork";
+        case TrainingImplementationKind::KhrAllCoopmat: return "KhrAllCoopmat";
+        case TrainingImplementationKind::ScalarReference: return "ScalarReference";
+    }
+    return "Unknown";
+}
+
+const char *training_profile_selection_status_name(TrainingProfileSelectionStatus status) {
+    switch (status) {
+        case TrainingProfileSelectionStatus::SelectedKhrGroundwork:
+            return "SelectedKhrGroundwork";
+        case TrainingProfileSelectionStatus::SelectedKhrAllCoopmat:
+            return "SelectedKhrAllCoopmat";
+        case TrainingProfileSelectionStatus::SelectedScalarReference:
+            return "SelectedScalarReference";
+        case TrainingProfileSelectionStatus::NoSupportedTrainingProfile:
+            return "NoSupportedTrainingProfile";
+    }
+    return "Unknown";
+}
+
 std::span<const Profile> profiles() {
     return kProfiles;
 }

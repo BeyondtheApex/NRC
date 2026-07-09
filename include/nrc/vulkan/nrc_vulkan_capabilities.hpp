@@ -80,6 +80,9 @@ struct VulkanTrainingProfilePlan {
     bool usable = false;
 };
 
+const char *vulkan_validation_step_status_name(VulkanValidationStepStatus status);
+const char *vulkan_profile_validation_status_name(VulkanProfileValidationStatus status);
+
 ComponentType map_component_type(VkComponentTypeKHR type);
 std::vector<std::uint32_t> enumerate_subgroup_sizes(std::uint32_t minSize,
                                                     std::uint32_t maxSize,

@@ -62,7 +62,11 @@ Before recording commands, the sample builds a `nrc::vulkan::VulkanTrainingProfi
 8. Copy the resolved screen image back to the CPU and read back train records, gradients, optimizer entries, and packed weights.
 9. Write a tone-mapped binary PPM image from the resolved screen readback.
 
-The training plan is currently diagnostic/integration-facing. The sample explicitly allows scalar reference fallback, prints the selected plan, validates that a compile config exists, and still executes the scalar training shaders. On the current local machine this reports scalar reference fallback because KHR training is blocked by the cooperative-matrix training shared-memory requirement.
+The training plan is currently diagnostic/integration-facing. The sample explicitly allows scalar reference fallback, prints the selected implementation, selection status, validation status, and KHR support reason, validates that a compile config exists, and still executes the scalar training shaders. On the current local machine this reports scalar reference fallback because KHR training is blocked by the cooperative-matrix training shared-memory requirement:
+
+```text
+NRC training plan: implementation=ScalarReference, selection=SelectedScalarReference, profile=SCALAR_REFERENCE_WG64, validation=Supported, khr_support=MissingSharedMemory, plan usable=true, active sample execution=scalar.
+```
 
 The producer traces one primary ray for every `4x4` pixel, emits a screen eval record for each hit, reserves two train records in batch 0, and emits one train eval record targeting those records. Train-record bias and factor values come from a deterministic direct-lighting payload over the traced sample scene hit.
 

@@ -25,6 +25,29 @@ int main() {
     bool ok = true;
     constexpr std::uint32_t kRequiredKhrTrainingSharedBytes = 98304u;
 
+    ok &= require(std::strcmp(nrc::component_type_name(nrc::ComponentType::Float16),
+                              "Float16") == 0,
+                  "component type diagnostic name");
+    ok &= require(std::strcmp(nrc::backend_kind_name(nrc::BackendKind::KhrCooperativeMatrix),
+                              "KhrCooperativeMatrix") == 0,
+                  "backend kind diagnostic name");
+    ok &= require(std::strcmp(nrc::profile_id_name(
+                                  nrc::ProfileId::KhrFp16M8N16K16Sg32Wg128),
+                              "KhrFp16M8N16K16Sg32Wg128") == 0,
+                  "profile id diagnostic name");
+    ok &= require(std::strcmp(nrc::profile_support_status_name(
+                                  nrc::ProfileSupportStatus::MissingSharedMemory),
+                              "MissingSharedMemory") == 0,
+                  "profile support diagnostic name");
+    ok &= require(std::strcmp(nrc::training_implementation_kind_name(
+                                  nrc::TrainingImplementationKind::ScalarReference),
+                              "ScalarReference") == 0,
+                  "training implementation diagnostic name");
+    ok &= require(std::strcmp(nrc::training_profile_selection_status_name(
+                                  nrc::TrainingProfileSelectionStatus::SelectedKhrAllCoopmat),
+                              "SelectedKhrAllCoopmat") == 0,
+                  "training selection diagnostic name");
+
     ok &= require(nrc::weight_count() == 20672u, "VkNRC-compatible weight count");
     ok &= require(nrc::PackedInputLayout::size == 16u, "packed input layout size");
     ok &= require(nrc::EvalRecordLayout::size == 20u, "eval record layout size");

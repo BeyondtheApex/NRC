@@ -129,16 +129,6 @@ std::vector<std::uint32_t> read_spirv(const char *path) {
     return words;
 }
 
-const char *training_implementation_name(nrc::TrainingImplementationKind implementation) {
-    switch (implementation) {
-        case nrc::TrainingImplementationKind::KhrGroundwork: return "KHR groundwork";
-        case nrc::TrainingImplementationKind::KhrAllCoopmat: return "KHR all-coopmat";
-        case nrc::TrainingImplementationKind::ScalarReference: return "scalar reference";
-        case nrc::TrainingImplementationKind::None: return "none";
-    }
-    return "unknown";
-}
-
 bool near(float lhs, float rhs) {
     return std::fabs(lhs - rhs) <= 1.0e-5f;
 }
@@ -2183,9 +2173,15 @@ int main() {
         }
 
         const nrc::vulkan::VulkanTrainingProfilePlan &trainingPlan = sample.training_plan();
-        std::cout << "NRC training plan: "
-                  << training_implementation_name(trainingPlan.selection.implementation)
-                  << " profile " << trainingPlan.selection.profileName
+        std::cout << "NRC training plan: implementation="
+                  << nrc::training_implementation_kind_name(trainingPlan.selection.implementation)
+                  << ", selection="
+                  << nrc::training_profile_selection_status_name(trainingPlan.selection.status)
+                  << ", profile=" << trainingPlan.selection.profileName
+                  << ", validation="
+                  << nrc::vulkan::vulkan_profile_validation_status_name(trainingPlan.validation.status)
+                  << ", khr_support="
+                  << nrc::profile_support_status_name(trainingPlan.selection.khrProfileSupport.status)
                   << ", plan usable=" << (trainingPlan.usable ? "true" : "false")
                   << ", active sample execution=scalar." << std::endl;
         std::cout << "NRC reference path tracer minimal integration passed: "

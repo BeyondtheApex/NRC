@@ -80,6 +80,17 @@ The compile config is invalid when no training profile is selected. For scalar r
 
 The report also carries the profile id, profile name, and final `supported` bool. This is intended for integration logs and user-facing diagnostics when a renderer queries matrix support across different vendors.
 
+Stable diagnostic-name helpers are available for host logging:
+
+- `nrc::component_type_name`
+- `nrc::backend_kind_name`
+- `nrc::profile_id_name`
+- `nrc::profile_support_status_name`
+- `nrc::training_implementation_kind_name`
+- `nrc::training_profile_selection_status_name`
+
+They return ASCII tokens matching the public enum labels, such as `KhrGroundwork`, `ScalarReference`, and `MissingSharedMemory`.
+
 These diagnostics are capability-level only. They do not prove that a Vulkan device can create the selected shader pipeline or that numerical validation has passed.
 
 ## Shader Configuration

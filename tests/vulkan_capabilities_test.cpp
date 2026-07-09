@@ -5,6 +5,7 @@
 #include "nrc/vulkan/nrc_vulkan_shader.hpp"
 
 #include <array>
+#include <cstring>
 #include <cstdlib>
 #include <iostream>
 
@@ -23,6 +24,15 @@ bool require(bool condition, const char *message) {
 int main() {
     bool ok = true;
     constexpr std::uint32_t kRequiredKhrTrainingSharedBytes = 98304u;
+
+    ok &= require(std::strcmp(nrc::vulkan::vulkan_validation_step_status_name(
+                                  nrc::vulkan::VulkanValidationStepStatus::Skipped),
+                              "Skipped") == 0,
+                  "Vulkan validation step diagnostic name");
+    ok &= require(std::strcmp(nrc::vulkan::vulkan_profile_validation_status_name(
+                                  nrc::vulkan::VulkanProfileValidationStatus::PipelineCreationFailed),
+                              "PipelineCreationFailed") == 0,
+                  "Vulkan profile validation diagnostic name");
 
     ok &= require(nrc::vulkan::map_component_type(VK_COMPONENT_TYPE_FLOAT16_KHR) ==
                       nrc::ComponentType::Float16,

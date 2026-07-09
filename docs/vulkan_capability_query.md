@@ -137,6 +137,16 @@ nrc::vulkan::VulkanTrainingProfilePlan plan =
 
 `plan.shaderCompile` is the integration-facing shader plan. For KHR profiles it carries the selected workgroup size, subgroup size, cooperative matrix shape, full-subgroup requirement, and all-coopmat switches. `plan.usable` is true only when a training profile was selected, the shader compile config is valid, and the requested Vulkan validation stages are usable.
 
+For integration logs, use:
+
+- `nrc::training_implementation_kind_name(plan.selection.implementation)`
+- `nrc::training_profile_selection_status_name(plan.selection.status)`
+- `nrc::profile_support_status_name(plan.selection.khrProfileSupport.status)`
+- `nrc::vulkan::vulkan_profile_validation_status_name(plan.validation.status)`
+- `nrc::vulkan::vulkan_validation_step_status_name(plan.validation.pipelineCreation.status)`
+
+The helpers return stable ASCII enum tokens such as `KhrGroundwork`, `SelectedScalarReference`, `MissingSharedMemory`, and `PipelineCreationFailed`.
+
 ## Shader Module Helper
 
 `nrc::vulkan::create_shader_module` creates a `VkShaderModule` from caller-supplied SPIR-V words and returns a `VulkanValidationStep`.

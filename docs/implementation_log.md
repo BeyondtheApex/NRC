@@ -5939,3 +5939,78 @@ That is expected on the current machine because KHR training profile selection i
 ### Next Step
 
 Thread validation stages from actual KHR shader/pipeline attempts into the plan where a KHR training candidate exists, or continue expanding the sample toward iterative frame-style training while keeping the scalar execution path as the correctness anchor.
+
+## 2026-07-09 - Milestone 86 Public Diagnostic Names
+
+### Implemented
+
+- Added stable public diagnostic-name helpers in `nrc_core`:
+  - `nrc::component_type_name`
+  - `nrc::backend_kind_name`
+  - `nrc::profile_id_name`
+  - `nrc::profile_support_status_name`
+  - `nrc::training_implementation_kind_name`
+  - `nrc::training_profile_selection_status_name`
+- Added stable public diagnostic-name helpers in `nrc_vulkan`:
+  - `nrc::vulkan::vulkan_validation_step_status_name`
+  - `nrc::vulkan::vulkan_profile_validation_status_name`
+- The helpers return ASCII enum-label tokens such as:
+  - `KhrGroundwork`
+  - `ScalarReference`
+  - `MissingSharedMemory`
+  - `PipelineCreationFailed`
+- Replaced the sample path tracer's local training-implementation string switch with the shared helper.
+- Expanded the sample training-plan log line to include:
+  - selected implementation;
+  - training selection status;
+  - selected profile name;
+  - Vulkan validation status;
+  - decisive KHR support reason;
+  - plan usability;
+  - active sample execution path.
+- Added test coverage for representative core and Vulkan diagnostic-name mappings.
+- Updated current documentation:
+  - `docs/profile_and_layout.md`
+  - `docs/vulkan_capability_query.md`
+  - `docs/sample_path_tracer.md`
+
+### Behavior
+
+Downstream integrations can now log training/profile/validation decisions without writing their own enum-to-string switches. This matters for MCVR-style integration because profile fallback should be inspectable in engine logs, especially when vendors expose different cooperative-matrix shapes, subgroup sizes, or shared-memory limits.
+
+Current local sample output now includes:
+
+```text
+NRC training plan: implementation=ScalarReference, selection=SelectedScalarReference, profile=SCALAR_REFERENCE_WG64, validation=Supported, khr_support=MissingSharedMemory, plan usable=true, active sample execution=scalar.
+```
+
+That records the current local reason for scalar fallback directly in the sample output: KHR training was rejected by the 98304-byte shared-memory requirement, while scalar reference fallback was explicitly allowed for the sample.
+
+### Validation
+
+- An initial parallel MSBuild target build attempt collided on shared `nrc_core` `.tlog`/`.pdb` files. This was a build invocation race, not a compiler error; the same targets were rerun sequentially.
+- Sequential targeted core diagnostic build succeeded:
+  - `cmake --build build --config Debug --target nrc_profile_layout_test`
+- Sequential targeted sample build succeeded:
+  - `cmake --build build --config Debug --target nrc_reference_path_tracer`
+- Targeted diagnostic/sample CTest command succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_profile_layout_test|nrc_vulkan_capabilities_test|nrc_sample_reference_path_tracer_smoke" --output-on-failure -V`
+- Targeted result:
+  - `3/3 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `85/85 tests passed`
+
+### Current Limitations
+
+- The diagnostic helpers intentionally return stable tokens, not localized user-facing text.
+- They do not produce structured JSON or a full multi-line report; integrations still decide how to format logs.
+- The sample still only records the host-side training plan and executes scalar training.
+- KHR training numerical validation remains locally blocked by the 98304-byte shared-memory profile gate.
+
+### Next Step
+
+Use the diagnostic plan output to make the sample or a reusable helper record shader-module and pipeline-creation validation stages when a KHR training candidate exists, while preserving scalar training as the correctness anchor on devices that cannot run the KHR path locally.

@@ -158,6 +158,13 @@ struct TrainingShaderCompileConfig {
     bool useKhrCoopmatAllDActivation = false;
 };
 
+const char *component_type_name(ComponentType type);
+const char *backend_kind_name(BackendKind backend);
+const char *profile_id_name(ProfileId id);
+const char *profile_support_status_name(ProfileSupportStatus status);
+const char *training_implementation_kind_name(TrainingImplementationKind implementation);
+const char *training_profile_selection_status_name(TrainingProfileSelectionStatus status);
+
 std::span<const Profile> profiles();
 const Profile *find_profile(ProfileId id);
 std::span<const ProfileShaderConfig> profile_shader_configs();

@@ -39,6 +39,44 @@ bool is_not_run(VulkanValidationStepStatus status) {
 
 } // namespace
 
+const char *vulkan_validation_step_status_name(VulkanValidationStepStatus status) {
+    switch (status) {
+        case VulkanValidationStepStatus::NotRun: return "NotRun";
+        case VulkanValidationStepStatus::Passed: return "Passed";
+        case VulkanValidationStepStatus::Failed: return "Failed";
+        case VulkanValidationStepStatus::Skipped: return "Skipped";
+    }
+    return "Unknown";
+}
+
+const char *vulkan_profile_validation_status_name(VulkanProfileValidationStatus status) {
+    switch (status) {
+        case VulkanProfileValidationStatus::Supported: return "Supported";
+        case VulkanProfileValidationStatus::ProfileNotSupported: return "ProfileNotSupported";
+        case VulkanProfileValidationStatus::MissingShaderConfig: return "MissingShaderConfig";
+        case VulkanProfileValidationStatus::ShaderConfigMismatch: return "ShaderConfigMismatch";
+        case VulkanProfileValidationStatus::ShaderModuleCreationNotRun:
+            return "ShaderModuleCreationNotRun";
+        case VulkanProfileValidationStatus::ShaderModuleCreationSkipped:
+            return "ShaderModuleCreationSkipped";
+        case VulkanProfileValidationStatus::ShaderModuleCreationFailed:
+            return "ShaderModuleCreationFailed";
+        case VulkanProfileValidationStatus::PipelineCreationNotRun:
+            return "PipelineCreationNotRun";
+        case VulkanProfileValidationStatus::PipelineCreationSkipped:
+            return "PipelineCreationSkipped";
+        case VulkanProfileValidationStatus::PipelineCreationFailed:
+            return "PipelineCreationFailed";
+        case VulkanProfileValidationStatus::NumericalValidationNotRun:
+            return "NumericalValidationNotRun";
+        case VulkanProfileValidationStatus::NumericalValidationSkipped:
+            return "NumericalValidationSkipped";
+        case VulkanProfileValidationStatus::NumericalValidationFailed:
+            return "NumericalValidationFailed";
+    }
+    return "Unknown";
+}
+
 DeviceCapabilitiesView VulkanDeviceCapabilities::view() const {
     return {
         shaderFloat16,
