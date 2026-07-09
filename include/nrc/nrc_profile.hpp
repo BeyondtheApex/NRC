@@ -57,6 +57,7 @@ struct DeviceCapabilitiesView {
 struct ProfileRequirements {
     bool requireTraining = true;
     bool allowReferenceBackend = false;
+    bool requireRecomputeTraining = false;
 };
 
 enum class ProfileSupportStatus : std::uint8_t {
@@ -75,12 +76,14 @@ enum class ProfileSupportStatus : std::uint8_t {
 enum class TrainingImplementationKind : std::uint8_t {
     None,
     KhrGroundwork,
+    KhrRecompute,
     KhrAllCoopmat,
     ScalarReference,
 };
 
 enum class TrainingProfileSelectionStatus : std::uint8_t {
     SelectedKhrGroundwork,
+    SelectedKhrRecompute,
     SelectedKhrAllCoopmat,
     SelectedScalarReference,
     NoSupportedTrainingProfile,
@@ -121,6 +124,7 @@ struct ProfileSupportReport {
 };
 
 struct TrainingProfileSelectionOptions {
+    bool enableKhrRecompute = true;
     bool enableExperimentalAllCoopmat = false;
     bool allowKhrGroundwork = true;
     bool allowScalarReferenceFallback = false;
@@ -138,6 +142,7 @@ struct TrainingProfileSelection {
     std::uint32_t requiredSharedMemoryBytes = 0;
     bool selected = false;
     bool fallback = false;
+    bool useKhrRecomputeBackprop = false;
     bool useKhrCoopmatAllDWeights = false;
     bool useKhrCoopmatAllDActivation = false;
 };
@@ -154,6 +159,7 @@ struct TrainingShaderCompileConfig {
     bool requireFullSubgroups = false;
     bool requireSubgroupSizeControl = false;
     bool requireSubgroupArithmeticForTraining = false;
+    bool useKhrRecomputeBackprop = false;
     bool useKhrCoopmatAllDWeights = false;
     bool useKhrCoopmatAllDActivation = false;
 };
@@ -170,6 +176,8 @@ const Profile *find_profile(ProfileId id);
 std::span<const ProfileShaderConfig> profile_shader_configs();
 const ProfileShaderConfig *find_profile_shader_config(ProfileId id);
 std::uint32_t required_training_shared_memory_bytes(const Profile &profile);
+std::uint32_t required_training_shared_memory_bytes(const Profile &profile,
+                                                    bool useRecomputeBackprop);
 ProfileSupportReport evaluate_profile_support(const DeviceCapabilitiesView &capabilities,
                                                const ProfileRequirements &requirements,
                                                const Profile &profile);

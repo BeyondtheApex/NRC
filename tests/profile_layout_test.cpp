@@ -24,6 +24,7 @@ bool require(bool condition, const char *message) {
 int main() {
     bool ok = true;
     constexpr std::uint32_t kRequiredKhrTrainingSharedBytes = 98304u;
+    constexpr std::uint32_t kRequiredKhrRecomputeSharedBytes = 32768u;
 
     ok &= require(std::strcmp(nrc::component_type_name(nrc::ComponentType::Float16),
                               "Float16") == 0,
@@ -43,10 +44,18 @@ int main() {
                                   nrc::TrainingImplementationKind::ScalarReference),
                               "ScalarReference") == 0,
                   "training implementation diagnostic name");
+    ok &= require(std::strcmp(nrc::training_implementation_kind_name(
+                                  nrc::TrainingImplementationKind::KhrRecompute),
+                              "KhrRecompute") == 0,
+                  "recompute training implementation diagnostic name");
     ok &= require(std::strcmp(nrc::training_profile_selection_status_name(
                                   nrc::TrainingProfileSelectionStatus::SelectedKhrAllCoopmat),
                               "SelectedKhrAllCoopmat") == 0,
                   "training selection diagnostic name");
+    ok &= require(std::strcmp(nrc::training_profile_selection_status_name(
+                                  nrc::TrainingProfileSelectionStatus::SelectedKhrRecompute),
+                              "SelectedKhrRecompute") == 0,
+                  "recompute training selection diagnostic name");
 
     ok &= require(nrc::weight_count() == 20672u, "VkNRC-compatible weight count");
     ok &= require(nrc::PackedInputLayout::size == 16u, "packed input layout size");
@@ -104,11 +113,11 @@ int main() {
     ok &= require(defaultTraining.selected,
                   "default training profile selection succeeds for valid KHR capabilities");
     ok &= require(defaultTraining.status ==
-                      nrc::TrainingProfileSelectionStatus::SelectedKhrGroundwork,
-                  "default training profile uses KHR groundwork mode");
+                      nrc::TrainingProfileSelectionStatus::SelectedKhrRecompute,
+                  "default training profile uses KHR recompute mode");
     ok &= require(defaultTraining.implementation ==
-                      nrc::TrainingImplementationKind::KhrGroundwork,
-                  "default training implementation records KHR groundwork");
+                      nrc::TrainingImplementationKind::KhrRecompute,
+                  "default training implementation records KHR recompute");
     ok &= require(defaultTraining.profileId ==
                       nrc::ProfileId::KhrFp16M16N16K16Sg32Wg128,
                   "default training profile records selected KHR profile id");
@@ -116,13 +125,15 @@ int main() {
                       defaultTraining.shaderConfig->id == defaultTraining.profileId,
                   "default training profile carries shader config");
     ok &= require(defaultTraining.requiredSharedMemoryBytes ==
-                      kRequiredKhrTrainingSharedBytes,
+                      kRequiredKhrRecomputeSharedBytes,
                   "default training profile reports required shared memory");
     ok &= require(!defaultTraining.fallback,
                   "default KHR training selection is not a fallback");
-    ok &= require(!defaultTraining.useKhrCoopmatAllDWeights &&
-                      !defaultTraining.useKhrCoopmatAllDActivation,
-                  "default KHR training selection does not enable experimental all-coopmat flags");
+    ok &= require(defaultTraining.useKhrRecomputeBackprop,
+                  "default KHR training selection enables recompute backprop");
+    ok &= require(defaultTraining.useKhrCoopmatAllDWeights &&
+                      defaultTraining.useKhrCoopmatAllDActivation,
+                  "default KHR recompute training selection enables all-coopmat flags");
     ok &= require(defaultTraining.khrProfileSupport.supported,
                   "default training selection carries supported KHR report");
     const nrc::TrainingShaderCompileConfig defaultTrainingCompile =
@@ -146,14 +157,37 @@ int main() {
                       defaultTrainingCompile.requireSubgroupSizeControl &&
                       defaultTrainingCompile.requireSubgroupArithmeticForTraining,
                   "default training compile config records KHR pipeline requirements");
-    ok &= require(!defaultTrainingCompile.useKhrCoopmatAllDWeights &&
-                      !defaultTrainingCompile.useKhrCoopmatAllDActivation,
-                  "default training compile config keeps all-coopmat defines disabled");
+    ok &= require(defaultTrainingCompile.useKhrRecomputeBackprop,
+                  "default training compile config enables recompute define");
+    ok &= require(defaultTrainingCompile.useKhrCoopmatAllDWeights &&
+                      defaultTrainingCompile.useKhrCoopmatAllDActivation,
+                  "default training compile config enables all-coopmat defines");
+
+    const nrc::TrainingProfileSelection legacyGroundworkTraining =
+        nrc::choose_training_profile(
+            caps16,
+            {.enableKhrRecompute = false});
+    ok &= require(legacyGroundworkTraining.selected,
+                  "legacy groundwork training selection succeeds when recompute is disabled");
+    ok &= require(legacyGroundworkTraining.status ==
+                      nrc::TrainingProfileSelectionStatus::SelectedKhrGroundwork,
+                  "legacy training profile uses KHR groundwork mode");
+    ok &= require(legacyGroundworkTraining.implementation ==
+                      nrc::TrainingImplementationKind::KhrGroundwork,
+                  "legacy training implementation records KHR groundwork");
+    ok &= require(legacyGroundworkTraining.requiredSharedMemoryBytes ==
+                      kRequiredKhrTrainingSharedBytes,
+                  "legacy training profile reports full shared memory");
+    ok &= require(!legacyGroundworkTraining.useKhrRecomputeBackprop &&
+                      !legacyGroundworkTraining.useKhrCoopmatAllDWeights &&
+                      !legacyGroundworkTraining.useKhrCoopmatAllDActivation,
+                  "legacy groundwork compile flags stay disabled");
 
     const nrc::TrainingProfileSelection allCoopmatTraining =
         nrc::choose_training_profile(
             caps16,
-            {.enableExperimentalAllCoopmat = true});
+            {.enableKhrRecompute = false,
+             .enableExperimentalAllCoopmat = true});
     ok &= require(allCoopmatTraining.selected,
                   "experimental all-coopmat training selection succeeds");
     ok &= require(allCoopmatTraining.status ==
@@ -179,7 +213,10 @@ int main() {
     const nrc::TrainingProfileSelection noAllowedKhrTraining =
         nrc::choose_training_profile(
             caps16,
-            {false, false, false});
+            {.enableKhrRecompute = false,
+             .enableExperimentalAllCoopmat = false,
+             .allowKhrGroundwork = false,
+             .allowScalarReferenceFallback = false});
     ok &= require(!noAllowedKhrTraining.selected,
                   "training selection rejects valid KHR profile when all KHR modes are disabled");
     ok &= require(noAllowedKhrTraining.status ==
@@ -193,7 +230,10 @@ int main() {
     const nrc::TrainingProfileSelection scalarBecauseKhrDisabled =
         nrc::choose_training_profile(
             caps16,
-            {false, false, true});
+            {.enableKhrRecompute = false,
+             .enableExperimentalAllCoopmat = false,
+             .allowKhrGroundwork = false,
+             .allowScalarReferenceFallback = true});
     ok &= require(scalarBecauseKhrDisabled.selected,
                   "training selection can fall back to scalar when KHR modes are disabled");
     ok &= require(scalarBecauseKhrDisabled.status ==
@@ -250,24 +290,75 @@ int main() {
         ok &= require(sharedMemoryReport.status ==
                           nrc::ProfileSupportStatus::MissingSharedMemory,
                       "support report records missing shared memory");
-        const nrc::TrainingProfileSelection missingSharedTraining =
+        const nrc::ProfileSupportReport recomputeSharedMemoryReport =
+            nrc::evaluate_profile_support(
+                insufficientSharedMemory,
+                {.requireTraining = true,
+                 .allowReferenceBackend = false,
+                 .requireRecomputeTraining = true},
+                *sg32Profile);
+        ok &= require(recomputeSharedMemoryReport.supported,
+                      "recompute support report accepts 32 KiB-plus shared memory");
+        const nrc::TrainingProfileSelection recomputeOnLegacyInsufficientShared =
             nrc::choose_training_profile(insufficientSharedMemory);
-        ok &= require(!missingSharedTraining.selected,
-                      "training selection rejects insufficient KHR shared memory by default");
-        ok &= require(missingSharedTraining.khrProfileSupport.status ==
+        ok &= require(recomputeOnLegacyInsufficientShared.selected,
+                      "default training selection accepts recompute below legacy shared memory");
+        ok &= require(recomputeOnLegacyInsufficientShared.implementation ==
+                          nrc::TrainingImplementationKind::KhrRecompute,
+                      "legacy-insufficient device selects recompute training");
+        const nrc::TrainingProfileSelection missingLegacySharedTraining =
+            nrc::choose_training_profile(
+                insufficientSharedMemory,
+                {.enableKhrRecompute = false});
+        ok &= require(!missingLegacySharedTraining.selected,
+                      "legacy training selection rejects insufficient KHR shared memory");
+        ok &= require(missingLegacySharedTraining.khrProfileSupport.status ==
                           nrc::ProfileSupportStatus::MissingSharedMemory,
-                      "training selection carries missing shared memory KHR reason");
+                      "legacy training selection carries missing shared memory KHR reason");
         const nrc::TrainingProfileSelection sharedMemoryScalarFallback =
             nrc::choose_training_profile(
                 insufficientSharedMemory,
-                {false, true, true});
+                {.enableKhrRecompute = false,
+                 .enableExperimentalAllCoopmat = true,
+                 .allowKhrGroundwork = true,
+                 .allowScalarReferenceFallback = true});
         ok &= require(sharedMemoryScalarFallback.selected,
-                      "training selection can fall back to scalar on insufficient shared memory");
+                      "legacy training selection can fall back to scalar on insufficient shared memory");
         ok &= require(sharedMemoryScalarFallback.status ==
                           nrc::TrainingProfileSelectionStatus::SelectedScalarReference,
-                      "insufficient shared memory fallback selects scalar status");
+                      "legacy insufficient shared memory fallback selects scalar status");
         ok &= require(sharedMemoryScalarFallback.fallback,
-                      "insufficient shared memory scalar selection records fallback");
+                      "legacy insufficient shared memory scalar selection records fallback");
+
+        nrc::DeviceCapabilitiesView thirtyTwoKiBSharedMemory = caps16;
+        thirtyTwoKiBSharedMemory.maxComputeSharedMemorySize =
+            kRequiredKhrRecomputeSharedBytes;
+        const nrc::TrainingProfileSelection recomputeThirtyTwoKiB =
+            nrc::choose_training_profile(thirtyTwoKiBSharedMemory);
+        ok &= require(recomputeThirtyTwoKiB.selected,
+                      "default training selection supports exact 32 KiB shared memory");
+        ok &= require(recomputeThirtyTwoKiB.implementation ==
+                          nrc::TrainingImplementationKind::KhrRecompute,
+                      "32 KiB shared memory selects recompute training");
+        ok &= require(recomputeThirtyTwoKiB.requiredSharedMemoryBytes ==
+                          kRequiredKhrRecomputeSharedBytes,
+                      "32 KiB recompute selection reports 32 KiB requirement");
+        ok &= require(nrc::choose_training_profile(
+                          thirtyTwoKiBSharedMemory,
+                          {.enableKhrRecompute = false}).khrProfileSupport.status ==
+                          nrc::ProfileSupportStatus::MissingSharedMemory,
+                      "32 KiB device rejects legacy training when recompute is disabled");
+
+        nrc::DeviceCapabilitiesView hardInsufficientSharedMemory = caps16;
+        hardInsufficientSharedMemory.maxComputeSharedMemorySize =
+            kRequiredKhrRecomputeSharedBytes - 1u;
+        const nrc::TrainingProfileSelection hardMissingSharedTraining =
+            nrc::choose_training_profile(hardInsufficientSharedMemory);
+        ok &= require(!hardMissingSharedTraining.selected,
+                      "training selection rejects below-32 KiB KHR shared memory by default");
+        ok &= require(hardMissingSharedTraining.khrProfileSupport.status ==
+                          nrc::ProfileSupportStatus::MissingSharedMemory,
+                      "below-32 KiB training selection carries missing shared memory KHR reason");
     }
 
     const std::array<std::uint32_t, 1> sg16 = {16};
@@ -452,7 +543,12 @@ int main() {
                       nrc::ProfileSupportStatus::MissingRequiredFeature,
                   "training selection records missing KHR features for empty capabilities");
     const nrc::TrainingProfileSelection emptyScalarFallback =
-        nrc::choose_training_profile(emptyCaps, {false, true, true});
+        nrc::choose_training_profile(
+            emptyCaps,
+            {.enableKhrRecompute = false,
+             .enableExperimentalAllCoopmat = true,
+             .allowKhrGroundwork = true,
+             .allowScalarReferenceFallback = true});
     ok &= require(emptyScalarFallback.selected,
                   "training selection can fall back to scalar for empty capabilities");
     ok &= require(emptyScalarFallback.status ==
@@ -560,6 +656,12 @@ int main() {
                           "KHR shader shared layout total uvec4 count");
             ok &= require(sharedLayout.sharedBytes == 98304u,
                           "KHR shader shared layout byte count");
+            ok &= require(sharedLayout.recomputeSourceTile.baseUvec4 == 1024u,
+                          "KHR shader recompute source tile base");
+            ok &= require(sharedLayout.recomputeSharedUvec4Count == 2048u,
+                          "KHR shader recompute shared uvec4 count");
+            ok &= require(sharedLayout.recomputeSharedBytes == 32768u,
+                          "KHR shader recompute shared byte count");
             ok &= require(sharedLayout.dPreScratch.countUvec4 == 2048u,
                           "KHR shader shared layout dPre scratch size");
             ok &= require(sharedLayout.dPreScratchFitsActivePlusFinalSnapshot,
@@ -626,6 +728,10 @@ int main() {
                           "KHR hidden dW tile-streaming fits active tile");
             ok &= require(tileStreaming.preservesSharedActivationSnapshots,
                           "KHR hidden dW tile-streaming preserves snapshots");
+            ok &= require(sharedLayout.recomputeFitsTwoActiveTiles,
+                          "KHR recompute layout fits active and source tiles");
+            ok &= require(sharedLayout.recomputeFitsThirtyTwoKiB,
+                          "KHR recompute layout fits 32 KiB shared memory");
             ok &= require(std::strcmp(config->shaderHeader,
                                       "nrc/backend/khr_coopmat/NrcNNKhr.glsl") == 0,
                           "KHR shader config header path");

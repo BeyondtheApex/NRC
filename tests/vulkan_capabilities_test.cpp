@@ -24,6 +24,7 @@ bool require(bool condition, const char *message) {
 int main() {
     bool ok = true;
     constexpr std::uint32_t kRequiredKhrTrainingSharedBytes = 98304u;
+    constexpr std::uint32_t kRequiredKhrRecomputeSharedBytes = 32768u;
 
     ok &= require(std::strcmp(nrc::vulkan::vulkan_validation_step_status_name(
                                   nrc::vulkan::VulkanValidationStepStatus::Skipped),
@@ -276,8 +277,8 @@ int main() {
         ok &= require(defaultPlan.usable,
                       "Vulkan training plan is usable when no validation stages are required");
         ok &= require(defaultPlan.selection.implementation ==
-                          nrc::TrainingImplementationKind::KhrGroundwork,
-                      "Vulkan training plan defaults to KHR groundwork");
+                          nrc::TrainingImplementationKind::KhrRecompute,
+                      "Vulkan training plan defaults to KHR recompute");
         ok &= require(defaultPlan.shaderCompile.valid,
                       "Vulkan training plan carries compile config");
         ok &= require(defaultPlan.shaderCompile.backend ==
@@ -286,16 +287,33 @@ int main() {
         ok &= require(defaultPlan.shaderCompile.subgroupSize == 32u &&
                           defaultPlan.shaderCompile.cooperativeMatrixM == 16u,
                       "Vulkan training plan compile config records selected KHR profile shape");
-        ok &= require(!defaultPlan.shaderCompile.useKhrCoopmatAllDWeights &&
-                          !defaultPlan.shaderCompile.useKhrCoopmatAllDActivation,
-                      "Vulkan training plan default compile config keeps all-coopmat disabled");
+        ok &= require(defaultPlan.shaderCompile.useKhrRecomputeBackprop,
+                      "Vulkan training plan default compile config enables recompute");
+        ok &= require(defaultPlan.shaderCompile.useKhrCoopmatAllDWeights &&
+                          defaultPlan.shaderCompile.useKhrCoopmatAllDActivation,
+                      "Vulkan training plan default compile config enables all-coopmat");
         ok &= require(defaultPlan.validation.usable,
                       "Vulkan training plan carries usable validation report");
+
+        const nrc::vulkan::VulkanTrainingProfilePlan legacyGroundworkPlan =
+            nrc::vulkan::make_vulkan_training_profile_plan(
+                validCapabilities,
+                {.enableKhrRecompute = false});
+        ok &= require(legacyGroundworkPlan.selected,
+                      "Vulkan legacy groundwork training plan selects KHR profile");
+        ok &= require(legacyGroundworkPlan.selection.implementation ==
+                          nrc::TrainingImplementationKind::KhrGroundwork,
+                      "Vulkan legacy groundwork training plan records implementation");
+        ok &= require(!legacyGroundworkPlan.shaderCompile.useKhrRecomputeBackprop &&
+                          !legacyGroundworkPlan.shaderCompile.useKhrCoopmatAllDWeights &&
+                          !legacyGroundworkPlan.shaderCompile.useKhrCoopmatAllDActivation,
+                      "Vulkan legacy groundwork training plan keeps recompute and all-coopmat disabled");
 
         const nrc::vulkan::VulkanTrainingProfilePlan allCoopmatPlan =
             nrc::vulkan::make_vulkan_training_profile_plan(
                 validCapabilities,
-                {.enableExperimentalAllCoopmat = true});
+                {.enableKhrRecompute = false,
+                 .enableExperimentalAllCoopmat = true});
         ok &= require(allCoopmatPlan.selected,
                       "Vulkan all-coopmat training plan selects KHR profile");
         ok &= require(allCoopmatPlan.usable,
@@ -340,7 +358,7 @@ int main() {
         ok &= require(!passedRuntimePlan.usedRuntimeFallback,
                       "Vulkan runtime-fallback plan does not fallback after passed KHR validation");
         ok &= require(passedRuntimePlan.selection.implementation ==
-                          nrc::TrainingImplementationKind::KhrGroundwork,
+                          nrc::TrainingImplementationKind::KhrRecompute,
                       "Vulkan runtime-fallback plan preserves KHR implementation after passed validation");
 
         nrc::vulkan::VulkanProfileValidationRequirements failedKhrPipeline{};
@@ -365,7 +383,7 @@ int main() {
                           nrc::vulkan::VulkanProfileValidationStatus::Supported,
                       "Vulkan runtime-fallback plan validates selected scalar profile");
         ok &= require(runtimeFallbackPlan.fallbackSourceSelection.implementation ==
-                          nrc::TrainingImplementationKind::KhrGroundwork,
+                          nrc::TrainingImplementationKind::KhrRecompute,
                       "Vulkan runtime-fallback plan preserves rejected KHR implementation");
         ok &= require(runtimeFallbackPlan.fallbackSourceValidation.status ==
                           nrc::vulkan::VulkanProfileValidationStatus::PipelineCreationFailed,
@@ -564,23 +582,69 @@ int main() {
                           nrc::ProfileSupportStatus::MissingSharedMemory,
                       "Vulkan validation carries missing shared memory status");
 
-        const nrc::vulkan::VulkanTrainingProfilePlan sharedMemoryFallbackPlan =
+        const nrc::vulkan::VulkanTrainingProfilePlan recomputeLegacyInsufficientPlan =
+            nrc::vulkan::make_vulkan_training_profile_plan(
+                missingSharedMemoryCapabilities);
+        ok &= require(recomputeLegacyInsufficientPlan.selected,
+                      "Vulkan training plan selects recompute below legacy shared memory");
+        ok &= require(recomputeLegacyInsufficientPlan.selection.implementation ==
+                          nrc::TrainingImplementationKind::KhrRecompute,
+                      "Vulkan legacy-insufficient shared memory plan records recompute implementation");
+        ok &= require(recomputeLegacyInsufficientPlan.selection.requiredSharedMemoryBytes ==
+                          kRequiredKhrRecomputeSharedBytes,
+                      "Vulkan recompute plan records 32 KiB shared memory requirement");
+
+        const nrc::vulkan::VulkanTrainingProfilePlan legacySharedMemoryFallbackPlan =
             nrc::vulkan::make_vulkan_training_profile_plan(
                 missingSharedMemoryCapabilities,
-                {false, true, true});
-        ok &= require(sharedMemoryFallbackPlan.selected,
-                      "Vulkan training plan selects scalar fallback on insufficient shared memory when allowed");
-        ok &= require(sharedMemoryFallbackPlan.usable,
-                      "Vulkan scalar fallback training plan is usable without required runtime stages");
-        ok &= require(sharedMemoryFallbackPlan.selection.implementation ==
+                {.enableKhrRecompute = false,
+                 .enableExperimentalAllCoopmat = true,
+                 .allowKhrGroundwork = true,
+                 .allowScalarReferenceFallback = true});
+        ok &= require(legacySharedMemoryFallbackPlan.selected,
+                      "Vulkan legacy training plan selects scalar fallback on insufficient shared memory when allowed");
+        ok &= require(legacySharedMemoryFallbackPlan.usable,
+                      "Vulkan legacy scalar fallback training plan is usable without required runtime stages");
+        ok &= require(legacySharedMemoryFallbackPlan.selection.implementation ==
                           nrc::TrainingImplementationKind::ScalarReference,
-                      "Vulkan training plan records scalar fallback implementation");
-        ok &= require(sharedMemoryFallbackPlan.selection.khrProfileSupport.status ==
+                      "Vulkan legacy training plan records scalar fallback implementation");
+        ok &= require(legacySharedMemoryFallbackPlan.selection.khrProfileSupport.status ==
                           nrc::ProfileSupportStatus::MissingSharedMemory,
-                      "Vulkan scalar fallback training plan preserves KHR rejection reason");
-        ok &= require(sharedMemoryFallbackPlan.shaderCompile.backend ==
+                      "Vulkan legacy scalar fallback training plan preserves KHR rejection reason");
+        ok &= require(legacySharedMemoryFallbackPlan.shaderCompile.backend ==
                           nrc::BackendKind::ScalarReference,
-                      "Vulkan scalar fallback training plan carries scalar compile config");
+                      "Vulkan legacy scalar fallback training plan carries scalar compile config");
+
+        nrc::vulkan::VulkanDeviceCapabilities exactThirtyTwoKiBCapabilities =
+            validCapabilities;
+        exactThirtyTwoKiBCapabilities.maxComputeSharedMemorySize =
+            kRequiredKhrRecomputeSharedBytes;
+        const nrc::vulkan::VulkanTrainingProfilePlan exactThirtyTwoKiBPlan =
+            nrc::vulkan::make_vulkan_training_profile_plan(
+                exactThirtyTwoKiBCapabilities);
+        ok &= require(exactThirtyTwoKiBPlan.selected,
+                      "Vulkan training plan selects KHR on exact 32 KiB shared memory");
+        ok &= require(exactThirtyTwoKiBPlan.selection.implementation ==
+                          nrc::TrainingImplementationKind::KhrRecompute,
+                      "Vulkan exact-32 KiB plan records recompute implementation");
+        ok &= require(nrc::vulkan::make_vulkan_training_profile_plan(
+                          exactThirtyTwoKiBCapabilities,
+                          {.enableKhrRecompute = false}).selection.khrProfileSupport.status ==
+                          nrc::ProfileSupportStatus::MissingSharedMemory,
+                      "Vulkan exact-32 KiB plan rejects legacy training when recompute is disabled");
+
+        nrc::vulkan::VulkanDeviceCapabilities belowThirtyTwoKiBCapabilities =
+            validCapabilities;
+        belowThirtyTwoKiBCapabilities.maxComputeSharedMemorySize =
+            kRequiredKhrRecomputeSharedBytes - 1u;
+        const nrc::vulkan::VulkanTrainingProfilePlan belowThirtyTwoKiBPlan =
+            nrc::vulkan::make_vulkan_training_profile_plan(
+                belowThirtyTwoKiBCapabilities);
+        ok &= require(!belowThirtyTwoKiBPlan.selected,
+                      "Vulkan training plan rejects below-32 KiB shared memory by default");
+        ok &= require(belowThirtyTwoKiBPlan.selection.khrProfileSupport.status ==
+                          nrc::ProfileSupportStatus::MissingSharedMemory,
+                      "Vulkan below-32 KiB plan carries missing shared memory status");
     }
 
     nrc::vulkan::VulkanDeviceCapabilities emptyCapabilities{};

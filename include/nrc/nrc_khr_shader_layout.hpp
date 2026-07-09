@@ -50,8 +50,11 @@ struct KhrShaderSharedMemoryLayout {
     std::uint32_t reductionSharedUvec4Count = 0;
     std::uint32_t sharedUvec4Count = 0;
     std::uint32_t sharedBytes = 0;
+    std::uint32_t recomputeSharedUvec4Count = 0;
+    std::uint32_t recomputeSharedBytes = 0;
 
     KhrSharedMemoryRegion activeTile;
+    KhrSharedMemoryRegion recomputeSourceTile;
     KhrSharedMemoryRegion finalHiddenSnapshot;
     KhrSharedMemoryRegion outputSourceSnapshot;
     KhrSharedMemoryRegion previousSourceSnapshot;
@@ -69,6 +72,8 @@ struct KhrShaderSharedMemoryLayout {
     bool outputDWeightPartialFitsActiveTile = false;
     bool hiddenDWeightPartialFitsSharedAllocation = false;
     bool hiddenDWeightPartialPreservesSharedHiddenActivationSnapshots = false;
+    bool recomputeFitsTwoActiveTiles = false;
+    bool recomputeFitsThirtyTwoKiB = false;
 };
 
 KhrShaderSharedMemoryLayout compute_khr_shader_shared_memory_layout(

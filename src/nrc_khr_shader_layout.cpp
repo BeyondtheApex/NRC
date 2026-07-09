@@ -53,6 +53,10 @@ KhrShaderSharedMemoryLayout compute_khr_shader_shared_memory_layout(
     layout.activationSnapshotCount = kBackpropActivationSnapshotCount;
 
     layout.activeTile = {0, layout.activeTileUvec4Count};
+    layout.recomputeSourceTile = {
+        layout.activeTileUvec4Count,
+        layout.activeTileUvec4Count,
+    };
     layout.finalHiddenSnapshot = {layout.activeTileUvec4Count, layout.activeTileUvec4Count};
     layout.outputSourceSnapshot = {layout.activeTileUvec4Count * 2u, layout.activeTileUvec4Count};
     layout.previousSourceSnapshot = {layout.activeTileUvec4Count * 3u, layout.activeTileUvec4Count};
@@ -67,6 +71,8 @@ KhrShaderSharedMemoryLayout compute_khr_shader_shared_memory_layout(
                                        std::max(layout.activationCopySharedUvec4Count,
                                                 layout.reductionSharedUvec4Count));
     layout.sharedBytes = layout.sharedUvec4Count * kUvec4Bytes;
+    layout.recomputeSharedUvec4Count = layout.activeTileUvec4Count * 2u;
+    layout.recomputeSharedBytes = layout.recomputeSharedUvec4Count * kUvec4Bytes;
 
     const std::uint32_t dPreUvec4PerSample = kNnHiddenWidth / kFp32PerUvec4;
     layout.dPreScratch = {0, config.workgroupSize * dPreUvec4PerSample};
@@ -134,6 +140,14 @@ KhrShaderSharedMemoryLayout compute_khr_shader_shared_memory_layout(
     tileStreaming.preservesSharedActivationSnapshots =
         tileStreaming.combinedScratch.end_uvec4() <=
         layout.finalHiddenSnapshot.baseUvec4;
+    layout.recomputeFitsTwoActiveTiles =
+        layout.recomputeSharedUvec4Count >= layout.recomputeSourceTile.end_uvec4() &&
+        layout.activeTile.contains(layout.outputDerivativeFp16Scratch) &&
+        layout.activeTile.contains(layout.outputDWeightPartialScratch) &&
+        layout.activeTile.contains(tileStreaming.combinedScratch);
+    layout.recomputeFitsThirtyTwoKiB =
+        layout.recomputeFitsTwoActiveTiles &&
+        layout.recomputeSharedBytes <= 32768u;
 
     return layout;
 }

@@ -343,6 +343,7 @@ VulkanTrainingProfilePlan make_vulkan_training_profile_plan(
     const ProfileRequirements profileRequirements{
         true,
         plan.selection.implementation == TrainingImplementationKind::ScalarReference,
+        plan.selection.useKhrRecomputeBackprop,
     };
     plan.validation = evaluate_vulkan_profile_validation(capabilities,
                                                          profileRequirements,
@@ -370,6 +371,7 @@ VulkanTrainingProfilePlan make_vulkan_training_profile_plan_with_runtime_fallbac
     }
 
     TrainingProfileSelectionOptions fallbackOptions = selectionOptions;
+    fallbackOptions.enableKhrRecompute = false;
     fallbackOptions.enableExperimentalAllCoopmat = false;
     fallbackOptions.allowKhrGroundwork = false;
     fallbackOptions.allowScalarReferenceFallback = true;

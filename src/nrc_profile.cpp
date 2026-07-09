@@ -227,6 +227,7 @@ const char *training_implementation_kind_name(TrainingImplementationKind impleme
     switch (implementation) {
         case TrainingImplementationKind::None: return "None";
         case TrainingImplementationKind::KhrGroundwork: return "KhrGroundwork";
+        case TrainingImplementationKind::KhrRecompute: return "KhrRecompute";
         case TrainingImplementationKind::KhrAllCoopmat: return "KhrAllCoopmat";
         case TrainingImplementationKind::ScalarReference: return "ScalarReference";
     }
@@ -237,6 +238,8 @@ const char *training_profile_selection_status_name(TrainingProfileSelectionStatu
     switch (status) {
         case TrainingProfileSelectionStatus::SelectedKhrGroundwork:
             return "SelectedKhrGroundwork";
+        case TrainingProfileSelectionStatus::SelectedKhrRecompute:
+            return "SelectedKhrRecompute";
         case TrainingProfileSelectionStatus::SelectedKhrAllCoopmat:
             return "SelectedKhrAllCoopmat";
         case TrainingProfileSelectionStatus::SelectedScalarReference:
@@ -274,6 +277,11 @@ const ProfileShaderConfig *find_profile_shader_config(ProfileId id) {
 }
 
 std::uint32_t required_training_shared_memory_bytes(const Profile &profile) {
+    return required_training_shared_memory_bytes(profile, false);
+}
+
+std::uint32_t required_training_shared_memory_bytes(const Profile &profile,
+                                                    bool useRecomputeBackprop) {
     const ProfileShaderConfig *config = find_profile_shader_config(profile.id);
     if (config == nullptr || config->backend != BackendKind::KhrCooperativeMatrix) {
         return 0;
@@ -281,7 +289,10 @@ std::uint32_t required_training_shared_memory_bytes(const Profile &profile) {
 
     const KhrShaderSharedMemoryLayout layout =
         compute_khr_shader_shared_memory_layout(*config);
-    return layout.valid ? layout.sharedBytes : 0;
+    if (!layout.valid) {
+        return 0;
+    }
+    return useRecomputeBackprop ? layout.recomputeSharedBytes : layout.sharedBytes;
 }
 
 ProfileSupportReport evaluate_profile_support(const DeviceCapabilitiesView &capabilities,
@@ -327,7 +338,8 @@ ProfileSupportReport evaluate_profile_support(const DeviceCapabilitiesView &capa
 
     if (requirements.requireTraining) {
         const std::uint32_t requiredSharedMemoryBytes =
-            required_training_shared_memory_bytes(profile);
+            required_training_shared_memory_bytes(profile,
+                                                  requirements.requireRecomputeTraining);
         if (requiredSharedMemoryBytes > 0 &&
             capabilities.maxComputeSharedMemorySize < requiredSharedMemoryBytes) {
             return make_report(profile, ProfileSupportStatus::MissingSharedMemory);
@@ -360,10 +372,10 @@ TrainingProfileSelection choose_training_profile(
     selection.khrProfileSupport = make_empty_report();
     selection.scalarProfileSupport = make_empty_report();
 
-    const ProfileRequirements khrTrainingRequirements{
-        true,
-        false,
-    };
+    ProfileRequirements khrTrainingRequirements{};
+    khrTrainingRequirements.requireTraining = true;
+    khrTrainingRequirements.allowReferenceBackend = false;
+    khrTrainingRequirements.requireRecomputeTraining = options.enableKhrRecompute;
     const Profile *selectedKhrProfile = nullptr;
     for (const Profile &profile : kProfiles) {
         if (profile.backend != BackendKind::KhrCooperativeMatrix) {
@@ -383,6 +395,21 @@ TrainingProfileSelection choose_training_profile(
     }
 
     if (selectedKhrProfile != nullptr) {
+        if (options.enableKhrRecompute) {
+            selection.status = TrainingProfileSelectionStatus::SelectedKhrRecompute;
+            selection.implementation = TrainingImplementationKind::KhrRecompute;
+            selection.profileId = selectedKhrProfile->id;
+            selection.profileName = selectedKhrProfile->name;
+            selection.shaderConfig = find_profile_shader_config(selectedKhrProfile->id);
+            selection.requiredSharedMemoryBytes =
+                required_training_shared_memory_bytes(*selectedKhrProfile, true);
+            selection.selected = true;
+            selection.useKhrRecomputeBackprop = true;
+            selection.useKhrCoopmatAllDWeights = true;
+            selection.useKhrCoopmatAllDActivation = true;
+            return selection;
+        }
+
         if (options.enableExperimentalAllCoopmat) {
             selection.status = TrainingProfileSelectionStatus::SelectedKhrAllCoopmat;
             selection.implementation = TrainingImplementationKind::KhrAllCoopmat;
@@ -413,8 +440,9 @@ TrainingProfileSelection choose_training_profile(
     const Profile *scalarProfile = find_profile(ProfileId::ScalarReferenceWg64);
     if (scalarProfile != nullptr) {
         const ProfileRequirements scalarRequirements{
-            true,
-            options.allowScalarReferenceFallback,
+            .requireTraining = true,
+            .allowReferenceBackend = options.allowScalarReferenceFallback,
+            .requireRecomputeTraining = false,
         };
         selection.scalarProfileSupport =
             evaluate_profile_support(capabilities, scalarRequirements, *scalarProfile);
@@ -452,6 +480,7 @@ TrainingShaderCompileConfig make_training_shader_compile_config(
     config.requireSubgroupSizeControl = selection.shaderConfig->requireSubgroupSizeControl;
     config.requireSubgroupArithmeticForTraining =
         selection.shaderConfig->requireSubgroupArithmeticForTraining;
+    config.useKhrRecomputeBackprop = selection.useKhrRecomputeBackprop;
     config.useKhrCoopmatAllDWeights = selection.useKhrCoopmatAllDWeights;
     config.useKhrCoopmatAllDActivation = selection.useKhrCoopmatAllDActivation;
     return config;

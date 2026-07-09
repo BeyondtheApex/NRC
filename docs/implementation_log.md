@@ -6202,3 +6202,55 @@ This avoids the AMD pipeline compiler structured exception without changing the 
 ### Next Step
 
 Add a small permanent driver-regression note or test hook around `nrc_vulkan_khr_dispatch_test` so future shader refactors do not accidentally reintroduce the AMD output-stage pipeline compiler crash.
+
+## 2026-07-09 - Milestone 90 KHR Recompute Training Profile Contract
+
+### Implemented
+
+- Added a distinct KHR recompute training implementation to the public profile API:
+  - `TrainingImplementationKind::KhrRecompute`
+  - `TrainingProfileSelectionStatus::SelectedKhrRecompute`
+  - `TrainingProfileSelectionOptions::enableKhrRecompute`
+  - `TrainingProfileSelection::useKhrRecomputeBackprop`
+  - `TrainingShaderCompileConfig::useKhrRecomputeBackprop`
+- Added `ProfileRequirements::requireRecomputeTraining` so capability checks can validate the recompute shared-memory requirement separately from the legacy 98304-byte activation-snapshot layout.
+- Added `required_training_shared_memory_bytes(profile, useRecomputeBackprop)`.
+- Extended `compute_khr_shader_shared_memory_layout` with the recompute allocation model:
+  - active tile: 1024 `uvec4`
+  - source tile: 1024 `uvec4`
+  - recompute shared allocation: 2048 `uvec4`, or 32768 bytes
+  - layout fit checks for output derivative scratch, output dW scratch, and hidden dW tile-streaming scratch.
+- Changed `choose_training_profile` default policy to prefer KHR recompute training when supported.
+- Kept legacy KHR groundwork and legacy all-coopmat modes available by setting `enableKhrRecompute = false`.
+- Updated Vulkan training-plan validation so a selected recompute plan validates against 32768 bytes, while legacy plans still validate against 98304 bytes.
+- Runtime fallback now disables recompute for the fallback selection step so a failed KHR runtime-validation attempt can fall back to scalar instead of immediately reselecting the same KHR implementation.
+
+### Behavior
+
+The host-side training policy now has two explicit KHR shared-memory contracts:
+
+```text
+legacy groundwork/all-coopmat: 98304 bytes
+recompute training:           32768 bytes
+```
+
+This does not lower the legacy shader's allocation. It introduces a separate recompute implementation path that integrations can select and validate independently. On a device with exactly 32 KiB of compute shared memory, the default training profile selection now succeeds only through `KhrRecompute`; disabling recompute still reports `MissingSharedMemory` for the legacy KHR path.
+
+### Validation
+
+- Targeted host/profile build succeeded:
+  - `cmake --build build --config Debug --target nrc_profile_layout_test nrc_vulkan_capabilities_test`
+- Targeted profile/layout and Vulkan capability tests succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_(profile_layout|vulkan_capabilities)_test" --output-on-failure`
+- Targeted result:
+  - `2/2 tests passed`
+
+### Current Limitations
+
+- This milestone defines and validates the host-side recompute contract only.
+- `NRC_KHR_RECOMPUTE_BACKPROP` has not yet been implemented in `NrcNNKhr.glsl` / `NrcGradientKhr.glsl`.
+- Until the shader recompute path exists and is numerically validated, the new default compile flag is a contract for the next milestone, not a completed GPU training path.
+
+### Next Step
+
+Implement the KHR gradient shader recompute branch using only the active activation tile plus the source tile, force the branch through the all-coopmat dW/dA helpers, compile recompute SPIR-V variants, and run the local AMD runtime numerical gradient comparison through the 32 KiB profile gate.
