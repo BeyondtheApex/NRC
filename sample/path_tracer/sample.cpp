@@ -600,6 +600,9 @@ public:
                              const char *inferenceSpirv,
                              const char *trainPrepareSpirv,
                              const char *gradientSpirv,
+                             const char *gradientKhrSg32Spirv,
+                             const char *gradientKhrSg16Spirv,
+                             const char *gradientKhrM8Sg32Spirv,
                              const char *optimizeSpirv) {
         create_instance();
         pick_physical_device();
@@ -612,6 +615,9 @@ public:
         create_train_prepare_pipeline(trainPrepareSpirv);
         create_gradient_pipeline(gradientSpirv);
         create_optimize_pipeline(optimizeSpirv);
+        create_khr_gradient_pipeline(gradientKhrSg32Spirv,
+                                     gradientKhrSg16Spirv,
+                                     gradientKhrM8Sg32Spirv);
     }
 
     MinimalIntegrationSample(const MinimalIntegrationSample &) = delete;
@@ -619,6 +625,14 @@ public:
 
     const nrc::vulkan::VulkanTrainingProfilePlan &training_plan() const {
         return trainingPlan_;
+    }
+
+    const std::string &khr_probe_status() const {
+        return khrProbeStatus_;
+    }
+
+    bool khr_probe_dispatched() const {
+        return khrProbeDispatched_;
     }
 
     ~MinimalIntegrationSample() {
@@ -637,6 +651,9 @@ public:
             }
             if (gradientPipeline_ != VK_NULL_HANDLE) {
                 vkDestroyPipeline(device_, gradientPipeline_, nullptr);
+            }
+            if (khrGradientPipeline_ != VK_NULL_HANDLE) {
+                vkDestroyPipeline(device_, khrGradientPipeline_, nullptr);
             }
             if (trainPreparePipeline_ != VK_NULL_HANDLE) {
                 vkDestroyPipeline(device_, trainPreparePipeline_, nullptr);
@@ -821,23 +838,26 @@ public:
 
         write_ppm_file(NRC_SAMPLE_OUTPUT_PPM, finalBiasFactorR);
         const bool visualOutputOk = verify_ppm_file(NRC_SAMPLE_OUTPUT_PPM, finalBiasFactorR);
+        const bool scalarValidationOk =
+            verify(finalQueueState,
+                   finalEvalRecords,
+                   finalTrainRecords,
+                   initialBiasFactorR,
+                   initialFactorGb,
+                   finalBiasFactorR) &&
+            verify_training(finalQueueState,
+                            finalTrainRecords,
+                            gpuVisibleWeights,
+                            finalOptimizerState,
+                            finalIndirect,
+                            finalGradients,
+                            finalOptimizerEntries,
+                            finalWeights,
+                            finalUseWeights);
+        const bool khrProbeOk =
+            probe_khr_gradient_dispatch(finalTrainRecords, finalQueueState, packedWeights, sceneBuffer);
 
-        return verify(finalQueueState,
-                      finalEvalRecords,
-                      finalTrainRecords,
-                      initialBiasFactorR,
-                      initialFactorGb,
-                      finalBiasFactorR) &&
-               verify_training(finalQueueState,
-                               finalTrainRecords,
-                               gpuVisibleWeights,
-                               finalOptimizerState,
-                               finalIndirect,
-                               finalGradients,
-                               finalOptimizerEntries,
-                               finalWeights,
-                               finalUseWeights) &&
-               visualOutputOk;
+        return scalarValidationOk && khrProbeOk && visualOutputOk;
     }
 
 private:
@@ -959,7 +979,8 @@ private:
         appInfo.applicationVersion = VK_MAKE_VERSION(0, 1, 0);
         appInfo.pEngineName = "NRC";
         appInfo.engineVersion = VK_MAKE_VERSION(0, 1, 0);
-        appInfo.apiVersion = loaderVersion < VK_API_VERSION_1_1 ? loaderVersion : VK_API_VERSION_1_1;
+        appInfo.apiVersion = loaderVersion < VK_API_VERSION_1_1 ? loaderVersion :
+            (loaderVersion < VK_API_VERSION_1_3 ? VK_API_VERSION_1_1 : VK_API_VERSION_1_3);
 
         VkInstanceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -1022,13 +1043,13 @@ private:
         const auto getCooperativeMatrixProperties =
             reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR>(
                 vkGetInstanceProcAddr(instance_, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"));
-        const nrc::vulkan::VulkanDeviceCapabilities capabilities =
+        capabilities_ =
             nrc::vulkan::query_device_capabilities(physicalDevice_, getCooperativeMatrixProperties);
 
         nrc::TrainingProfileSelectionOptions selectionOptions{};
         selectionOptions.allowScalarReferenceFallback = true;
         trainingPlan_ =
-            nrc::vulkan::make_vulkan_training_profile_plan(capabilities, selectionOptions);
+            nrc::vulkan::make_vulkan_training_profile_plan(capabilities_, selectionOptions);
         if (!trainingPlan_.selected || !trainingPlan_.shaderCompile.valid) {
             throw std::runtime_error("sample could not create a host-side NRC training profile plan");
         }
@@ -1051,6 +1072,13 @@ private:
         check_format(VK_FORMAT_R32G32_SFLOAT, "VK_FORMAT_R32G32_SFLOAT");
     }
 
+    bool wants_khr_training_probe() const {
+        return trainingPlan_.selected &&
+               trainingPlan_.shaderCompile.valid &&
+               trainingPlan_.shaderCompile.backend == nrc::BackendKind::KhrCooperativeMatrix &&
+               trainingPlan_.selection.shaderConfig != nullptr;
+    }
+
     void create_device() {
         float priority = 1.0f;
         VkDeviceQueueCreateInfo queueInfo{};
@@ -1063,15 +1091,45 @@ private:
         atomicFloat.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
         atomicFloat.shaderBufferFloat32AtomicAdd = VK_TRUE;
 
-        const char *extensions[] = {VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME};
+        VkPhysicalDeviceCooperativeMatrixFeaturesKHR cooperativeMatrixFeatures{};
+        cooperativeMatrixFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR;
+        cooperativeMatrixFeatures.cooperativeMatrix = VK_TRUE;
+
+        VkPhysicalDeviceVulkan13Features vulkan13Features{};
+        vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+        vulkan13Features.subgroupSizeControl = VK_TRUE;
+        vulkan13Features.computeFullSubgroups = VK_TRUE;
+
+        VkPhysicalDeviceVulkan12Features vulkan12Features{};
+        vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        vulkan12Features.shaderFloat16 = VK_TRUE;
+
+        VkPhysicalDeviceVulkan11Features vulkan11Features{};
+        vulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+        vulkan11Features.storageBuffer16BitAccess = VK_TRUE;
+
+        VkPhysicalDeviceFeatures2 features{};
+        features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        features.pNext = &atomicFloat;
+
+        std::vector<const char *> extensions = {VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME};
+        const bool enableKhrDeviceFeatures = wants_khr_training_probe();
+        if (enableKhrDeviceFeatures) {
+            cooperativeMatrixFeatures.pNext = &atomicFloat;
+            vulkan13Features.pNext = &cooperativeMatrixFeatures;
+            vulkan12Features.pNext = &vulkan13Features;
+            vulkan11Features.pNext = &vulkan12Features;
+            features.pNext = &vulkan11Features;
+            extensions.push_back(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+        }
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        createInfo.pNext = &atomicFloat;
+        createInfo.pNext = &features;
         createInfo.queueCreateInfoCount = 1;
         createInfo.pQueueCreateInfos = &queueInfo;
-        createInfo.enabledExtensionCount = 1;
-        createInfo.ppEnabledExtensionNames = extensions;
+        createInfo.enabledExtensionCount = static_cast<std::uint32_t>(extensions.size());
+        createInfo.ppEnabledExtensionNames = extensions.data();
 
         check_vk(vkCreateDevice(physicalDevice_, &createInfo, nullptr, &device_), "vkCreateDevice");
         vkGetDeviceQueue(device_, queueFamilyIndex_, 0, &queue_);
@@ -1174,6 +1232,109 @@ private:
         pushRange.size = sizeof(TrainingConstants);
         optimizePipelineLayout_ = create_pipeline_layout(optimizeSetLayout_, &pushRange);
         optimizePipeline_ = create_compute_pipeline(optimizeSpirv, optimizePipelineLayout_);
+    }
+
+    const char *selected_khr_gradient_spirv_path(const char *sg32Spirv,
+                                                 const char *sg16Spirv,
+                                                 const char *m8Sg32Spirv) const {
+        const nrc::ProfileShaderConfig *config = trainingPlan_.selection.shaderConfig;
+        if (config == nullptr || config->backend != nrc::BackendKind::KhrCooperativeMatrix) {
+            return nullptr;
+        }
+        if (config->cooperativeMatrixM == 16u && config->subgroupSize == 32u) {
+            return sg32Spirv;
+        }
+        if (config->cooperativeMatrixM == 16u && config->subgroupSize == 16u) {
+            return sg16Spirv;
+        }
+        if (config->cooperativeMatrixM == 8u && config->subgroupSize == 32u) {
+            return m8Sg32Spirv;
+        }
+        return nullptr;
+    }
+
+    void update_khr_runtime_validation(const nrc::vulkan::VulkanValidationStep &shaderModuleValidation,
+                                       const nrc::vulkan::VulkanValidationStep &pipelineValidation,
+                                       bool requirePipelineCreation) {
+        const nrc::Profile *profile = nrc::find_profile(trainingPlan_.selection.profileId);
+        if (profile == nullptr || profile->backend != nrc::BackendKind::KhrCooperativeMatrix) {
+            return;
+        }
+
+        nrc::ProfileRequirements requirements{};
+        requirements.requireTraining = true;
+        requirements.allowReferenceBackend = false;
+        requirements.requireRecomputeTraining = trainingPlan_.selection.useKhrRecomputeBackprop;
+
+        nrc::vulkan::VulkanProfileValidationRequirements validationRequirements{};
+        validationRequirements.requireShaderModuleCreation = true;
+        validationRequirements.requirePipelineCreation = requirePipelineCreation;
+        validationRequirements.shaderModuleCreation = shaderModuleValidation;
+        validationRequirements.pipelineCreation = pipelineValidation;
+
+        trainingPlan_.validation =
+            nrc::vulkan::evaluate_vulkan_profile_validation(capabilities_,
+                                                            requirements,
+                                                            *profile,
+                                                            validationRequirements);
+        trainingPlan_.usable = trainingPlan_.shaderCompile.valid && trainingPlan_.validation.usable;
+    }
+
+    void create_khr_gradient_pipeline(const char *sg32Spirv,
+                                      const char *sg16Spirv,
+                                      const char *m8Sg32Spirv) {
+        khrProbeStatus_ = "not selected";
+        if (!wants_khr_training_probe()) {
+            return;
+        }
+        if (!trainingPlan_.selection.useKhrRecomputeBackprop) {
+            khrProbeStatus_ = "selected KHR profile is not the recompute profile";
+            return;
+        }
+
+        const char *spirvPath = selected_khr_gradient_spirv_path(sg32Spirv, sg16Spirv, m8Sg32Spirv);
+        if (spirvPath == nullptr) {
+            khrProbeStatus_ = "selected KHR profile has no sample SPIR-V asset";
+            return;
+        }
+
+        const std::vector<std::uint32_t> spirv = read_spirv(spirvPath);
+        nrc::vulkan::VulkanShaderModuleCreateInfo shaderCreateInfo{};
+        shaderCreateInfo.device = device_;
+        shaderCreateInfo.code = std::span<const std::uint32_t>(spirv.data(), spirv.size());
+        const nrc::vulkan::VulkanShaderModuleCreateResult shaderResult =
+            nrc::vulkan::create_shader_module(shaderCreateInfo);
+        if (shaderResult.validation.status != nrc::vulkan::VulkanValidationStepStatus::Passed) {
+            update_khr_runtime_validation(shaderResult.validation, {}, false);
+            khrProbeStatus_ =
+                std::string("shader module creation failed: VkResult ") +
+                vk_result_string(shaderResult.validation.vkResult);
+            return;
+        }
+
+        nrc::vulkan::VulkanComputePipelineCreateInfo pipelineCreateInfo{};
+        pipelineCreateInfo.device = device_;
+        pipelineCreateInfo.pipelineLayout = gradientPipelineLayout_;
+        pipelineCreateInfo.shaderModule = shaderResult.shaderModule;
+        pipelineCreateInfo.shaderConfig = trainingPlan_.selection.shaderConfig;
+        const nrc::vulkan::VulkanComputePipelineCreateResult pipelineResult =
+            nrc::vulkan::create_profile_compute_pipeline(pipelineCreateInfo);
+        vkDestroyShaderModule(device_, shaderResult.shaderModule, nullptr);
+
+        update_khr_runtime_validation(shaderResult.validation, pipelineResult.validation, true);
+        if (pipelineResult.validation.structuredException) {
+            khrProbeStatus_ = "vkCreateComputePipelines raised a structured exception";
+            return;
+        }
+        if (pipelineResult.validation.status != nrc::vulkan::VulkanValidationStepStatus::Passed) {
+            khrProbeStatus_ =
+                std::string("pipeline creation failed: VkResult ") +
+                vk_result_string(pipelineResult.validation.vkResult);
+            return;
+        }
+
+        khrGradientPipeline_ = pipelineResult.pipeline;
+        khrProbeStatus_ = "pipeline-ready";
     }
 
     template <std::size_t N>
@@ -1623,6 +1784,99 @@ private:
         vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
     }
 
+    bool probe_khr_gradient_dispatch(std::span<const nrc::NrcTrainRecord> trainRecords,
+                                     const nrc::NrcQueueState &queueState,
+                                     std::span<const nrc::PackedFp16x8> packedWeights,
+                                     const Buffer &sceneBuffer) {
+        if (khrGradientPipeline_ == VK_NULL_HANDLE) {
+            return true;
+        }
+
+        const std::uint32_t trainCount = std::min(queueState.trainCounts[0], nrc::kTrainBatchSize);
+        if (trainCount == 0u) {
+            khrProbeStatus_ = "pipeline-ready, dispatch skipped because batch 0 is empty";
+            return true;
+        }
+
+        Buffer khrTrainRecords = create_host_buffer(static_cast<VkDeviceSize>(trainRecords.size_bytes()),
+                                                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        Buffer khrQueueState = create_host_buffer(sizeof(nrc::NrcQueueState),
+                                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        Buffer khrWeights = create_host_buffer(static_cast<VkDeviceSize>(packedWeights.size_bytes()),
+                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        Buffer khrGradients = create_host_buffer(static_cast<VkDeviceSize>(nrc::weight_count() * sizeof(float)),
+                                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+
+        std::vector<float> zeroGradients(nrc::weight_count(), 0.0f);
+        upload(khrTrainRecords, trainRecords.data(), static_cast<VkDeviceSize>(trainRecords.size_bytes()));
+        upload(khrQueueState, &queueState, sizeof(queueState));
+        upload(khrWeights, packedWeights.data(), static_cast<VkDeviceSize>(packedWeights.size_bytes()));
+        upload(khrGradients,
+               zeroGradients.data(),
+               static_cast<VkDeviceSize>(zeroGradients.size() * sizeof(float)));
+
+        VkDescriptorPool descriptorPool = create_descriptor_pool();
+        VkDescriptorSet khrGradientSet = allocate_descriptor_set(descriptorPool, gradientSetLayout_);
+        update_gradient_set(khrGradientSet, khrTrainRecords, khrQueueState, khrWeights, khrGradients, sceneBuffer);
+
+        VkCommandBuffer commandBuffer = allocate_command_buffer();
+        VkFence fence = VK_NULL_HANDLE;
+        try {
+            VkFenceCreateInfo fenceInfo{};
+            fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+            check_vk(vkCreateFence(device_, &fenceInfo, nullptr, &fence), "vkCreateFence");
+            record_khr_gradient_dispatch(commandBuffer, khrGradientSet, trainCount);
+
+            VkSubmitInfo submitInfo{};
+            submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submitInfo.commandBufferCount = 1;
+            submitInfo.pCommandBuffers = &commandBuffer;
+            check_vk(vkQueueSubmit(queue_, 1, &submitInfo, fence), "vkQueueSubmit");
+            check_vk(vkWaitForFences(device_, 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max()),
+                     "vkWaitForFences");
+        } catch (...) {
+            if (fence != VK_NULL_HANDLE) {
+                vkDestroyFence(device_, fence, nullptr);
+            }
+            vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
+            vkDestroyDescriptorPool(device_, descriptorPool, nullptr);
+            throw;
+        }
+
+        vkDestroyFence(device_, fence, nullptr);
+        vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
+        vkDestroyDescriptorPool(device_, descriptorPool, nullptr);
+
+        std::vector<float> gradients(nrc::weight_count(), 0.0f);
+        download(khrGradients, gradients.data(), static_cast<VkDeviceSize>(gradients.size() * sizeof(float)));
+
+        std::uint32_t nonZeroCount = 0;
+        float maxAbsGradient = 0.0f;
+        for (float gradient : gradients) {
+            if (!std::isfinite(gradient)) {
+                std::cerr << "FAIL: KHR sample probe produced a non-finite gradient\n";
+                khrProbeStatus_ = "dispatch failed: non-finite gradient";
+                return false;
+            }
+            const float absGradient = std::fabs(gradient);
+            if (absGradient > 0.0f) {
+                ++nonZeroCount;
+                maxAbsGradient = std::max(maxAbsGradient, absGradient);
+            }
+        }
+        if (nonZeroCount == 0u) {
+            std::cerr << "FAIL: KHR sample probe dispatch produced all-zero gradients\n";
+            khrProbeStatus_ = "dispatch failed: all-zero gradients";
+            return false;
+        }
+
+        khrProbeDispatched_ = true;
+        khrProbeStatus_ =
+            "pipeline+dispatch passed; nonzero gradients=" + std::to_string(nonZeroCount) +
+            ", maxAbs=" + std::to_string(maxAbsGradient);
+        return true;
+    }
+
     void record_commands(VkCommandBuffer commandBuffer,
                          const Buffer &queueState,
                          const Buffer &evalRecords,
@@ -1834,6 +2088,50 @@ private:
                               VK_ACCESS_HOST_READ_BIT,
                               "transfer-to-host barrier");
 
+        check_vk(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer");
+    }
+
+    void record_khr_gradient_dispatch(VkCommandBuffer commandBuffer,
+                                      VkDescriptorSet gradientSet,
+                                      std::uint32_t trainCount) const {
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        check_vk(vkBeginCommandBuffer(commandBuffer, &beginInfo), "vkBeginCommandBuffer");
+
+        nrc::vulkan::VulkanValidationStep barrierValidation =
+            nrc::vulkan::cmd_memory_barrier(
+                commandBuffer,
+                nrc::vulkan::host_write_to_compute_shader_barrier(
+                    VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT));
+        check_vk(barrierValidation.vkResult, "KHR probe host-to-shader barrier");
+
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, khrGradientPipeline_);
+        vkCmdBindDescriptorSets(commandBuffer,
+                                VK_PIPELINE_BIND_POINT_COMPUTE,
+                                gradientPipelineLayout_,
+                                0,
+                                1,
+                                &gradientSet,
+                                0,
+                                nullptr);
+        const std::uint32_t batch = 0u;
+        vkCmdPushConstants(commandBuffer,
+                           gradientPipelineLayout_,
+                           VK_SHADER_STAGE_COMPUTE_BIT,
+                           0,
+                           sizeof(batch),
+                           &batch);
+
+        const nrc::ProfileShaderConfig *config = trainingPlan_.selection.shaderConfig;
+        const std::uint32_t workgroupSize = config != nullptr ? config->workgroupSize : kGradientWorkgroupSize;
+        const std::uint32_t groupCount = (trainCount + workgroupSize - 1u) / workgroupSize;
+        vkCmdDispatch(commandBuffer, groupCount, 1, 1);
+
+        barrierValidation =
+            nrc::vulkan::cmd_memory_barrier(
+                commandBuffer,
+                nrc::vulkan::compute_shader_write_to_host_read_barrier());
+        check_vk(barrierValidation.vkResult, "KHR probe shader-to-host barrier");
         check_vk(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer");
     }
 
@@ -2155,8 +2453,12 @@ private:
     VkPipeline inferencePipeline_ = VK_NULL_HANDLE;
     VkPipeline trainPreparePipeline_ = VK_NULL_HANDLE;
     VkPipeline gradientPipeline_ = VK_NULL_HANDLE;
+    VkPipeline khrGradientPipeline_ = VK_NULL_HANDLE;
     VkPipeline optimizePipeline_ = VK_NULL_HANDLE;
+    nrc::vulkan::VulkanDeviceCapabilities capabilities_{};
     nrc::vulkan::VulkanTrainingProfilePlan trainingPlan_{};
+    std::string khrProbeStatus_ = "not run";
+    bool khrProbeDispatched_ = false;
 };
 
 } // namespace
@@ -2167,6 +2469,9 @@ int main() {
                                         NRC_SAMPLE_INFERENCE_SPV,
                                         NRC_SAMPLE_TRAIN_PREPARE_SPV,
                                         NRC_SAMPLE_GRADIENT_SPV,
+                                        NRC_SAMPLE_GRADIENT_KHR_SG32_SPV,
+                                        NRC_SAMPLE_GRADIENT_KHR_SG16_SPV,
+                                        NRC_SAMPLE_GRADIENT_KHR_M8_SG32_SPV,
                                         NRC_SAMPLE_OPTIMIZE_SPV);
         if (!sample.run()) {
             return EXIT_FAILURE;
@@ -2183,9 +2488,13 @@ int main() {
                   << ", khr_support="
                   << nrc::profile_support_status_name(trainingPlan.selection.khrProfileSupport.status)
                   << ", plan usable=" << (trainingPlan.usable ? "true" : "false")
-                  << ", active sample execution=scalar." << std::endl;
+                  << ", active sample execution=scalar"
+                  << ", khr_probe=" << sample.khr_probe_status()
+                  << ", khr_dispatch=" << (sample.khr_probe_dispatched() ? "ran" : "not-run")
+                  << "." << std::endl;
         std::cout << "NRC reference path tracer minimal integration passed: "
-                  << kEvalCapacity << " eval records, scalar inference resolve, and one scalar training update." << std::endl;
+                  << kEvalCapacity << " eval records, scalar inference resolve, one scalar training update, "
+                  << "and optional KHR recompute dispatch probe." << std::endl;
         std::cout << "Wrote sample image: " << NRC_SAMPLE_OUTPUT_PPM << std::endl;
         std::cout << "This milestone uses primary-ray traced hits and direct-lighting train payloads; full ray tracing is pending." << std::endl;
         return EXIT_SUCCESS;

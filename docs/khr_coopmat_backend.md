@@ -72,7 +72,7 @@ CTest also compiles the same three variants with `NRC_NN_BACKPROPAGATION` enable
 
 `tests/shader_compile/nrc_gradient_khr_dispatch.comp` compile-validates the KHR train-record pass for the same three profile shader shapes. It proves the pass-level binding ABI, push constants, train-count handling, integration-provided unpack hook, current hidden/output subgroup `dW` reductions, and encoded-source staging compile together.
 
-`sample/path_tracer/shaders/sample_gradient_khr.comp` also compile-validates the same three profile shader shapes using the sample scene's real `PackedNrcInput` unpack hook. These sample SPIR-V assets are not dispatched yet; they exist so a later sample-side KHR pipeline probe can validate the same integration unpacking path as the scalar sample training pass.
+`sample/path_tracer/shaders/sample_gradient_khr.comp` also builds the same three profile shader shapes using the sample scene's real `PackedNrcInput` unpack hook. The sample now compiles these assets as optimized recompute training SPIR-V and, when the selected profile is KHR recompute, creates the selected profile pipeline and dispatches a standalone gradient probe over the generated train records.
 
 The same dispatch smoke file is also compile-tested with `NRC_KHR_USE_COOPMAT_OUTPUT_DW=1` for SG32, SG16, and M8/SG32. These tests prove that the optional output-layer cooperative-matrix `dW` path type-checks for the currently implemented KHR profile shapes. They do not make it the default legacy non-recompute runtime path.
 

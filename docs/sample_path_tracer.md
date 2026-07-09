@@ -13,6 +13,7 @@ The current sample is a minimal Vulkan integration skeleton with a tiny primary-
 7. Scalar training update.
 8. Visual output write.
 9. Readback and artifact validation.
+10. Optional KHR recompute training pipeline and dispatch probe.
 
 ## Current Files
 
@@ -62,11 +63,12 @@ Before recording commands, the sample builds a `nrc::vulkan::VulkanTrainingProfi
 7. Dispatch `sample_optimize.comp`.
 8. Copy the resolved screen image back to the CPU and read back train records, gradients, optimizer entries, and packed weights.
 9. Write a tone-mapped binary PPM image from the resolved screen readback.
+10. If the selected training profile is KHR recompute, create the matching sample-scene KHR gradient pipeline and dispatch one standalone gradient probe over the generated train records.
 
-The training plan is currently diagnostic/integration-facing. The sample explicitly allows scalar reference fallback, prints the selected implementation, selection status, validation status, and KHR support reason, validates that a compile config exists, and still executes the scalar training shaders. The sample also compile-validates a KHR gradient wrapper for the SG32, SG16, and M8/SG32 training profiles so a later pipeline probe can use sample-scene train-record unpacking instead of the test-only fake unpack hook. On the current local machine the host-side plan can select KHR recompute training, while active sample execution remains scalar:
+The training plan is integration-facing. The sample explicitly allows scalar reference fallback, prints the selected implementation, selection status, validation status, KHR support reason, active execution path, and KHR probe status. The main correctness path still executes scalar training. When the plan selects KHR recompute, the sample enables the KHR device feature chain, creates the selected profile pipeline from optimized recompute SPIR-V, dispatches a separate gradient probe, and verifies the probe wrote finite non-zero gradients. On the current local AMD machine:
 
 ```text
-NRC training plan: implementation=KhrRecompute, selection=SelectedKhrRecompute, profile=KHR_FP16_M16N16K16_SG32_WG128, validation=Supported, khr_support=Supported, plan usable=true, active sample execution=scalar.
+NRC training plan: implementation=KhrRecompute, selection=SelectedKhrRecompute, profile=KHR_FP16_M16N16K16_SG32_WG128, validation=Supported, khr_support=Supported, plan usable=true, active sample execution=scalar, khr_probe=pipeline+dispatch passed; nonzero gradients=489, maxAbs=14.078125, khr_dispatch=ran.
 ```
 
 The producer traces one primary ray for every `4x4` pixel, emits a screen eval record for each hit, reserves two train records in batch 0, and emits one train eval record targeting those records. Train-record bias and factor values come from a deterministic direct-lighting payload over the traced sample scene hit.
@@ -97,6 +99,7 @@ The host verifies:
 - optimizer entries match the CPU Adam/EMA reference;
 - packed weights and packed use-weights match the CPU reference and at least one packed weight changes.
 - the PPM output exists, matches the readback-derived bytes, has the expected `P6 4 4 255` header, and contains visible non-uniform pixels.
+- when KHR recompute training is selected, the selected sample-scene KHR gradient pipeline creates successfully and a standalone dispatch writes finite non-zero gradients.
 
 ## Build and Test
 
@@ -112,9 +115,9 @@ CTest runs:
 nrc_sample_reference_path_tracer_smoke
 ```
 
-The host sample queries device capabilities through `nrc::vulkan::query_device_capabilities`, builds a training plan through `nrc::vulkan::make_vulkan_training_profile_plan`, creates shader modules through `nrc::vulkan::create_shader_module`, and creates all five active compute pipelines through plain `nrc::vulkan::create_compute_pipeline`.
+The host sample queries device capabilities through `nrc::vulkan::query_device_capabilities`, builds a training plan through `nrc::vulkan::make_vulkan_training_profile_plan`, creates shader modules through `nrc::vulkan::create_shader_module`, and creates the five scalar compute pipelines through plain `nrc::vulkan::create_compute_pipeline`. When KHR recompute is selected, it also creates a profile-aware KHR compute pipeline through `nrc::vulkan::create_profile_compute_pipeline` and records the shader-module/pipeline result into the training plan validation.
 
-The build also generates inactive KHR training SPIR-V assets:
+The build also generates optimized recompute KHR training SPIR-V assets:
 
 ```text
 nrc_sample_gradient_khr_sg32.spv
@@ -122,7 +125,7 @@ nrc_sample_gradient_khr_sg16.spv
 nrc_sample_gradient_khr_m8_sg32.spv
 ```
 
-These are compile-validation assets only. The host sample does not create KHR training shader modules or pipelines yet.
+The host maps the selected `TrainingShaderCompileConfig` to these assets. They use the sample scene's real `PackedNrcInput` unpack hook, compile with `glslc -O`, and define `NRC_KHR_RECOMPUTE_BACKPROP=1`, `NRC_KHR_USE_COOPMAT_ALL_DW=1`, and `NRC_KHR_USE_COOPMAT_ALL_DA=1`.
 
 It also creates descriptor set layouts through `nrc::vulkan::create_descriptor_set_layout` and writes storage-buffer/storage-image descriptors through `nrc::vulkan::update_storage_buffer_descriptors` and `nrc::vulkan::update_storage_image_descriptors`.
 
@@ -134,15 +137,16 @@ Memory and image barriers are recorded through `nrc::vulkan::cmd_memory_barrier`
 - No acceleration structure, Vulkan ray query, material system, BRDF sampling, secondary rays, or scene loading exists yet.
 - Training records use deterministic direct lighting, not real multi-bounce path-traced samples.
 - Buffer/image copy helpers and resource allocation remain sample-local.
-- KHR cooperative matrix inference is not used because KHR pipeline creation is driver-gated on the current AMD machine.
-- Training plan selection is wired for integration diagnostics, but execution still uses the scalar correctness path rather than the recompute KHR cooperative-matrix backend.
-- KHR training shader assets are compiled for the sample scene, but no KHR training pipeline probe or dispatch is active yet.
+- KHR cooperative matrix inference is not used by the sample; the sample KHR path is a training-gradient probe only.
+- The active training update still uses the scalar correctness path. KHR recompute dispatch is validated separately and is not yet wired into the optimize/update step.
+- The KHR probe only checks finite non-zero gradients, not GPU-vs-CPU numerical equality for the sample scene.
 
 ## Next Steps
 
 The next sample milestones should add:
 
 - replacing the sample-local triangle loop with Vulkan ray query or a fuller path tracing stage;
+- promoting the KHR recompute probe from standalone gradient validation to an active prepare -> KHR gradient -> optimize path;
 - train-record production from multi-bounce sampled paths;
 - iterative per-frame training instead of a single validated update;
 - a larger inspection output once the sample moves beyond the `4x4` smoke image.

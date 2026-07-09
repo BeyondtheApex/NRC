@@ -6320,3 +6320,69 @@ The mismatches are localized to the upstream fp16 cooperative-matrix `dA` chain 
 ### Next Step
 
 Run the full Debug build/test suite after the documentation update, then move to sample-side KHR pipeline probing so `sample/path_tracer` can validate the recompute KHR shader module and pipeline against its real scene unpacking path before any sample KHR dispatch is enabled.
+
+## 2026-07-09 - Milestone 92 Sample KHR Recompute Dispatch Probe
+
+### Implemented
+
+- Promoted `sample/path_tracer` KHR assets from compile-only coverage to an optional runtime probe.
+- The sample now exports all three sample-scene KHR SPIR-V paths through `sample_config.hpp`:
+  - SG32
+  - SG16
+  - M8/SG32
+- Sample KHR SPIR-V generation now matches the stable recompute runtime shape:
+  - `glslc -O`
+  - `NRC_KHR_RECOMPUTE_BACKPROP=1`
+  - `NRC_KHR_USE_COOPMAT_ALL_DW=1`
+  - `NRC_KHR_USE_COOPMAT_ALL_DA=1`
+- The sample conditionally enables the KHR device feature chain when the selected training plan is KHR cooperative matrix:
+  - `VK_KHR_cooperative_matrix`
+  - `shaderFloat16`
+  - `storageBuffer16BitAccess`
+  - `subgroupSizeControl`
+  - `computeFullSubgroups`
+  - `shaderBufferFloat32AtomicAdd`
+- Added sample-side mapping from `TrainingShaderCompileConfig` to the matching KHR SPIR-V asset.
+- Added profile-aware KHR compute pipeline creation through `nrc::vulkan::create_profile_compute_pipeline`.
+- Threaded shader-module and pipeline creation validation back into the sample's `VulkanTrainingProfilePlan`.
+- Added a standalone KHR recompute gradient dispatch probe after scalar sample validation. It uses:
+  - the sample-generated train records;
+  - the sample queue state;
+  - the sample scene buffer/unpack path;
+  - a separate zeroed gradient buffer so scalar training validation remains isolated.
+- The probe verifies that the dispatch writes finite non-zero gradients.
+- Sample output now reports `khr_probe` and `khr_dispatch`.
+
+### Behavior
+
+The active sample training update remains scalar. KHR recompute is now validated as a real shader-module, compute-pipeline, and dispatch path over the sample scene's actual record-unpack ABI. This is intentionally one step short of replacing the sample's scalar `prepare -> gradient -> optimize` update.
+
+On the local AMD machine the sample reports:
+
+```text
+NRC training plan: implementation=KhrRecompute, selection=SelectedKhrRecompute, profile=KHR_FP16_M16N16K16_SG32_WG128, validation=Supported, khr_support=Supported, plan usable=true, active sample execution=scalar, khr_probe=pipeline+dispatch passed; nonzero gradients=489, maxAbs=14.078125, khr_dispatch=ran.
+```
+
+### Validation
+
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Targeted sample smoke passed:
+  - `ctest --test-dir build -C Debug -R nrc_sample_reference_path_tracer_smoke --output-on-failure`
+  - result: `1/1 tests passed`
+- Direct sample run succeeded and dispatched the KHR recompute probe:
+  - `build/sample/path_tracer/Debug/nrc_reference_path_tracer.exe`
+  - result: `khr_dispatch=ran`
+- Full Debug test suite passed:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+  - result: `89/89 tests passed`
+
+### Current Limitations
+
+- The KHR path in the sample is still a standalone gradient probe, not the active optimizer update.
+- The sample KHR probe validates finite non-zero output only; it does not yet compare the sample-scene KHR gradients against a CPU oracle.
+- The sample is still a tiny primary-ray triangle integration skeleton, not a visual NRC renderer.
+
+### Next Step
+
+Promote the sample KHR path from standalone probe to an optional active training mode: `prepare -> KHR recompute gradient -> optimize`, with scalar kept as the correctness/control path. After that, move the same integration contract into a visual host such as `vk_gltf_renderer`.
