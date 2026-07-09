@@ -5,6 +5,7 @@
 #include "nrc/nrc_reference_nn.hpp"
 #include "nrc/nrc_weights.hpp"
 #include "nrc/vulkan/nrc_vulkan_barriers.hpp"
+#include "nrc/vulkan/nrc_vulkan_capabilities.hpp"
 #include "nrc/vulkan/nrc_vulkan_descriptors.hpp"
 #include "nrc/vulkan/nrc_vulkan_pipeline.hpp"
 #include "nrc/vulkan/nrc_vulkan_shader.hpp"
@@ -126,6 +127,16 @@ std::vector<std::uint32_t> read_spirv(const char *path) {
     }
 
     return words;
+}
+
+const char *training_implementation_name(nrc::TrainingImplementationKind implementation) {
+    switch (implementation) {
+        case nrc::TrainingImplementationKind::KhrGroundwork: return "KHR groundwork";
+        case nrc::TrainingImplementationKind::KhrAllCoopmat: return "KHR all-coopmat";
+        case nrc::TrainingImplementationKind::ScalarReference: return "scalar reference";
+        case nrc::TrainingImplementationKind::None: return "none";
+    }
+    return "unknown";
 }
 
 bool near(float lhs, float rhs) {
@@ -602,6 +613,7 @@ public:
                              const char *optimizeSpirv) {
         create_instance();
         pick_physical_device();
+        create_training_profile_plan();
         check_formats();
         create_device();
         create_command_pool();
@@ -614,6 +626,10 @@ public:
 
     MinimalIntegrationSample(const MinimalIntegrationSample &) = delete;
     MinimalIntegrationSample &operator=(const MinimalIntegrationSample &) = delete;
+
+    const nrc::vulkan::VulkanTrainingProfilePlan &training_plan() const {
+        return trainingPlan_;
+    }
 
     ~MinimalIntegrationSample() {
         if (device_ != VK_NULL_HANDLE) {
@@ -673,6 +689,11 @@ public:
     }
 
     bool run() {
+        if (!trainingPlan_.selected || !trainingPlan_.shaderCompile.valid) {
+            std::cerr << "FAIL: sample did not create a usable host-side training profile plan\n";
+            return false;
+        }
+
         const std::vector<float> weights = make_constant_prediction_weights();
         const std::vector<nrc::PackedFp16x8> packedWeights = nrc::pack_weights_fp16_uvec4(weights);
         const std::vector<float> gpuVisibleWeights =
@@ -1005,6 +1026,22 @@ private:
         }
 
         throw SkipTest("no Vulkan compute device supports shaderBufferFloat32AtomicAdd");
+    }
+
+    void create_training_profile_plan() {
+        const auto getCooperativeMatrixProperties =
+            reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR>(
+                vkGetInstanceProcAddr(instance_, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"));
+        const nrc::vulkan::VulkanDeviceCapabilities capabilities =
+            nrc::vulkan::query_device_capabilities(physicalDevice_, getCooperativeMatrixProperties);
+
+        nrc::TrainingProfileSelectionOptions selectionOptions{};
+        selectionOptions.allowScalarReferenceFallback = true;
+        trainingPlan_ =
+            nrc::vulkan::make_vulkan_training_profile_plan(capabilities, selectionOptions);
+        if (!trainingPlan_.selected || !trainingPlan_.shaderCompile.valid) {
+            throw std::runtime_error("sample could not create a host-side NRC training profile plan");
+        }
     }
 
     void check_format(VkFormat format, const char *name) const {
@@ -2129,6 +2166,7 @@ private:
     VkPipeline trainPreparePipeline_ = VK_NULL_HANDLE;
     VkPipeline gradientPipeline_ = VK_NULL_HANDLE;
     VkPipeline optimizePipeline_ = VK_NULL_HANDLE;
+    nrc::vulkan::VulkanTrainingProfilePlan trainingPlan_{};
 };
 
 } // namespace
@@ -2144,6 +2182,12 @@ int main() {
             return EXIT_FAILURE;
         }
 
+        const nrc::vulkan::VulkanTrainingProfilePlan &trainingPlan = sample.training_plan();
+        std::cout << "NRC training plan: "
+                  << training_implementation_name(trainingPlan.selection.implementation)
+                  << " profile " << trainingPlan.selection.profileName
+                  << ", plan usable=" << (trainingPlan.usable ? "true" : "false")
+                  << ", active sample execution=scalar." << std::endl;
         std::cout << "NRC reference path tracer minimal integration passed: "
                   << kEvalCapacity << " eval records, scalar inference resolve, and one scalar training update." << std::endl;
         std::cout << "Wrote sample image: " << NRC_SAMPLE_OUTPUT_PPM << std::endl;

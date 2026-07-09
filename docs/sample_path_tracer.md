@@ -9,9 +9,10 @@ The current sample is a minimal Vulkan integration skeleton with a tiny primary-
 3. Train-record production.
 4. Scalar inference.
 5. Screen and train-record resolve.
-6. Scalar training update.
-7. Visual output write.
-8. Readback and artifact validation.
+6. Host-side NRC training plan selection.
+7. Scalar training update.
+8. Visual output write.
+9. Readback and artifact validation.
 
 ## Current Files
 
@@ -49,7 +50,7 @@ The sample creates:
 - a binary PPM output image:
   - `build/sample/path_tracer/nrc_reference_path_tracer.ppm`
 
-It records one command buffer:
+Before recording commands, the sample builds a `nrc::vulkan::VulkanTrainingProfilePlan` from the selected physical device capabilities. It then records one command buffer:
 
 1. Upload the initial screen images.
 2. Dispatch `sample_producer.comp` in reset mode.
@@ -60,6 +61,8 @@ It records one command buffer:
 7. Dispatch `sample_optimize.comp`.
 8. Copy the resolved screen image back to the CPU and read back train records, gradients, optimizer entries, and packed weights.
 9. Write a tone-mapped binary PPM image from the resolved screen readback.
+
+The training plan is currently diagnostic/integration-facing. The sample explicitly allows scalar reference fallback, prints the selected plan, validates that a compile config exists, and still executes the scalar training shaders. On the current local machine this reports scalar reference fallback because KHR training is blocked by the cooperative-matrix training shared-memory requirement.
 
 The producer traces one primary ray for every `4x4` pixel, emits a screen eval record for each hit, reserves two train records in batch 0, and emits one train eval record targeting those records. Train-record bias and factor values come from a deterministic direct-lighting payload over the traced sample scene hit.
 
@@ -73,6 +76,7 @@ vec3(0.25, 0.5, 0.75)
 
 The host verifies:
 
+- a host-side training plan was selected and produced a valid shader compile config;
 - `evalCount == 17`;
 - every pixel has exactly one eval record;
 - train batch 0 has two records and batches 1-3 remain zero;
@@ -103,7 +107,7 @@ CTest runs:
 nrc_sample_reference_path_tracer_smoke
 ```
 
-The host sample creates shader modules through `nrc::vulkan::create_shader_module` and creates all five compute pipelines through plain `nrc::vulkan::create_compute_pipeline`.
+The host sample queries device capabilities through `nrc::vulkan::query_device_capabilities`, builds a training plan through `nrc::vulkan::make_vulkan_training_profile_plan`, creates shader modules through `nrc::vulkan::create_shader_module`, and creates all five active compute pipelines through plain `nrc::vulkan::create_compute_pipeline`.
 
 It also creates descriptor set layouts through `nrc::vulkan::create_descriptor_set_layout` and writes storage-buffer/storage-image descriptors through `nrc::vulkan::update_storage_buffer_descriptors` and `nrc::vulkan::update_storage_image_descriptors`.
 
@@ -116,7 +120,7 @@ Memory and image barriers are recorded through `nrc::vulkan::cmd_memory_barrier`
 - Training records use deterministic direct lighting, not real multi-bounce path-traced samples.
 - Buffer/image copy helpers and resource allocation remain sample-local.
 - KHR cooperative matrix inference is not used because KHR pipeline creation is driver-gated on the current AMD machine.
-- Training uses the scalar correctness path, not a production-performance KHR cooperative-matrix backend.
+- Training plan selection is wired for integration diagnostics, but execution still uses the scalar correctness path rather than a production-performance KHR cooperative-matrix backend.
 
 ## Next Steps
 

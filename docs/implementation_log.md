@@ -5873,3 +5873,69 @@ If an integration requires pipeline or numerical validation, the Vulkan plan rem
 ### Next Step
 
 Adopt the plan object in an actual integration path. The next useful target is the sample path tracer: query capabilities, build a `VulkanTrainingProfilePlan`, log/record the selected training implementation, and keep scalar training as the active execution path until KHR training runtime validation can execute successfully.
+
+## 2026-07-09 - Milestone 85 Sample Training Plan Adoption
+
+### Implemented
+
+- Integrated `nrc::vulkan::VulkanTrainingProfilePlan` into `sample/path_tracer`.
+- Added device-capability query during sample initialization:
+  - resolves `vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR` from the instance;
+  - calls `nrc::vulkan::query_device_capabilities`;
+  - calls `nrc::vulkan::make_vulkan_training_profile_plan`.
+- The sample explicitly enables scalar reference fallback in the training-plan options because the active sample execution path is still scalar training.
+- Added a sample-side plan validity check before running the workload:
+  - a training profile must be selected;
+  - the selected plan must have a valid shader compile config.
+- Added a successful-run log line that records:
+  - selected training implementation;
+  - selected profile name;
+  - plan usable state;
+  - active sample execution path.
+- Kept the command graph unchanged:
+  - `sample_train_prepare.comp`;
+  - `sample_gradient_scalar.comp`;
+  - `sample_optimize.comp`.
+- Updated current documentation:
+  - `docs/sample_path_tracer.md`
+  - `docs/project_structure.md`
+  - `docs/training_optimizer.md`
+
+### Behavior
+
+The sample now validates the same integration-facing plan API that a downstream renderer should use, but it does not switch execution to KHR training yet.
+
+Current local sample output includes:
+
+```text
+NRC training plan: scalar reference profile SCALAR_REFERENCE_WG64, plan usable=true, active sample execution=scalar.
+```
+
+That is expected on the current machine because KHR training profile selection is blocked by the 98304-byte shared-memory requirement. The sample explicitly allows scalar fallback so it can keep validating the reference integration path.
+
+### Validation
+
+- Targeted sample build succeeded:
+  - `cmake --build build --config Debug --target nrc_reference_path_tracer`
+- Targeted sample smoke test succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_sample_reference_path_tracer_smoke" --output-on-failure -V`
+- Targeted sample smoke result:
+  - `1/1 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `85/85 tests passed`
+
+### Current Limitations
+
+- The sample records the training plan but still executes scalar training.
+- The sample does not compile or dispatch a KHR training pipeline.
+- The sample does not feed real shader-module, pipeline, or numerical validation stages into `VulkanTrainingProfilePlan` yet.
+- KHR training numerical validation is still blocked locally by the 98304-byte shared-memory profile gate.
+- The sample remains a `4x4` primary-ray triangle integration skeleton, not a full path tracer.
+
+### Next Step
+
+Thread validation stages from actual KHR shader/pipeline attempts into the plan where a KHR training candidate exists, or continue expanding the sample toward iterative frame-style training while keeping the scalar execution path as the correctness anchor.
