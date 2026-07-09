@@ -6081,3 +6081,59 @@ This is useful for renderer integration because a device may report the required
 ### Next Step
 
 Thread actual shader-module and pipeline creation attempts into the training plan where a KHR training candidate exists. The nearest useful path is either a reusable KHR training pipeline validation helper or a sample-side optional KHR validation probe that records failures through the new runtime-fallback plan without changing the active scalar execution path.
+
+## 2026-07-09 - Milestone 88 Sample KHR Training Shader Assets
+
+### Implemented
+
+- Added `sample/path_tracer/shaders/sample_gradient_khr.comp`.
+- The new sample shader:
+  - includes `sample_scene.glsl`;
+  - uses `NrcSampleUnpackPackedInput` as the integration-provided `NrcUnpackPackedInput` hook;
+  - includes `nrc/passes/NrcGradientKhr.glsl`;
+  - dispatches `NrcGradientKhrMain`.
+- Extended `sample/path_tracer/CMakeLists.txt` to compile sample-scene KHR gradient variants:
+  - `nrc_sample_gradient_khr_sg32.spv`
+  - `nrc_sample_gradient_khr_sg16.spv`
+  - `nrc_sample_gradient_khr_m8_sg32.spv`
+- Added those SPIR-V files to the `nrc_reference_path_tracer_shaders` dependency set.
+- Kept host execution unchanged:
+  - active training prepare still uses `sample_train_prepare.comp`;
+  - active gradient still uses `sample_gradient_scalar.comp`;
+  - active optimize still uses `sample_optimize.comp`.
+- Updated current documentation:
+  - `docs/sample_path_tracer.md`
+  - `docs/project_structure.md`
+  - `docs/khr_coopmat_backend.md`
+
+### Behavior
+
+The sample now has real sample-scene KHR training SPIR-V assets available for later shader-module and pipeline validation probes. This avoids depending on the test-only fake unpack hook when the sample eventually records KHR shader/pipeline validation results into `VulkanTrainingProfilePlan`.
+
+The assets are compile-validation only. They do not change command recording, descriptor layout creation, scalar training, image output, or host readback validation.
+
+### Validation
+
+- Targeted sample build succeeded and generated the three KHR gradient SPIR-V assets:
+  - `cmake --build build --config Debug --target nrc_reference_path_tracer`
+- Targeted sample smoke test succeeded:
+  - `ctest --test-dir build -C Debug -R "nrc_sample_reference_path_tracer_smoke" --output-on-failure -V`
+- Targeted sample smoke result:
+  - `1/1 tests passed`
+- Debug build succeeded:
+  - `cmake --build build --config Debug`
+- Full test command succeeded:
+  - `ctest --test-dir build -C Debug --output-on-failure`
+- Full test result:
+  - `85/85 tests passed`
+
+### Current Limitations
+
+- The host sample does not yet select a KHR SPIR-V path from `TrainingShaderCompileConfig`.
+- The host sample does not create KHR training shader modules or profile-aware KHR compute pipelines.
+- The host sample does not feed KHR shader/pipeline validation status into the runtime-fallback training plan helper yet.
+- KHR training numerical validation remains locally blocked by the 98304-byte shared-memory profile gate.
+
+### Next Step
+
+Add a sample-side KHR training validation probe that maps `TrainingShaderCompileConfig` to the compiled sample KHR SPIR-V assets, attempts shader-module and profile pipeline creation when KHR training is selected, and feeds the validation result into `make_vulkan_training_profile_plan_with_runtime_fallback` without dispatching KHR training yet.

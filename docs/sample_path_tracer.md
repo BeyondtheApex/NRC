@@ -25,6 +25,7 @@ The current sample is a minimal Vulkan integration skeleton with a tiny primary-
 - Training shader wrappers:
   - `sample/path_tracer/shaders/sample_train_prepare.comp`
   - `sample/path_tracer/shaders/sample_gradient_scalar.comp`
+  - `sample/path_tracer/shaders/sample_gradient_khr.comp`
   - `sample/path_tracer/shaders/sample_optimize.comp`
 - Shared sample scene shader:
   - `sample/path_tracer/shaders/sample_scene.glsl`
@@ -62,7 +63,7 @@ Before recording commands, the sample builds a `nrc::vulkan::VulkanTrainingProfi
 8. Copy the resolved screen image back to the CPU and read back train records, gradients, optimizer entries, and packed weights.
 9. Write a tone-mapped binary PPM image from the resolved screen readback.
 
-The training plan is currently diagnostic/integration-facing. The sample explicitly allows scalar reference fallback, prints the selected implementation, selection status, validation status, and KHR support reason, validates that a compile config exists, and still executes the scalar training shaders. On the current local machine this reports scalar reference fallback because KHR training is blocked by the cooperative-matrix training shared-memory requirement:
+The training plan is currently diagnostic/integration-facing. The sample explicitly allows scalar reference fallback, prints the selected implementation, selection status, validation status, and KHR support reason, validates that a compile config exists, and still executes the scalar training shaders. The sample also compile-validates a KHR gradient wrapper for the SG32, SG16, and M8/SG32 training profiles so a later pipeline probe can use sample-scene train-record unpacking instead of the test-only fake unpack hook. On the current local machine this reports scalar reference fallback because KHR training is blocked by the cooperative-matrix training shared-memory requirement:
 
 ```text
 NRC training plan: implementation=ScalarReference, selection=SelectedScalarReference, profile=SCALAR_REFERENCE_WG64, validation=Supported, khr_support=MissingSharedMemory, plan usable=true, active sample execution=scalar.
@@ -113,6 +114,16 @@ nrc_sample_reference_path_tracer_smoke
 
 The host sample queries device capabilities through `nrc::vulkan::query_device_capabilities`, builds a training plan through `nrc::vulkan::make_vulkan_training_profile_plan`, creates shader modules through `nrc::vulkan::create_shader_module`, and creates all five active compute pipelines through plain `nrc::vulkan::create_compute_pipeline`.
 
+The build also generates inactive KHR training SPIR-V assets:
+
+```text
+nrc_sample_gradient_khr_sg32.spv
+nrc_sample_gradient_khr_sg16.spv
+nrc_sample_gradient_khr_m8_sg32.spv
+```
+
+These are compile-validation assets only. The host sample does not create KHR training shader modules or pipelines yet.
+
 It also creates descriptor set layouts through `nrc::vulkan::create_descriptor_set_layout` and writes storage-buffer/storage-image descriptors through `nrc::vulkan::update_storage_buffer_descriptors` and `nrc::vulkan::update_storage_image_descriptors`.
 
 Memory and image barriers are recorded through `nrc::vulkan::cmd_memory_barrier`, `nrc::vulkan::color_image_barrier`, and `nrc::vulkan::cmd_pipeline_barrier`.
@@ -125,6 +136,7 @@ Memory and image barriers are recorded through `nrc::vulkan::cmd_memory_barrier`
 - Buffer/image copy helpers and resource allocation remain sample-local.
 - KHR cooperative matrix inference is not used because KHR pipeline creation is driver-gated on the current AMD machine.
 - Training plan selection is wired for integration diagnostics, but execution still uses the scalar correctness path rather than a production-performance KHR cooperative-matrix backend.
+- KHR training shader assets are compiled for the sample scene, but no KHR training pipeline probe or dispatch is active yet.
 
 ## Next Steps
 

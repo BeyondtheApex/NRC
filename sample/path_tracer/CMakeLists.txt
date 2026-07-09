@@ -82,6 +82,73 @@ if(TARGET nrc_vulkan AND NRC_SAMPLE_GLSLC)
             "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcConstants.glsl"
         VERBATIM)
 
+    set(NRC_SAMPLE_GRADIENT_KHR_SG32_SPV
+        "${CMAKE_CURRENT_BINARY_DIR}/nrc_sample_gradient_khr_sg32.spv")
+    add_custom_command(
+        OUTPUT "${NRC_SAMPLE_GRADIENT_KHR_SG32_SPV}"
+        COMMAND "${NRC_SAMPLE_GLSLC}"
+            "--target-env=vulkan1.3"
+            "-DNRC_KHR_SUBGROUP_SIZE=32"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "-I${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shaders/sample_gradient_khr.comp"
+            "-o"
+            "${NRC_SAMPLE_GRADIENT_KHR_SG32_SPV}"
+        DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/shaders/sample_gradient_khr.comp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shaders/sample_scene.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/passes/NrcGradientKhr.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcEncoding.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcTypes.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcConstants.glsl"
+        VERBATIM)
+
+    set(NRC_SAMPLE_GRADIENT_KHR_SG16_SPV
+        "${CMAKE_CURRENT_BINARY_DIR}/nrc_sample_gradient_khr_sg16.spv")
+    add_custom_command(
+        OUTPUT "${NRC_SAMPLE_GRADIENT_KHR_SG16_SPV}"
+        COMMAND "${NRC_SAMPLE_GLSLC}"
+            "--target-env=vulkan1.3"
+            "-DNRC_KHR_SUBGROUP_SIZE=16"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "-I${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shaders/sample_gradient_khr.comp"
+            "-o"
+            "${NRC_SAMPLE_GRADIENT_KHR_SG16_SPV}"
+        DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/shaders/sample_gradient_khr.comp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shaders/sample_scene.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/passes/NrcGradientKhr.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcEncoding.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcTypes.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcConstants.glsl"
+        VERBATIM)
+
+    set(NRC_SAMPLE_GRADIENT_KHR_M8_SG32_SPV
+        "${CMAKE_CURRENT_BINARY_DIR}/nrc_sample_gradient_khr_m8_sg32.spv")
+    add_custom_command(
+        OUTPUT "${NRC_SAMPLE_GRADIENT_KHR_M8_SG32_SPV}"
+        COMMAND "${NRC_SAMPLE_GLSLC}"
+            "--target-env=vulkan1.3"
+            "-DNRC_KHR_SUBGROUP_SIZE=32"
+            "-DNRC_KHR_COOPMAT_M=8"
+            "-I${PROJECT_SOURCE_DIR}/shaders"
+            "-I${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shaders/sample_gradient_khr.comp"
+            "-o"
+            "${NRC_SAMPLE_GRADIENT_KHR_M8_SG32_SPV}"
+        DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/shaders/sample_gradient_khr.comp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shaders/sample_scene.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/passes/NrcGradientKhr.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/backend/khr_coopmat/NrcNNKhr.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcEncoding.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcTypes.glsl"
+            "${PROJECT_SOURCE_DIR}/shaders/nrc/common/NrcConstants.glsl"
+        VERBATIM)
+
     set(NRC_SAMPLE_OPTIMIZE_SPV "${CMAKE_CURRENT_BINARY_DIR}/nrc_sample_optimize.spv")
     add_custom_command(
         OUTPUT "${NRC_SAMPLE_OPTIMIZE_SPV}"
@@ -105,6 +172,9 @@ if(TARGET nrc_vulkan AND NRC_SAMPLE_GLSLC)
             "${NRC_SAMPLE_INFERENCE_SPV}"
             "${NRC_SAMPLE_TRAIN_PREPARE_SPV}"
             "${NRC_SAMPLE_GRADIENT_SPV}"
+            "${NRC_SAMPLE_GRADIENT_KHR_SG32_SPV}"
+            "${NRC_SAMPLE_GRADIENT_KHR_SG16_SPV}"
+            "${NRC_SAMPLE_GRADIENT_KHR_M8_SG32_SPV}"
             "${NRC_SAMPLE_OPTIMIZE_SPV}")
 
     configure_file(
