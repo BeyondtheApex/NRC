@@ -1,0 +1,33 @@
+#version 460
+#pragma shader_stage(compute)
+#extension GL_GOOGLE_include_directive : require
+
+#include "nrc/common/NrcTypes.glsl"
+
+#ifndef NRC_KHR_WORKGROUP_SIZE
+#define NRC_KHR_WORKGROUP_SIZE 128
+#endif
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+struct NrcDispatchIndirectCommand {
+    uint x;
+    uint y;
+    uint z;
+};
+
+layout(std430, set = 0, binding = 0) readonly buffer NrcInferencePrepareQueueStateBuffer {
+    uint nrcInferencePrepareEvalCount;
+    uint nrcInferencePrepareTrainCounts[NRC_TRAIN_BATCH_COUNT];
+};
+
+layout(std430, set = 0, binding = 1) writeonly buffer NrcInferencePrepareIndirectBuffer {
+    NrcDispatchIndirectCommand nrcInferencePrepareIndirectCommand;
+};
+
+void main() {
+    nrcInferencePrepareIndirectCommand = NrcDispatchIndirectCommand(
+        (nrcInferencePrepareEvalCount + NRC_KHR_WORKGROUP_SIZE - 1u) / NRC_KHR_WORKGROUP_SIZE,
+        1u,
+        1u);
+}

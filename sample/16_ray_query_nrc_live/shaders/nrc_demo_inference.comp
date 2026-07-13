@@ -1,0 +1,16 @@
+#version 460
+#pragma shader_stage(compute)
+#extension GL_GOOGLE_include_directive : require
+
+#define NRC_NN_SET 0
+#define NRC_NN_WEIGHTS_BINDING 0
+#define NRC_INFERENCE_SET 0
+
+#include "nrc_demo_common.inc"
+#include "nrc/passes/NrcInferenceScalar.glsl"
+
+layout(local_size_x = NRC_INFERENCE_WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    NrcInferenceScalarMain();
+}

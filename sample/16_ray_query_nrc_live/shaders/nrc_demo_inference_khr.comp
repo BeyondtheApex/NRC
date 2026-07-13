@@ -1,0 +1,127 @@
+#version 460
+#pragma shader_stage(compute)
+#extension GL_GOOGLE_include_directive : require
+
+#define NRC_NN_SET 0
+#define NRC_NN_WEIGHTS_BINDING 0
+#define NRC_INFERENCE_SET 0
+
+#include "nrc/common/NrcTypes.glsl"
+#include "nrc/backend/khr_coopmat/NrcNNKhr.glsl"
+
+#ifndef NRC_INFERENCE_EVAL_RECORDS_BINDING
+#define NRC_INFERENCE_EVAL_RECORDS_BINDING 1
+#endif
+
+#ifndef NRC_INFERENCE_EVAL_COUNT_BINDING
+#define NRC_INFERENCE_EVAL_COUNT_BINDING 2
+#endif
+
+#ifndef NRC_INFERENCE_BIAS_FACTOR_R_BINDING
+#define NRC_INFERENCE_BIAS_FACTOR_R_BINDING 3
+#endif
+
+#ifndef NRC_INFERENCE_FACTOR_GB_BINDING
+#define NRC_INFERENCE_FACTOR_GB_BINDING 4
+#endif
+
+#ifndef NRC_INFERENCE_TRAIN_RECORDS_BINDING
+#define NRC_INFERENCE_TRAIN_RECORDS_BINDING 5
+#endif
+
+#ifndef NRC_INFERENCE_ENCODED_INPUTS_BINDING
+#define NRC_INFERENCE_ENCODED_INPUTS_BINDING 6
+#endif
+
+layout(std430, set = NRC_INFERENCE_SET, binding = NRC_INFERENCE_EVAL_RECORDS_BINDING) readonly buffer NrcInferenceEvalRecordsBuffer {
+    NrcEvalRecord nrcInferenceEvalRecords[];
+};
+
+layout(std430, set = NRC_INFERENCE_SET, binding = NRC_INFERENCE_EVAL_COUNT_BINDING) readonly buffer NrcInferenceEvalCountBuffer {
+    uint nrcInferenceEvalCount;
+};
+
+layout(set = NRC_INFERENCE_SET, binding = NRC_INFERENCE_BIAS_FACTOR_R_BINDING, rgba32f) uniform image2D nrcInferenceBiasFactorR;
+layout(set = NRC_INFERENCE_SET, binding = NRC_INFERENCE_FACTOR_GB_BINDING, rg32f) readonly uniform image2D nrcInferenceFactorGB;
+
+layout(std430, set = NRC_INFERENCE_SET, binding = NRC_INFERENCE_TRAIN_RECORDS_BINDING) buffer NrcInferenceTrainRecordsBuffer {
+    NrcTrainRecord nrcInferenceTrainRecords[];
+};
+
+layout(std430, set = NRC_INFERENCE_SET, binding = NRC_INFERENCE_ENCODED_INPUTS_BINDING) readonly buffer NrcInferenceEncodedInputsBuffer {
+    uvec4 nrcInferenceEncodedInputs[];
+};
+
+void NrcLoadEncodedInput(uint featureIndex, out uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT]) {
+    uint baseIndex = featureIndex * NRC_ENCODED_INPUT_UVEC4_COUNT;
+    for (uint i = 0u; i < NRC_ENCODED_INPUT_UVEC4_COUNT; ++i) {
+        encoded[i] = nrcInferenceEncodedInputs[baseIndex + i];
+    }
+}
+
+void NrcInferenceApplyScreen(uint encodedDst, vec3 prediction) {
+    ivec2 coord = ivec2(NrcDecodeEvalDstScreen(encodedDst));
+    vec4 biasFactorR = imageLoad(nrcInferenceBiasFactorR, coord);
+    vec2 factorGb = imageLoad(nrcInferenceFactorGB, coord).rg;
+    vec3 color = biasFactorR.rgb + vec3(biasFactorR.a, factorGb) * prediction;
+    imageStore(nrcInferenceBiasFactorR, coord, vec4(color, 0.0));
+}
+
+void NrcInferenceApplyTrain(uint encodedDst, vec3 prediction) {
+    uint batch;
+    uint left;
+    uint right;
+    NrcDecodeEvalDstTrain(encodedDst, batch, left, right);
+
+    if (batch >= NRC_TRAIN_BATCH_COUNT || left >= NRC_TRAIN_BATCH_SIZE) {
+        return;
+    }
+
+    right = min(right, NRC_TRAIN_BATCH_SIZE - 1u);
+    for (uint i = left; i <= right; ++i) {
+        uint trainIndex = batch * NRC_TRAIN_BATCH_SIZE + i;
+        NrcTrainRecord trainRecord = nrcInferenceTrainRecords[trainIndex];
+        vec3 bias = vec3(trainRecord.biasR, trainRecord.biasG, trainRecord.biasB);
+        vec3 factor = vec3(trainRecord.factorR, trainRecord.factorG, trainRecord.factorB);
+        vec3 color = bias + factor * prediction;
+        nrcInferenceTrainRecords[trainIndex].biasR = color.r;
+        nrcInferenceTrainRecords[trainIndex].biasG = color.g;
+        nrcInferenceTrainRecords[trainIndex].biasB = color.b;
+    }
+}
+
+layout(local_size_x = NRC_KHR_WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    uint evalIndex = gl_GlobalInvocationID.x;
+    bool validEvalRecord = evalIndex < nrcInferenceEvalCount;
+
+    NrcEvalRecord evalRecord;
+    uvec4 encoded[NRC_ENCODED_INPUT_UVEC4_COUNT];
+    if (validEvalRecord) {
+        evalRecord = nrcInferenceEvalRecords[evalIndex];
+        validEvalRecord = evalRecord.dst != NRC_EVAL_INVALID_DST;
+    }
+
+    if (validEvalRecord) {
+        NrcLoadEncodedInput(evalRecord.packedInput.primitiveId, encoded);
+    } else {
+        for (uint i = 0u; i < NRC_ENCODED_INPUT_UVEC4_COUNT; ++i) {
+            encoded[i] = uvec4(0u);
+        }
+    }
+
+    vec3 prediction;
+    NrcKhrForward(encoded, prediction);
+    prediction = max(prediction, vec3(0.0));
+
+    if (!validEvalRecord) {
+        return;
+    }
+
+    if (NrcEvalDstType(evalRecord.dst) == NRC_EVAL_DST_SCREEN) {
+        NrcInferenceApplyScreen(evalRecord.dst, prediction);
+    } else {
+        NrcInferenceApplyTrain(evalRecord.dst, prediction);
+    }
+}

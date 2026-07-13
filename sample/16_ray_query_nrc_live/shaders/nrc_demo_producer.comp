@@ -1,0 +1,35 @@
+#version 460
+#pragma shader_stage(compute)
+#extension GL_GOOGLE_include_directive : require
+
+#include "nrc/passes/NrcQueueOps.glsl"
+
+layout(local_size_x = NRC_QUEUE_RESET_WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = NRC_QUEUE_SET, binding = 3) buffer NrcDemoEncodedInputsBuffer {
+    uvec4 nrcDemoEncodedInputs[];
+};
+
+layout(set = NRC_QUEUE_SET, binding = 4, rgba32f) uniform image2D nrcDemoBiasFactorR;
+layout(set = NRC_QUEUE_SET, binding = 5, rg32f) uniform image2D nrcDemoFactorGB;
+
+layout(push_constant) uniform NrcDemoProducerConstants {
+    uint mode;
+    uint evalCapacity;
+    uint pixelCount;
+    uint width;
+    uint height;
+    uint trainRecordCount;
+    uint frame;
+} nrcDemoProducerConstants;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    NrcQueueResetMain();
+    if (index < nrcDemoProducerConstants.pixelCount) {
+        ivec2 coord = ivec2(index % nrcDemoProducerConstants.width,
+                            index / nrcDemoProducerConstants.width);
+        imageStore(nrcDemoBiasFactorR, coord, vec4(0.0, 0.0, 0.0, 1.0));
+        imageStore(nrcDemoFactorGB, coord, vec4(0.0, 0.0, 0.0, 0.0));
+    }
+}

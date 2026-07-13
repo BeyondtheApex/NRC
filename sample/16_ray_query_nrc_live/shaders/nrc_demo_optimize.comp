@@ -1,0 +1,12 @@
+#version 460
+#pragma shader_stage(compute)
+#extension GL_GOOGLE_include_directive : require
+
+#define NRC_OPTIMIZE_WRITE_USE_WEIGHTS 1
+#include "nrc/passes/NrcOptimize.glsl"
+
+layout(local_size_x = NRC_OPTIMIZE_WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    NrcOptimizeMain();
+}

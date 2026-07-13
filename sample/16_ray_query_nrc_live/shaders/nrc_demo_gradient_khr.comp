@@ -1,0 +1,16 @@
+#version 460
+#pragma shader_stage(compute)
+#extension GL_GOOGLE_include_directive : require
+
+#define NRC_GRADIENT_SET 0
+#define NRC_NN_SET 0
+#define NRC_NN_WEIGHTS_BINDING 2
+#define NRC_GRADIENT_ENCODED_INPUTS_BINDING 4
+
+#include "nrc/passes/NrcGradientKhr.glsl"
+
+layout(local_size_x = NRC_GRADIENT_WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    NrcGradientKhrMain();
+}
