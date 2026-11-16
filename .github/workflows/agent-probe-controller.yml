@@ -1,0 +1,55 @@
+name: Agent infrastructure probe - controller
+run-name: 'Probe controller / ${{ inputs.scenario_id || github.run_id }} / ${{ inputs.phase || ''start'' }}'
+
+on:
+  push:
+    branches: [codex/github-agent-validation]
+    paths:
+      - .github/workflows/agent-probe-controller.yml
+      - .github/workflows/agent-probe-worker.yml
+      - validation/github-agent/**
+  workflow_dispatch:
+    inputs:
+      phase:
+        type: choice
+        options: [start, checkpoint, resume, ingest]
+        default: start
+      scenario_id:
+        type: string
+        default: ''
+      result_json:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  protocol-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s validation/github-agent -p 'test_*.py' -v
+
+  controller:
+    needs: protocol-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Restore, advance, persist and exit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PROBE_PHASE: ${{ inputs.phase || 'start' }}
+          PROBE_SCENARIO: ${{ inputs.scenario_id }}
+          PROBE_RESULT: ${{ inputs.result_json }}
+        run: python3 validation/github-agent/probe.py controller
+
