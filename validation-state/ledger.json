@@ -28,7 +28,14 @@
         "value": 42
       },
       "duplicate_deliveries": 0,
-      "rejected_results": [],
+      "rejected_results": [
+        {
+          "digest": "a3121ea47f27e849255408c94dc6ba8705b435bb2b34cebdcb51936a6decc668",
+          "reasons": [
+            "goal_revision"
+          ]
+        }
+      ],
       "events": [
         {
           "id": "prepare:probe-43903708089",
