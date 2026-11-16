@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://api.github.com https://github.com; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>NRC · GitHub Agent 基础设施验证</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><span class="eyebrow">NRC / INFRASTRUCTURE PROBE</span><h1>仓库原生 Agent<br>基础设施验证</h1>
+      <p>静态 GitHub Pages → GitHub API → 独立 Workflow Runs → Git 持久状态。</p>
+      <p class="notice">这是确定性基础设施实验，不是已经运行的 Argus。无模型调用、无后端代理；不会修改 NRC 产品代码。</p>
+    </header>
+    <section><div class="section-title"><span>01</span><h2>浏览器与跨域</h2></div>
+      <p>从当前 Pages 域名读取公开仓库，并探测认证端点的浏览器可访问性。无效 Client ID 探测不等于完整 OAuth 登录。</p>
+      <div class="actions"><button id="transport">运行公开 API 与跨域检查</button><button id="export" class="secondary">导出脱敏报告</button></div>
+      <pre id="transport-output" aria-live="polite">尚未运行。</pre>
+    </section>
+    <section><div class="section-title"><span>02</span><h2>用户授权</h2></div>
+      <p>可选：输入仅针对此测试仓库的细粒度 Token。令牌只保存在本页面内存，不写入 URL、日志、报告、Git 或浏览器持久存储；刷新即可清除。</p>
+      <label for="token">限定仓库的个人访问令牌</label><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="在这里输入，不要发送到聊天中">
+      <div class="actions"><button id="connect">检查授权</button><button id="disconnect" class="secondary">清除授权</button></div>
+      <p id="auth-status" class="status" aria-live="polite">未授权。公开读取仍可使用。</p>
+      <details><summary>Device Flow 实际验证（需要你自己的 App Client ID）</summary>
+        <p>只有浏览器能够读取设备码与令牌端点，才能继续验证。不要输入 client secret 或 App 私钥。</p>
+        <label for="client-id">Client ID</label><input id="client-id" autocomplete="off" spellcheck="false" placeholder="填写已启用 Device Flow 的 App Client ID">
+        <button id="device">开始 Device Flow</button><button id="stop-device" class="secondary">停止轮询</button>
+        <pre id="device-output" aria-live="polite">尚未运行。</pre><a id="verification-link" href="https://github.com/login/device" target="_blank" rel="noopener noreferrer" hidden>在 GitHub 官方页面授权</a>
+      </details>
+    </section>
+    <section><div class="section-title"><span>03</span><h2>独立任务与持久恢复</h2></div>
+      <p>提交固定的 6 × 7 测试任务。Worker 独立运行，回传正常、重复和过期结果，控制器分别接受、去重和拒绝。</p>
+      <p class="muted">此操作需要 Actions 写权限。实际任务授权仍由 Workflow 核验，不由页面按钮决定。</p>
+      <div class="actions"><button id="start" disabled>提交一次完整测试</button><button id="checkpoint" disabled>仅保存检查点</button><button id="resume" disabled>恢复当前检查点</button></div>
+      <p id="command-status" class="status" aria-live="polite">未提交。</p>
+      <div class="actions"><button id="refresh" class="secondary">读取 Git 持久状态</button><a href="https://github.com/BeyondtheApex/NRC/actions" target="_blank" rel="noopener noreferrer">查看 GitHub Actions</a></div>
+      <pre id="ledger" aria-live="polite">尚未读取。</pre>
+    </section>
+    <footer>仓库：BeyondtheApex/NRC · 验证分支：codex/github-agent-validation<br>本页面不含访问令牌、模型密钥或产品运行数据。</footer>
+  </main>
+</body>
+</html>
+
