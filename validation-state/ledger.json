@@ -2,7 +2,7 @@
   "schema_version": 1,
   "scenarios": {
     "probe-43903708089": {
-      "phase": "running",
+      "phase": "completed",
       "goal_revision": 1,
       "source_sha": "63ea7f31b565b67abd19d8ea86064c2aac64af16",
       "task_id": "probe-43903708089-multiply",
@@ -18,13 +18,25 @@
         "state": "submitted",
         "key": "dispatch:probe-43903708089"
       },
-      "accepted_result": null,
+      "accepted_result": {
+        "scenario_id": "probe-43903708089",
+        "task_id": "probe-43903708089-multiply",
+        "attempt_id": 1,
+        "goal_revision": 1,
+        "source_sha": "63ea7f31b565b67abd19d8ea86064c2aac64af16",
+        "worker_run_id": 43903760648,
+        "value": 42
+      },
       "duplicate_deliveries": 0,
       "rejected_results": [],
       "events": [
         {
           "id": "prepare:probe-43903708089",
           "type": "task.prepared"
+        },
+        {
+          "id": "result:probe-43903708089",
+          "type": "task.completed"
         }
       ]
     }
