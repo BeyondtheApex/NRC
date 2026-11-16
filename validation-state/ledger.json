@@ -2,7 +2,7 @@
   "schema_version": 1,
   "scenarios": {
     "probe-43903708089": {
-      "phase": "ready",
+      "phase": "running",
       "goal_revision": 1,
       "source_sha": "63ea7f31b565b67abd19d8ea86064c2aac64af16",
       "task_id": "probe-43903708089-multiply",
@@ -15,7 +15,7 @@
         ]
       },
       "dispatch": {
-        "state": "pending",
+        "state": "submitted",
         "key": "dispatch:probe-43903708089"
       },
       "accepted_result": null,
