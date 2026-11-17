@@ -186,7 +186,7 @@
       ]
     },
     "probe-43998055910": {
-      "phase": "ready",
+      "phase": "running",
       "goal_revision": 1,
       "source_sha": "7149c8eea6592888f1345b3785ce7ea03e499121",
       "task_id": "probe-43998055910-multiply",
@@ -199,7 +199,7 @@
         ]
       },
       "dispatch": {
-        "state": "pending",
+        "state": "submitted",
         "key": "dispatch:probe-43998055910"
       },
       "accepted_result": null,
