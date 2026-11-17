@@ -48,7 +48,7 @@
       ]
     },
     "probe-recovery-001": {
-      "phase": "running",
+      "phase": "completed",
       "goal_revision": 1,
       "source_sha": "63ea7f31b565b67abd19d8ea86064c2aac64af16",
       "task_id": "probe-recovery-001-multiply",
@@ -64,13 +64,25 @@
         "state": "submitted",
         "key": "dispatch:probe-recovery-001"
       },
-      "accepted_result": null,
+      "accepted_result": {
+        "scenario_id": "probe-recovery-001",
+        "task_id": "probe-recovery-001-multiply",
+        "attempt_id": 1,
+        "goal_revision": 1,
+        "source_sha": "63ea7f31b565b67abd19d8ea86064c2aac64af16",
+        "worker_run_id": 43996959344,
+        "value": 42
+      },
       "duplicate_deliveries": 0,
       "rejected_results": [],
       "events": [
         {
           "id": "prepare:probe-recovery-001",
           "type": "task.prepared"
+        },
+        {
+          "id": "result:probe-recovery-001",
+          "type": "task.completed"
         }
       ]
     }
