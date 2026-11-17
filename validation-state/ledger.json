@@ -74,7 +74,14 @@
         "value": 42
       },
       "duplicate_deliveries": 1,
-      "rejected_results": [],
+      "rejected_results": [
+        {
+          "digest": "c3b504f44b1c55dad87a99ce66c8155abda33fe442319266ebacd97401ef4d97",
+          "reasons": [
+            "goal_revision"
+          ]
+        }
+      ],
       "events": [
         {
           "id": "prepare:probe-recovery-001",
