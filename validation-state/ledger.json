@@ -184,6 +184,33 @@
           "type": "task.completed"
         }
       ]
+    },
+    "probe-43998055910": {
+      "phase": "ready",
+      "goal_revision": 1,
+      "source_sha": "7149c8eea6592888f1345b3785ce7ea03e499121",
+      "task_id": "probe-43998055910-multiply",
+      "attempt_id": 1,
+      "task": {
+        "operation": "multiply",
+        "operands": [
+          6,
+          7
+        ]
+      },
+      "dispatch": {
+        "state": "pending",
+        "key": "dispatch:probe-43998055910"
+      },
+      "accepted_result": null,
+      "duplicate_deliveries": 0,
+      "rejected_results": [],
+      "events": [
+        {
+          "id": "prepare:probe-43998055910",
+          "type": "task.prepared"
+        }
+      ]
     }
   }
 }
