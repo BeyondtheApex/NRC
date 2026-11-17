@@ -119,7 +119,7 @@
         "worker_run_id": 43997348892,
         "value": 42
       },
-      "duplicate_deliveries": 0,
+      "duplicate_deliveries": 1,
       "rejected_results": [
         {
           "digest": "7427fdaaa8c683f962b4a237225c5f02b7cc2d1901e553e3dee38d747c64dbb0",
