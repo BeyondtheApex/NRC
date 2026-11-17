@@ -1,0 +1,59 @@
+name: Agent infrastructure probe - worker
+run-name: 'Probe worker / ${{ inputs.scenario_id || ''registration'' }}'
+
+on:
+  push:
+    branches: [codex/github-agent-validation]
+    paths:
+      - .github/workflows/agent-probe-worker.yml
+  workflow_dispatch:
+    inputs:
+      scenario_id:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  register:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: echo 'Registration only; no task execution on push.'
+
+  deterministic-worker:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      result_b64: ${{ steps.execute.outputs.result_b64 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - id: execute
+        name: Execute only the authorized fixture task
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PROBE_SCENARIO: ${{ inputs.scenario_id }}
+        run: python3 validation/github-agent/probe.py worker
+
+  publish-result:
+    if: github.event_name == 'workflow_dispatch'
+    needs: deterministic-worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Deliver result, duplicate and deliberately stale result
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PROBE_RESULT_B64: ${{ needs.deterministic-worker.outputs.result_b64 }}
+        run: python3 validation/github-agent/probe.py publish
