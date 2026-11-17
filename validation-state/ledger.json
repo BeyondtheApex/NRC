@@ -92,6 +92,33 @@
           "type": "task.completed"
         }
       ]
+    },
+    "probe-ui-1794879608260": {
+      "phase": "ready",
+      "goal_revision": 1,
+      "source_sha": "63ea7f31b565b67abd19d8ea86064c2aac64af16",
+      "task_id": "probe-ui-1794879608260-multiply",
+      "attempt_id": 1,
+      "task": {
+        "operation": "multiply",
+        "operands": [
+          6,
+          7
+        ]
+      },
+      "dispatch": {
+        "state": "pending",
+        "key": "dispatch:probe-ui-1794879608260"
+      },
+      "accepted_result": null,
+      "duplicate_deliveries": 0,
+      "rejected_results": [],
+      "events": [
+        {
+          "id": "prepare:probe-ui-1794879608260",
+          "type": "task.prepared"
+        }
+      ]
     }
   }
 }
