@@ -165,7 +165,7 @@
         "worker_run_id": 43997717590,
         "value": 42
       },
-      "duplicate_deliveries": 0,
+      "duplicate_deliveries": 1,
       "rejected_results": [],
       "events": [
         {
