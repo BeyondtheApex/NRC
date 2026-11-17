@@ -140,7 +140,7 @@
       ]
     },
     "probe-43997683645": {
-      "phase": "running",
+      "phase": "completed",
       "goal_revision": 1,
       "source_sha": "e994bb20f4ce6180cd69b7c37cd9b264a30e8437",
       "task_id": "probe-43997683645-multiply",
@@ -156,13 +156,25 @@
         "state": "submitted",
         "key": "dispatch:probe-43997683645"
       },
-      "accepted_result": null,
+      "accepted_result": {
+        "scenario_id": "probe-43997683645",
+        "task_id": "probe-43997683645-multiply",
+        "attempt_id": 1,
+        "goal_revision": 1,
+        "source_sha": "e994bb20f4ce6180cd69b7c37cd9b264a30e8437",
+        "worker_run_id": 43997717590,
+        "value": 42
+      },
       "duplicate_deliveries": 0,
       "rejected_results": [],
       "events": [
         {
           "id": "prepare:probe-43997683645",
           "type": "task.prepared"
+        },
+        {
+          "id": "result:probe-43997683645",
+          "type": "task.completed"
         }
       ]
     }
