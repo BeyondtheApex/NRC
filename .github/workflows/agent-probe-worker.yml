@@ -57,4 +57,3 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           PROBE_RESULT_B64: ${{ needs.deterministic-worker.outputs.result_b64 }}
         run: python3 validation/github-agent/probe.py publish
-

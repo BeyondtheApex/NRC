@@ -61,15 +61,23 @@ class ProtocolTests(unittest.TestCase):
             apply_result(self.ledger, dict(self.result, worker_run_id=999))
 
     def test_result_requires_expected_workflow_commit_and_successful_job(self):
-        run = {"path": ".github/workflows/agent-probe-worker.yml", "event": "workflow_dispatch", "head_sha": self.sha}
+        run = {"path": ".github/workflows/agent-probe-worker.yml", "event": "workflow_dispatch", "head_sha": self.sha,
+               "display_title": "Probe worker / " + self.sid}
         jobs = [{"name": "deterministic-worker", "status": "completed", "conclusion": "success"}]
         item = self.ledger["scenarios"][self.sid]
-        validate_worker_run(run, jobs, item)
+        validate_worker_run(run, jobs, item, self.sid)
         for bad in (dict(run, head_sha="b" * 40), dict(run, path="other.yml"), dict(run, event="push")):
             with self.assertRaises(ValueError):
-                validate_worker_run(bad, jobs, item)
+                validate_worker_run(bad, jobs, item, self.sid)
         with self.assertRaises(ValueError):
-            validate_worker_run(run, [], item)
+            validate_worker_run(run, [], item, self.sid)
+
+    def test_a_successful_run_for_another_task_is_not_valid_evidence(self):
+        run = {"path": ".github/workflows/agent-probe-worker.yml", "event": "workflow_dispatch", "head_sha": self.sha,
+               "display_title": "Probe worker / probe-another-scenario"}
+        jobs = [{"name": "deterministic-worker", "status": "completed", "conclusion": "success"}]
+        with self.assertRaises(ValueError):
+            validate_worker_run(run, jobs, self.ledger["scenarios"][self.sid], self.sid)
 
     def test_invalid_identifiers_cannot_become_paths(self):
         for sid in ("../main", "probe-a/b", "probe-", "other"):
@@ -79,4 +87,3 @@ class ProtocolTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

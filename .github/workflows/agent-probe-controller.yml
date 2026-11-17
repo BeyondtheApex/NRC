@@ -52,4 +52,3 @@ jobs:
           PROBE_SCENARIO: ${{ inputs.scenario_id }}
           PROBE_RESULT: ${{ inputs.result_json }}
         run: python3 validation/github-agent/probe.py controller
-

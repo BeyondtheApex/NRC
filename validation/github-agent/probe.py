@@ -95,13 +95,15 @@ def apply_result(ledger, result):
     return "accepted"
 
 
-def validate_worker_run(run, jobs, item):
+def validate_worker_run(run, jobs, item, sid):
     if run.get("path", "").split("@")[0] != ".github/workflows/" + WORKER:
         raise ValueError("Result did not originate from the worker workflow")
     if run.get("event") != "workflow_dispatch":
         raise ValueError("Worker event was not workflow_dispatch")
     if run.get("head_sha") != item["source_sha"]:
         raise ValueError("Worker source commit differs from the authorized task")
+    if run.get("display_title") != "Probe worker / " + sid:
+        raise ValueError("Worker run belongs to another scenario")
     if not any(j.get("name") == "deterministic-worker" and
                j.get("status") == "completed" and j.get("conclusion") == "success"
                for j in jobs):
@@ -209,7 +211,7 @@ def controller():
             raise ValueError("Invalid worker run identifier")
         run = gh.api("GET", f"/actions/runs/{run_id}")
         jobs = gh.api("GET", f"/actions/runs/{run_id}/jobs?per_page=100")["jobs"]
-        validate_worker_run(run, jobs, item)
+        validate_worker_run(run, jobs, item, sid)
         outcome = gh.mutate(lambda state: apply_result(state, result))
         summary({"scenario": sid, "result": outcome, "worker_run_id": run_id})
         return
@@ -274,4 +276,3 @@ if __name__ == "__main__":
     except (APIError, ValueError, KeyError) as exc:
         print("Probe failed:", str(exc), file=sys.stderr)
         sys.exit(1)
-
