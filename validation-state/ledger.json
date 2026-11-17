@@ -212,7 +212,14 @@
         "value": 42
       },
       "duplicate_deliveries": 0,
-      "rejected_results": [],
+      "rejected_results": [
+        {
+          "digest": "f5dfbad6d4973572a8bfacc66e669a8f444f2eec71664c242caab2a0f0a2e927",
+          "reasons": [
+            "goal_revision"
+          ]
+        }
+      ],
       "events": [
         {
           "id": "prepare:probe-43998055910",
